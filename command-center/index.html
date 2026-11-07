@@ -642,6 +642,10 @@ async function poll(){
   try {
     const r = await fetch("/api/stats", {cache:"no-store"});
     S = await r.json();
+    // the app's files changed since this page loaded: reload so the window always shows the current version
+    if (S.build) { if (!window.__build) window.__build = S.build; else if (S.build !== window.__build && !chatBusy) {
+      if (!history.length) return location.reload();
+      if (!window.__buildNote) { window.__buildNote = 1; sys("the command center was updated: press Ctrl+R to load it (this clears the chat)."); } } }
     for (const k of ["pc", "laptop"]) {
       const M = S.machines && S.machines[k], h = mhist[k];
       if (!M || !M.ok) continue;

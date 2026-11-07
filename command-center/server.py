@@ -431,6 +431,19 @@ def laptop_action(action):
 
 
 _stats = {"t": 0, "v": None}
+_BUILD_FILES = ("index.html", "server.py", "workspaces.py", "tokens.py")
+
+
+def build_stamp():
+    """Newest modification time of the app's own files. The page reloads itself when this changes, so a window
+    left open (the taskbar pin only refocuses it) never keeps showing an old version."""
+    t = 0
+    for f in _BUILD_FILES:
+        try:
+            t = max(t, os.path.getmtime(os.path.join(HERE, f)))
+        except OSError:
+            pass
+    return int(t)
 token_watch = None
 
 
@@ -462,7 +475,7 @@ def stats():
          "laptop_name": (laptop_cache["machine"] or {}).get("name") or laptop_address()[1],
          "tokens": token_watch.view() if token_watch else None,
          "ui_streams": active_streams, "models": {k: v["name"] for k, v in MODELS.items()},
-         "time": time.time()}
+         "build": build_stamp(), "time": time.time()}
     with lock:
         _stats.update(t=time.time(), v=v)
     return v
