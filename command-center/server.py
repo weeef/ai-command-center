@@ -352,30 +352,63 @@ def laptop_machine():
             "cpu": (j.get("cpu") or {}).get("utilization_percent", 0) or 0, "cpu_name": (j.get("cpu") or {}).get("name")}
 
 
-laptop_cache = {"machine": None, "t": 0.0}
+laptop_cache = {"machine": None, "t": 0.0, "resolved": None}
+
+
+def resolve_laptop(name):
+    """What the laptop's name resolves to right now (mDNS/DNS), IPv4 only; None if it doesn't."""
+    if not name:
+        return None
+    for host in (name, name + ".local"):
+        try:
+            return socket.getaddrinfo(host, None, socket.AF_INET)[0][4][0]
+        except (OSError, IndexError):
+            continue
+    return None
+
+
+def laptop_reach_note():
+    ip, name = laptop_address()
+    if not ip:
+        return "PAIR has no paired laptop on record"
+    if laptop_cache["machine"] is not None:
+        return f"{name} answers at {ip} but its model server doesn't"
+    now = laptop_cache.get("resolved")
+    if now and now != ip:
+        return (f"{name} isn't answering at {ip}, where PAIR expects it; its name now points to {now}, "
+                f"so its address changed: re-pair it in the PAIR app or reserve its IP in the router")
+    return (f"{name} isn't answering at {ip}. If PAIR is open on the laptop, its firewall is likely blocking: "
+            f"set the laptop's Wi-Fi to a Private network (Settings > Network > Wi-Fi > network profile)")
 
 
 def laptop_watch():
     """Check the laptop every few seconds in the background, so stats never wait on a sleeping laptop."""
     while True:
-        laptop_cache.update(machine=laptop_machine(), t=time.time())
+        m = laptop_machine()
+        laptop_cache.update(machine=m, t=time.time())
+        if m is None:   # only look the name up when something is wrong (it can take a moment)
+            laptop_cache["resolved"] = resolve_laptop(laptop_address()[1] or "")
         time.sleep(3)
 
 
 PAIR_STATES = {"loaded": "ON", "loading": "LOADING", "sleeping": "ASLEEP", "unloaded": "OFF"}
 
 
-def laptop_info():
+def laptop_info(timeout=2.0):
     info = {"state": "OFF", "key": "laptop", "name": None, "file": None, "ctx": None, "vision": None,
             "engine": "PAIR → laptop", "id": None, "processing": False, "note": ""}
     try:
-        _, j = pair_req("GET", "/models")
+        _, j = pair_req("GET", "/models", timeout=timeout)
+    except ConnectionRefusedError:
+        info["note"] = "PAIR isn't running on this PC (nothing on 127.0.0.1:8080)"
+        return info
     except OSError:
-        info["note"] = "PAIR isn't running"
+        # PAIR's proxy is up but slow: it is waiting on a laptop that doesn't answer
+        info["note"] = "PAIR is running, but " + laptop_reach_note()
         return info
     data = j.get("data") if isinstance(j, dict) else None
     if not data:
-        info["note"] = "no model listed (is the laptop on?)"
+        info["note"] = "PAIR lists no laptop model: " + laptop_reach_note()
         return info
     # Prefer a model that's already up; otherwise the first one PAIR lists.
     m = next((x for x in data if (x.get("status") or {}).get("value") in ("loaded", "sleeping", "loading")), data[0])
@@ -408,7 +441,7 @@ def laptop_info():
 
 
 def laptop_action(action):
-    info = laptop_info()
+    info = laptop_info(timeout=12)   # a click can wait; the 1 s stats poll can't
     if not info["id"]:
         return False, info["note"] or "laptop model not found"
     if action == "on" and info["state"] in ("ON", "ASLEEP"):
@@ -472,6 +505,7 @@ def stats():
          "gpu": machine["gpu"], "ram": machine["ram"], "cpu": machine["cpu"], "model": m, "busy": busy,
          "machines": {"pc": pc, "laptop": lap},
          "laptop_online": laptop_cache["machine"] is not None,
+         "laptop_note": None if laptop_cache["machine"] is not None else laptop_reach_note(),
          "laptop_name": (laptop_cache["machine"] or {}).get("name") or laptop_address()[1],
          "tokens": token_watch.view() if token_watch else None,
          "ui_streams": active_streams, "models": {k: v["name"] for k, v in MODELS.items()},
@@ -573,7 +607,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not isinstance(data, dict):
             return self.send_json(400, {"error": "expected a JSON object"})
         if path == "/api/code/open":
-            ok, msg = workspaces.open_code(data.get("which"), data.get("path") or "", settings, save_settings)
+            lid = laptop_info()["id"] if data.get("which") == "laptop" else None
+            ok, msg = workspaces.open_code(data.get("which"), data.get("path") or "", settings, save_settings, lid)
             return self.send_json(200 if ok else 400, {"ok": ok, "msg": msg})
         if path == "/api/code/both":
             ok, msg = workspaces.open_both(data.get("path") or "", settings, save_settings)

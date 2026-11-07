@@ -553,7 +553,7 @@ function render(){
   const lc = document.querySelector('.chip.tg[data-t="laptop"]');
   lc.textContent = (S.laptop_online ? "● " : "○ ") + "laptop";
   lc.classList.toggle("online", !!S.laptop_online);
-  lc.title = S.laptop_online ? `${S.laptop_name || "laptop"} is on and reachable` : `${S.laptop_name || "laptop"} is off or not reachable`;
+  lc.title = S.laptop_online ? `${S.laptop_name || "laptop"} is on and reachable` : (S.laptop_note || `${S.laptop_name || "laptop"} is off or not reachable`);
   const key = m.key || (m.state === "OFF" ? null : selected);
   $("fModel").textContent = laptop ? (m.name || m.note || "–")
     : m.state === "OFF" ? `off · next: ${selected}` : (m.name || key || "–");
@@ -983,6 +983,10 @@ function renderCode(d){
         <span class="k">state</span><span class="v st-${mstate}">${mstate.toLowerCase()}${k === "laptop" ? " · via PAIR" : " · port 8090"}</span><span></span>
       </div>
       <div class="sect">cline settings</div>
+      ${(() => { const pt = (s.points_to || "").replace(/\/+$/, ""), ok = pt === s.expect.replace(/\/+$/, "");
+        return `<div class="kvt"><span class="k">uses</span><span class="v ${ok ? "st-ON" : "st-OFF"}">${ok ? "✓ " : "✗ "}${esc(pt || "not an OpenAI Compatible setup")}${ok ? (k === "laptop" ? " · laptop" : " · this pc") : ""}</span><span></span></div>` +
+          (ok ? "" : `<div class="note">This window's Cline points at <b>${esc(pt || "another provider")}</b>, not ${k === "laptop" ? "the laptop" : "this PC"} (${esc(s.expect)}).` +
+            (k === "laptop" ? ` Close the laptop VS Code and launch it from here: it's switched back to the laptop on every launch.` : ` Set the base url below in Cline's settings.`) + `</div>`); })()}
       <div class="kvt">
         ${copyRow("provider", s.cline.provider)}
         ${copyRow("base url", s.cline.base_url)}

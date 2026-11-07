@@ -16,6 +16,10 @@ NOWIN = 0x08000000
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LAPTOP_BAT = os.path.join(ROOT, "start-vscode-laptop.bat")
 LAPTOP_DATA = os.path.join(ROOT, "vscode-laptop").lower()
+LAPTOP_CLINE = os.path.join(ROOT, "cline-laptop", "data")      # CLINE_DIR set by start-vscode-laptop.bat
+MAIN_CLINE = os.path.join(os.path.expanduser("~"), ".cline", "data")
+LAPTOP_URL = "http://127.0.0.1:8080/v1"
+PC_URL = "http://127.0.0.1:8090/v1"
 CODE_CMD = shutil.which("code") or os.path.expandvars(r"%LOCALAPPDATA%\Programs\Microsoft VS Code\bin\code.cmd")
 GIT = shutil.which("git") or r"C:\Program Files\Git\cmd\git.exe"
 LAPTOP_BRANCH = "cline-laptop"
@@ -52,6 +56,66 @@ def vscode_running():
     return v
 
 
+def _jload(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def _jsave(path, data):
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=1)
+    os.replace(tmp, path)
+
+
+def cline_points_to(data_dir, expect=None):
+    """Where a Cline data folder sends requests. The VS Code extension reads globalState.json (your main Cline works
+    on 8090 while its settings/providers.json still says lmstudio), so that file decides; providers.json is only
+    used when globalState.json is missing."""
+    g = _jload(os.path.join(data_dir, "globalState.json"))
+    if g:
+        prov = g.get("actModeApiProvider")
+        return (g.get("openAiBaseUrl") or "").rstrip("/") if prov == "openai" else "provider: " + str(prov)
+    p = _jload(os.path.join(data_dir, "settings", "providers.json")) or {}
+    last = p.get("lastUsedProvider")
+    if not last:
+        return None
+    url = (((p.get("providers") or {}).get(last) or {}).get("settings") or {}).get("baseUrl")
+    return (url or "").rstrip("/") if last == "openai-compatible" else "provider: " + str(last)
+
+
+def pin_laptop_cline(model_id=None):
+    """Point the laptop VS Code's Cline at the laptop (PAIR, :8080) for both plan and act mode.
+    Only while that VS Code is closed: a running Cline keeps its settings in memory and would write them back."""
+    d = LAPTOP_CLINE
+    g = _jload(os.path.join(d, "globalState.json"))
+    if g is None:
+        return False
+    g.update(planModeApiProvider="openai", actModeApiProvider="openai", openAiBaseUrl=LAPTOP_URL)
+    if model_id:
+        g.update(planModeOpenAiModelId=model_id, actModeOpenAiModelId=model_id)
+    _jsave(os.path.join(d, "globalState.json"), g)
+    pp = os.path.join(d, "settings", "providers.json")
+    p = _jload(pp)
+    if p is not None:
+        p["lastUsedProvider"] = "openai-compatible"
+        oc = p.setdefault("providers", {}).setdefault("openai-compatible", {}).setdefault("settings", {})
+        oc.update(provider="openai-compatible", baseUrl=LAPTOP_URL)
+        oc.setdefault("apiKey", "none")
+        if model_id:
+            oc["model"] = model_id
+        _jsave(pp, p)
+    mp = os.path.join(d, "settings", "models.json")
+    m = _jload(mp)
+    if m is not None and "openai-compatible" in (m.get("providers") or {}):
+        m["providers"]["openai-compatible"].setdefault("provider", {})["baseUrl"] = LAPTOP_URL
+        _jsave(mp, m)
+    return True
+
+
 def code_info(settings, pc_model, laptop_model, key):
     running = vscode_running()
     return {
@@ -60,16 +124,18 @@ def code_info(settings, pc_model, laptop_model, key):
         "recent": [p for p in settings.get("recent_projects", []) if os.path.isdir(p)],
         "setups": {
             "pc": {"running": running["pc"], "label": "VS Code", "model": pc_model,
+                   "points_to": cline_points_to(MAIN_CLINE, PC_URL), "expect": PC_URL,
                    "cline": {"provider": "OpenAI Compatible", "base_url": "http://127.0.0.1:8090/v1",
                              "api_key": key, "model_id": pc_model.get("id") or "(any, the server has one model)"}},
             "laptop": {"running": running["laptop"], "label": "VS Code (laptop)", "model": laptop_model,
+                       "points_to": cline_points_to(LAPTOP_CLINE, LAPTOP_URL), "expect": LAPTOP_URL,
                        "cline": {"provider": "OpenAI Compatible", "base_url": "http://127.0.0.1:8080/v1",
                                  "api_key": "any (PAIR has no key)", "model_id": laptop_model.get("id") or "–"}},
         },
     }
 
 
-def open_code(which, path, settings, save):
+def open_code(which, path, settings, save, laptop_model_id=None):
     """Start VS Code (main or the laptop setup), optionally on a folder. Returns (ok, message)."""
     if which not in ("pc", "laptop"):
         return False, "which must be pc or laptop"
@@ -86,6 +152,8 @@ def open_code(which, path, settings, save):
     else:
         if not os.path.exists(LAPTOP_BAT):
             return False, "start-vscode-laptop.bat is missing"
+        if not vscode_running()["laptop"]:
+            pin_laptop_cline(laptop_model_id)   # every fresh launch starts on the laptop's model
         cmd = ["cmd", "/c", "call", LAPTOP_BAT, *args]
     subprocess.Popen(cmd, cwd=ROOT, creationflags=NOWIN)
     _code_cache["t"] = 0
