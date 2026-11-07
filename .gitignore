@@ -9,6 +9,7 @@
 !check-model.bat
 !start-command-center.bat
 !start-vscode-laptop.bat
+!sync.bat
 !command-center/
 command-center/*
 !command-center/server.py

@@ -23,6 +23,7 @@ start-uncensored.bat       start-llm.bat 2
 check-model.bat            which model is running on 8090
 start-vscode-laptop.bat    VS Code with its own profile (vscode-laptop\, cline-laptop\) for the laptop's Cline
 start-command-center.bat   opens the UI
+sync.bat                   commit + push everything in one step
 command-center\
   server.py                HTTP server + model control + stats + chat proxy (adds the API key server-side)
   workspaces.py            2:code and 3:web
