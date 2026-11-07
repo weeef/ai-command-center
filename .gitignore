@@ -1,0 +1,29 @@
+# Whitelist: ignore everything, then allow only the command center's code and launchers.
+# Keeps out the API key, models, llama.cpp binaries, browser/VS Code profiles, logs and personal state.
+*
+!.gitignore
+!README.md
+!start-llm.bat
+!start-standard.bat
+!start-uncensored.bat
+!check-model.bat
+!start-command-center.bat
+!start-vscode-laptop.bat
+!command-center/
+command-center/*
+!command-center/server.py
+!command-center/workspaces.py
+!command-center/tokens.py
+!command-center/taskbar.py
+!command-center/launch.pyw
+!command-center/index.html
+!command-center/command-center.ico
+!command-center/start-command-center.bat
+
+# never, even if someone adds a broader rule above
+api-key.txt
+**/settings.json
+**/tokens.json
+**/tokens-log.jsonl
+**/edge-profile/
+**/*.bak

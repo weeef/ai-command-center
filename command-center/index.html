@@ -1,0 +1,1093 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>command center</title>
+<link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAvUlEQVR42mNgQAJVi74HA/EmIH4LxP+pjN9CzQ5mwAaAEouQNUhJq1EVozlmEVbLqW0pAccsQg52ulmO5ohgBmi8DJQDNjHAEtwAOeAtw0BYjuyIweuA3bO+w/GAO4BWDiHZAdR2BME0QGtHEJUIaekIonMBrRxBUjakhSNILgeo7Yih5YABjYIBTYQDmg1JsXzeuSycmC5FMV0cgC84aeqAkdkgoacDBrxROuDN8oHtmAx412xQdE4HsnsOAN3q9zr1wm/GAAAAAElFTkSuQmCC">
+<style>
+:root{
+  --bg:#1a1b26;--bg2:#16161e;--bg3:#24283b;--fg:#c0caf5;--dim:#565f89;--border:#3b4261;
+  --accent:#7aa2f7;--accent2:#bb9af7;--ok:#9ece6a;--warn:#e0af68;--crit:#f7768e;--cyan:#7dcfff;
+  --g1:#7aa2f7;--g2:#bb9af7;--g3:#f7768e;
+  --font:"Cascadia Mono","Cascadia Code",Consolas,"JetBrains Mono","Fira Code",monospace;
+}
+[data-theme="mocha"]{--bg:#1e1e2e;--bg2:#181825;--bg3:#313244;--fg:#cdd6f4;--dim:#6c7086;--border:#45475a;
+  --accent:#89b4fa;--accent2:#cba6f7;--ok:#a6e3a1;--warn:#f9e2af;--crit:#f38ba8;--cyan:#94e2d5;--g1:#f5c2e7;--g2:#cba6f7;--g3:#89b4fa}
+[data-theme="gruvbox"]{--bg:#282828;--bg2:#1d2021;--bg3:#3c3836;--fg:#ebdbb2;--dim:#928374;--border:#504945;
+  --accent:#fabd2f;--accent2:#fe8019;--ok:#b8bb26;--warn:#fabd2f;--crit:#fb4934;--cyan:#8ec07c;--g1:#fabd2f;--g2:#fe8019;--g3:#fb4934}
+[data-theme="matrix"]{--bg:#000;--bg2:#030803;--bg3:#0b1a0b;--fg:#9cff9c;--dim:#2f6b2f;--border:#1f4d1f;
+  --accent:#00ff66;--accent2:#7dff7d;--ok:#00ff66;--warn:#d4ff00;--crit:#ff3355;--cyan:#66ffcc;--g1:#003b12;--g2:#00ff66;--g3:#d6ffd6}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:13px/1.45 var(--font);overflow:hidden}
+button{font:inherit;color:inherit;background:var(--bg3);border:1px solid var(--border);padding:1px 8px;cursor:pointer;border-radius:0}
+button:hover{border-color:var(--accent);color:var(--accent)}
+button:focus-visible,textarea:focus-visible{outline:1px solid var(--accent);outline-offset:1px}
+button:disabled{opacity:.45;cursor:default}
+::selection{background:var(--accent);color:var(--bg)}
+::-webkit-scrollbar{width:8px}::-webkit-scrollbar-thumb{background:var(--border)}::-webkit-scrollbar-track{background:transparent}
+
+#bar{height:28px;display:flex;align-items:stretch;background:var(--bg2);border-bottom:1px solid var(--border);white-space:nowrap}
+#bar>*{display:flex;align-items:center;padding:0 10px}
+#tags{padding:0}
+#tags span{padding:0 9px;height:100%;display:flex;align-items:center;color:var(--dim)}
+#tags span.on{background:var(--accent);color:var(--bg);font-weight:bold}
+#tags span{cursor:pointer;user-select:none}
+#tags span:not(.on):hover{color:var(--fg);background:var(--bg3)}
+[hidden]{display:none!important}
+
+/* 2:code and 3:web workspaces */
+main.ws{grid-template-columns:1fr 1fr;gap:14px}
+.ws .col{display:flex;flex-direction:column;gap:16px;min-height:0;padding-top:10px;overflow:hidden}
+.ws .pane{padding:14px 14px 12px}
+.setup{flex:0 0 auto}
+.big{font-size:15px;font-weight:bold}
+.dot{display:inline-block;width:.6em;height:.6em;border-radius:50%;background:var(--dim);margin-right:.45em;vertical-align:.05em}
+.dot.on{background:var(--ok);box-shadow:0 0 6px var(--ok)}
+.dot.warn{background:var(--warn)}
+.dot.crit{background:var(--crit)}
+.shead{display:flex;align-items:center;gap:10px;margin:2px 0 10px}
+.shead .grow{flex:1}
+.shead .sub{color:var(--dim)}
+.btn-main{font-weight:bold;padding:3px 12px}
+.btn-main.go{color:var(--ok);border-color:var(--ok)}
+.btn-main.stop{color:var(--crit);border-color:var(--crit)}
+.kvt{display:grid;grid-template-columns:96px 1fr auto;gap:4px 10px;align-items:center}
+.kvt .k{color:var(--accent)}
+.kvt .v{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kvt button{font-size:11px;padding:0 6px}
+.sect{color:var(--accent2);margin:12px 0 6px;font-weight:bold}
+.sect::before{content:"── "}.sect::after{content:" ──"}
+.openrow{display:flex;gap:8px;align-items:center}
+.openrow input{flex:1;min-width:0;background:var(--bg2);color:var(--fg);border:1px solid var(--border);font:inherit;padding:5px 8px;outline:none}
+.openrow input:focus{border-color:var(--accent)}
+.openrow .ps{padding:0}
+#recent{margin-top:10px}
+.rec{display:flex;align-items:center;gap:8px;padding:3px 4px;border-bottom:1px dashed var(--bg3)}
+.rec:hover{background:var(--bg2)}
+.rec .name{color:var(--fg);font-weight:bold;white-space:nowrap}
+.rec .path{flex:1;min-width:0;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left}
+.rec button{font-size:11px;padding:0 6px}
+.rec .x{color:var(--dim);border-color:transparent;background:none}
+.rec .x:hover{color:var(--crit)}
+.routes{margin:0;white-space:pre;line-height:1.7;overflow:auto}
+.routes .ok{color:var(--ok)}.routes .bad{color:var(--crit)}.routes .mid{color:var(--warn)}.routes .d{color:var(--dim)}.routes .n{color:var(--accent2)}
+.urlbox{font-size:17px;font-weight:bold;color:var(--cyan);margin:8px 0 4px;word-break:break-all}
+.steps{margin:4px 0 8px;padding-left:22px;line-height:1.8}
+.steps b{color:var(--accent)}
+.devs{width:100%;border-collapse:collapse}
+.devs td{padding:5px 8px;border-bottom:1px dashed var(--bg3);white-space:nowrap}
+.devs td.ip{color:var(--dim);font-variant-numeric:tabular-nums}
+.devs td.os{color:var(--accent2)}
+.devs tr.off td{color:var(--dim)}
+.devs tr.me td:first-child{color:var(--accent)}
+.note{margin-top:10px;padding:6px 10px;border-left:2px solid var(--warn);color:var(--warn);background:var(--bg2)}
+.note.ok{border-color:var(--ok);color:var(--ok)}
+#state{font-weight:bold;letter-spacing:.05em}
+.st-OFF{color:var(--dim)}.st-ON{color:var(--ok)}.st-LOADING{color:var(--warn)}.st-ASLEEP{color:var(--cyan)}.st-THINKING{color:var(--accent2)}
+#bar .sep{color:var(--border);padding:0}
+#bar .grow{flex:1}
+#host{color:var(--dim)}
+#tps{gap:6px;font-variant-numeric:tabular-nums}
+#tps .tl{color:var(--dim);font-size:11px;letter-spacing:.08em;text-transform:uppercase}
+#tps .tv{display:inline-block;min-width:4ch;text-align:right;font-weight:bold}
+#tps #ppT{color:var(--accent)}
+#tps #tgT{color:var(--ok)}
+#tps .tv.na{color:var(--border);font-weight:normal}
+#tps .tu{color:var(--dim);font-size:11px}
+#tps .tsep{color:var(--border);padding:0 4px}
+/* usage pane machine tabs */
+.ut{cursor:pointer;color:var(--dim);font-weight:normal;padding:0 5px;margin-left:4px;border:1px solid transparent}
+.ut:hover{color:var(--fg);border-color:var(--border)}
+.ut.sel{color:var(--bg);background:var(--accent);font-weight:bold}
+.ut.down:not(.sel){text-decoration:line-through}
+#usagePane{cursor:default}
+#clock{color:var(--accent);font-weight:bold}
+#themeBtn{border:none;background:none;height:100%;color:var(--accent2)}
+
+main{display:grid;grid-template-columns:432px 1fr;gap:14px;padding:6px 12px 12px;height:calc(100% - 28px)}
+#side{display:flex;flex-direction:column;gap:16px;min-height:0;overflow:hidden;padding-top:10px}
+.pane{position:relative;border:1px solid var(--border);padding:12px 12px 10px;min-height:0;background:var(--bg)}
+.pane.focus{border-color:var(--accent)}
+.pane>.title{position:absolute;top:-.75em;left:10px;background:var(--bg);padding:0 6px;color:var(--accent);font-weight:bold;line-height:1.4}
+.pane>.title i{font-style:normal;color:var(--dim);font-weight:normal}
+
+/* brain */
+#brainPane{flex:1 1 auto;padding:8px 4px 4px;display:flex}
+#brainWrap{flex:1;position:relative;overflow:hidden;min-height:0}
+#brain{position:absolute;inset:0;margin:0;font:10px/10px var(--font);letter-spacing:0;white-space:pre;
+  background:linear-gradient(160deg,var(--g1) 10%,var(--g2) 50%,var(--g3) 90%);-webkit-background-clip:text;background-clip:text;color:transparent;
+  transition:opacity .6s;text-align:left;user-select:none}
+#brain.off{opacity:.28}
+#brain .n{color:#fff;text-shadow:0 0 6px var(--accent2)}
+#brainTag{position:absolute;right:6px;bottom:2px;color:var(--dim);font-size:11px}
+#measure{position:absolute;visibility:hidden;font:10px/10px var(--font);white-space:pre}
+
+/* fetch */
+#fetch{display:flex;gap:14px;flex:0 0 auto}
+#fetch .logo{color:var(--accent2);white-space:pre;line-height:1.2;font-size:12px}
+#fetch .kv{flex:1;min-width:0}
+#fetch .kv div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#fetch .k{color:var(--accent);display:inline-block;width:56px}
+#fetch .who{color:var(--accent2);font-weight:bold}
+#fetch .rule{color:var(--dim)}
+.swatch{display:flex;gap:0;margin:4px 0 6px}.swatch span{width:16px;height:9px}
+#ctl{display:flex;gap:6px;margin-top:6px;align-items:center}
+#powerBtn{min-width:78px;font-weight:bold}
+#powerBtn.on{color:var(--ok);border-color:var(--ok)}
+.chip{color:var(--dim)}
+.chip.sel{color:var(--bg);background:var(--accent);border-color:var(--accent)}
+.chip.sel.unc{background:var(--crit);border-color:var(--crit)}
+#tgtRow{display:flex;gap:6px;align-items:center;margin-top:6px}
+#tgtRow .k{color:var(--accent);width:56px}
+.chip.tg.sel{background:var(--accent2);border-color:var(--accent2)}
+.chip.tg.online:not(.sel){color:var(--ok)}
+.hide{display:none!important}
+#ctlMsg{color:var(--dim);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;text-align:right}
+
+/* usage */
+.meter{display:flex;align-items:center;gap:8px;margin:2px 0}
+.meter .lab{width:36px;color:var(--accent)}
+.meter .segs{display:flex;gap:2px;flex:1}
+.meter .segs i{flex:1;height:10px;background:var(--bg3)}
+.meter .segs i.f{background:var(--ok)}
+.meter.warn .segs i.f{background:var(--warn)}
+.meter.crit .segs i.f{background:var(--crit)}
+.meter .val{width:150px;font-size:11px!important;text-align:right;color:var(--dim);font-size:11.5px;white-space:nowrap}
+.meter .val b{color:var(--fg);font-weight:normal}
+.spark{display:flex;align-items:center;gap:8px;margin-top:4px}
+.spark canvas{flex:1;height:26px;width:100%;display:block}
+.spark .lab{width:36px;color:var(--accent)}
+.spark .val{width:150px;text-align:right;color:var(--dim);font-size:11.5px;white-space:nowrap}
+.spark .val b{color:var(--fg);font-weight:normal}
+
+/* tokens burned */
+.tok{margin-top:8px;border-top:1px dashed var(--border);padding-top:6px}
+.tok .th{display:flex;color:var(--dim);font-size:11px;margin-bottom:2px}
+.tok .th .grow{flex:1}
+.tok .th button{font-size:11px;padding:0 6px}
+.tok .tr{display:grid;grid-template-columns:52px 1fr 1fr 64px;gap:6px;align-items:baseline;font-size:12px;white-space:nowrap}
+.tok .tr .m{color:var(--accent)}
+.tok .tr .n{color:var(--fg);text-align:right}
+.tok .tr .n i{color:var(--dim);font-style:normal;font-size:11px}
+.tok .tr .r{color:var(--ok);text-align:right;font-size:11px}
+.tok .tr.off .n,.tok .tr.off .r{color:var(--border)}
+.tok .sub2{color:var(--dim);font-size:11px;padding-left:58px;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tok .log{max-height:120px;overflow:auto;font-size:11px;color:var(--dim);margin-top:4px}
+.tok .log div{white-space:nowrap}
+
+/* cline */
+.row{display:flex;align-items:center;gap:8px;margin:2px 0}
+.row .k{color:var(--accent);width:66px;flex:0 0 auto}
+.row .v{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row button{font-size:11px;padding:0 6px}
+.hint{color:var(--dim);font-size:11px;margin-top:3px}
+
+/* chat */
+#chatPane{display:flex;flex-direction:column;padding:12px 0 0;min-width:0;margin-top:10px}
+#log{flex:1;overflow-y:auto;padding:4px 14px 10px;min-height:0}
+.msg{margin:0 0 14px}
+.msg .who{font-weight:bold;margin-bottom:2px}
+.msg.user .who{color:var(--accent2)}
+.msg.bot .who{color:var(--accent)}
+.msg.sys{color:var(--dim)}
+.msg.sys.err{color:var(--crit)}
+.msg .body{white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere}
+.msg .body code{background:var(--bg3);padding:0 4px;color:var(--cyan)}
+.msg .body b{color:var(--warn)}
+.code{margin:6px 0;border:1px solid var(--border);background:var(--bg2);white-space:normal}
+.code .bar{display:flex;justify-content:space-between;align-items:center;padding:1px 8px;border-bottom:1px solid var(--border);color:var(--dim);font-size:11px}
+.code .bar button{font-size:11px;padding:0 6px}
+.code pre{margin:0;padding:8px 10px;overflow-x:auto;white-space:pre}
+.code pre code{background:none;padding:0;color:var(--fg)}
+details.think{margin:2px 0 6px;border-left:2px solid var(--border);padding-left:10px;color:var(--dim)}
+details.think summary{cursor:pointer;color:var(--accent2);list-style:none}
+details.think summary::before{content:"▸ "}
+details.think[open] summary::before{content:"▾ "}
+details.think .tbody{white-space:pre-wrap;max-height:260px;overflow-y:auto;font-size:12px}
+.stat{color:var(--dim);font-size:11.5px;margin-top:3px}
+.stat b{color:var(--ok);font-weight:normal}
+.imgs{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0}
+.imgs img{max-height:120px;max-width:200px;border:1px solid var(--border)}
+.cursor::after{content:"▊";color:var(--accent);animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+
+#composer{border-top:1px solid var(--border);padding:8px 12px 10px;background:var(--bg)}
+#attach{display:flex;gap:6px;flex-wrap:wrap}
+#attach:not(:empty){margin-bottom:6px}
+#attach .th{position:relative}
+#attach img{height:52px;border:1px solid var(--border);display:block}
+#attach button{position:absolute;top:-6px;right:-6px;padding:0 4px;font-size:10px;line-height:14px;background:var(--crit);color:var(--bg);border:none}
+#inrow{display:flex;gap:8px;align-items:flex-end}
+#prompt{flex:1;resize:none;background:var(--bg2);color:var(--fg);border:1px solid var(--border);font:inherit;padding:6px 8px;min-height:34px;max-height:180px;outline:none}
+#prompt:focus{border-color:var(--accent)}
+#prompt::placeholder{color:var(--dim)}
+.ps{color:var(--ok);font-weight:bold;padding-bottom:7px}
+#sendBtn{height:34px;min-width:64px;font-weight:bold}
+#sendBtn.stop{color:var(--crit);border-color:var(--crit)}
+#fileBtn{height:34px}
+#chatPane.drag{border-color:var(--accent2);border-style:dashed}
+@media (prefers-reduced-motion:reduce){.cursor::after{animation:none}#brain{transition:none}}
+</style>
+</head>
+<body>
+<div id="bar">
+  <div id="tags" role="tablist">
+    <span class="on" data-ws="1" role="tab" tabindex="0" title="models and chat (Alt+1)">1:llm</span>
+    <span data-ws="2" role="tab" tabindex="0" title="VS Code and Cline (Alt+2)">2:code</span>
+    <span data-ws="3" role="tab" tabindex="0" title="phone access over Tailscale (Alt+3)">3:web</span>
+  </div>
+  <div id="state" class="st-OFF">OFF</div>
+  <div class="sep">│</div>
+  <div id="tps" title="speed of the last reply: pp = reading your prompt, tg = writing the answer">
+    <span class="tl">pp</span><span class="tv na" id="ppT">--</span><span class="tu">tok/s</span>
+    <span class="tsep">│</span>
+    <span class="tl">tg</span><span class="tv na" id="tgT">--</span><span class="tu">tok/s</span>
+  </div>
+  <div class="grow"></div>
+  <div id="host">user@host</div>
+  <div class="sep">│</div>
+  <button id="themeBtn" title="cycle theme">◐ tokyo</button>
+  <div class="sep">│</div>
+  <div id="clock">--:--:--</div>
+</div>
+<main id="ws1">
+  <aside id="side">
+    <section class="pane" id="brainPane"><div class="title">brain <i id="brainMode">idle</i></div>
+      <div id="brainWrap"><pre id="brain" class="off" aria-hidden="true"></pre><span id="measure">MMMMMMMMMM</span><span id="brainTag"></span></div>
+    </section>
+    <section class="pane" id="fetchPane"><div class="title">fetch</div>
+      <div id="fetch">
+        <div class="logo" aria-hidden="true">  ▄▀▀▀▄▄▀▀▄
+ █  ░▒▓▒░  █
+ █ ▓  ▓▓  ▓█
+  ▀▄ ▒▒▒ ▄▀
+    ▀▀█▀▀
+      ▀  </div>
+        <div class="kv">
+          <div class="who" id="fWho">user@host</div>
+          <div class="rule" id="fRule">---------</div>
+          <div><span class="k">model</span><span id="fModel">–</span></div>
+          <div><span class="k">state</span><span id="fState">–</span></div>
+          <div><span class="k">ctx</span><span id="fCtx">–</span></div>
+          <div><span class="k">vision</span><span id="fVision">–</span></div>
+          <div><span class="k">engine</span><span id="fEngine">llama.cpp</span></div>
+          <div><span class="k">gpu</span><span id="fGpu">–</span></div>
+          <div class="swatch" id="swatch"></div>
+        </div>
+      </div>
+      <div id="tgtRow">
+        <span class="k">run on</span>
+        <button class="chip tg" data-t="local" title="your models on this PC (port 8090)">this pc</button>
+        <button class="chip tg" data-t="laptop" title="the laptop's model through NVIDIA PAIR (port 8080)">laptop</button>
+      </div>
+      <div id="ctl">
+        <button id="powerBtn" title="turn the selected model on or off">⏻ on</button>
+        <button class="chip" data-m="standard" title="Qwen3.6-35B Q4_K_M, faster">standard</button>
+        <button class="chip unc" data-m="uncensored" title="Qwen3.6-35B uncensored Q5_K_M, slower">uncensored</button>
+        <span id="ctlMsg"></span>
+      </div>
+    </section>
+    <section class="pane" id="usagePane"><div class="title">usage <span class="ut" data-u="pc" role="button" tabindex="0">this pc</span><span class="ut" data-u="laptop" role="button" tabindex="0">laptop</span> <i id="usageNote"></i></div>
+      <div class="meter" id="mVram"><span class="lab">vram</span><span class="segs"></span><span class="val">–</span></div>
+      <div class="meter" id="mRam"><span class="lab">ram</span><span class="segs"></span><span class="val">–</span></div>
+      <div class="spark"><span class="lab">gpu</span><canvas id="sGpu"></canvas><span class="val" id="vGpu">–</span></div>
+      <div class="spark"><span class="lab">cpu</span><canvas id="sCpu"></canvas><span class="val" id="vCpu">–</span></div>
+      <div class="tok" id="tokBox">
+        <div class="th"><span>tokens burned · since on</span><span class="grow"></span><button id="tokLogBtn" title="finished sessions">log</button></div>
+        <div id="tokRows"></div>
+        <div class="log" id="tokLog" hidden></div>
+      </div>
+    </section>
+    <section class="pane" id="clinePane"><div class="title">cline</div>
+      <div class="row"><span class="k">provider</span><span class="v" id="cProv">OpenAI Compatible</span><button data-copy="cProv">copy</button></div>
+      <div class="row"><span class="k">base url</span><span class="v" id="cUrl">http://127.0.0.1:8090/v1</span><button data-copy="cUrl">copy</button></div>
+      <div class="row"><span class="k">api key</span><span class="v" id="cKeyMask">••••••••</span><button id="cKeyBtn">copy</button></div>
+      <div class="row"><span class="k">model id</span><span class="v" id="cModel">–</span><button data-copy="cModel">copy</button></div>
+    </section>
+  </aside>
+  <section class="pane" id="chatPane"><div class="title">chat <i id="chatHost">· 127.0.0.1:8090</i></div>
+    <div id="log" aria-live="polite"></div>
+    <div id="composer">
+      <div id="attach"></div>
+      <div id="inrow">
+        <span class="ps">❯</span>
+        <textarea id="prompt" rows="1" placeholder="message · Enter sends · Shift+Enter newline · paste/drop images · /help"></textarea>
+        <button id="fileBtn" title="attach image">+img</button>
+        <button id="sendBtn">send</button>
+        <input type="file" id="file" accept="image/*" multiple hidden>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- 2:code ─ VS Code + Cline -->
+<main id="ws2" class="ws" hidden>
+  <div class="col">
+    <section class="pane setup" id="setup-pc"><div class="title">vscode <i>· this pc's model</i></div><div class="sbody">loading…</div></section>
+    <section class="pane setup" id="setup-laptop"><div class="title">vscode <i>· laptop's model</i></div><div class="sbody">loading…</div></section>
+  </div>
+  <div class="col">
+    <section class="pane" id="projPane"><div class="title">projects</div>
+      <div class="openrow">
+        <span class="ps">❯</span>
+        <input id="projPath" spellcheck="false" autocomplete="off" placeholder="paste a folder path, e.g. D:\projects\my-app">
+        <button data-open="pc" title="open in your main VS Code (this pc's model)">open · pc</button>
+        <button data-open="laptop" title="open in the laptop VS Code (laptop's model)">open · laptop</button>
+        <button data-open="both" title="pc window on this repo + laptop window on its own git worktree (<name>-laptop), so both agents can work at once">open · both</button>
+      </div>
+      <div class="hint">tip: in Explorer, shift + right-click a folder → <b>Copy as path</b>, then paste it here.</div>
+      <div id="recent"></div>
+    </section>
+    <section class="pane" id="routesPane"><div class="title">routes</div><pre id="routes" class="routes"></pre></section>
+  </div>
+</main>
+
+<!-- 3:web ─ phone access over Tailscale -->
+<main id="ws3" class="ws" hidden>
+  <div class="col">
+    <section class="pane" id="phonePane"><div class="title">phone access <i>· tailscale serve</i></div><div id="phone">loading…</div></section>
+    <section class="pane" id="iphonePane"><div class="title">on your iphone</div>
+      <ol class="steps">
+        <li>Open the <b>Tailscale</b> app and make sure the VPN is <b>on</b>.</li>
+        <li>In Safari, go to the <b>address</b> above.</li>
+        <li>When it asks for an <b>API key</b> (or under its settings), paste the key above.</li>
+        <li>Chat, or attach a photo. Tip: Share → <b>Add to Home Screen</b> makes it feel like an app.</li>
+      </ol>
+      <div class="hint">Only devices signed in to your Tailscale account can reach it. It is not on the public internet.</div>
+    </section>
+  </div>
+  <div class="col">
+    <section class="pane" id="tailnetPane"><div class="title">tailnet <i id="tailnetName"></i></div><div id="tailnet">loading…</div></section>
+  </div>
+</main>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const THEMES = ["tokyo","mocha","gruvbox","matrix"];
+const store = {
+  get(k){ try { return localStorage.getItem(k); } catch(e){ return null; } },
+  set(k,v){ try { localStorage.setItem(k,v); } catch(e){} }
+};
+const reduced = matchMedia("(prefers-reduced-motion: reduce)");
+let S = null;               // last /api/stats
+let selected = store.get("rt.model") === "uncensored" ? "uncensored" : "standard";
+let chatBusy = false, abortCtl = null;
+let history = [];           // {role, content}
+let pending = [];           // attached images (data URLs)
+let lastCtx = null;
+let lastMachine = null;
+
+/* ---------------- theme ---------------- */
+function setTheme(t){
+  if (!THEMES.includes(t)) t = "tokyo";
+  document.documentElement.dataset.theme = t;
+  $("themeBtn").textContent = "◐ " + t;
+  store.set("rt.theme", t);
+  buildSwatch(); drawSparks();
+}
+function cycleTheme(){ const cur = document.documentElement.dataset.theme || "tokyo"; setTheme(THEMES[(THEMES.indexOf(cur)+1) % THEMES.length]); }
+function cssVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+function buildSwatch(){
+  const sw = $("swatch"); sw.innerHTML = "";
+  ["--bg3","--crit","--ok","--warn","--accent","--accent2","--cyan","--fg"].forEach(v => {
+    const s = document.createElement("span"); s.style.background = `var(${v})`; sw.appendChild(s);
+  });
+}
+
+/* ---------------- clock ---------------- */
+function tick(){ const d = new Date(); $("clock").textContent = d.toTimeString().slice(0,8); }
+setInterval(tick, 1000); tick();
+
+/* ---------------- brain ---------------- */
+const RAMP = " .:-=+*#%@";
+const brain = { pts:null, cols:0, rows:0, cw:6, ch:10, angle:0.6, mode:"off", last:0, flashes:[] };
+function fib(n, cb){ const g = Math.PI*(3-Math.sqrt(5)); for(let i=0;i<n;i++){ const y=1-2*(i+.5)/n, r=Math.sqrt(1-y*y), t=g*i; cb(Math.cos(t)*r, y, Math.sin(t)*r); } }
+function norm(x,y,z){ const l = Math.hypot(x,y,z) || 1; return [x/l,y/l,z/l]; }
+function buildBrain(){
+  const P = [];
+  // cerebrum: two hemispheres, flat medial walls leave a dark fissure between them
+  for (const side of [-1, 1]) {
+    const cx = side*0.27, cy = 0.12, a = 0.5, b = 0.6, c = 0.95;
+    fib(4200, (x,y,z) => {
+      let mx = x; if (mx*side < 0) mx *= 0.28;
+      let my = y; if (my < 0) my *= 0.72;
+      const th = Math.atan2(z, x), ph = Math.acos(Math.max(-1, Math.min(1, y)));
+      // ridged folds: abs of sines, low frequency so they read at character size
+      const g = Math.abs(Math.sin(4.2*th + 2.6*Math.sin(3.1*ph) + side*0.7)) * 0.6
+              + Math.abs(Math.sin(5.3*ph + 1.8*Math.cos(2.7*th))) * 0.4;
+      const r = 1 + 0.05*g;
+      const n = norm(mx/a, my/b, z/c);
+      P.push(cx + a*mx*r, cy + b*my*r, c*z*r, n[0], n[1], n[2], 0.3 + 0.7*g);
+    });
+  }
+  // cerebellum: low at the back, horizontal ridges
+  fib(1500, (x,y,z) => {
+    const a=.52, b=.26, c=.3, px=a*x, py=-.5+b*y, pz=-.68+c*z;
+    const g = Math.abs(Math.sin(py*34));
+    const n = norm(x/a, y/b, z/c);
+    P.push(px, py, pz, n[0], n[1], n[2], 0.25 + 0.75*g);
+  });
+  // stem
+  for (let i=0;i<520;i++){
+    const t = i/520, y = -0.3 - t*0.78, ang = i*2.399, r = 0.13 - t*0.035;
+    const nx = Math.cos(ang), nz = Math.sin(ang);
+    P.push(nx*r, y, -0.3 + nz*r - t*0.08, nx, -0.1, nz, 0.75);
+  }
+  brain.pts = new Float32Array(P);
+}
+function measureBrain(){
+  const m = $("measure"), w = $("brainWrap");
+  // offset* sizes are layout pixels, the same units as clientWidth, so this stays right under the UI zoom
+  brain.cw = m.offsetWidth/10 || 6; brain.ch = m.offsetHeight || 10;
+  brain.cols = Math.max(10, Math.floor(w.clientWidth / brain.cw));
+  brain.rows = Math.max(6, Math.floor(w.clientHeight / brain.ch));
+}
+function renderBrain(flash){
+  const {cols, rows, cw, ch, pts} = brain; if (!pts) return;
+  const W = cols*cw, H = rows*ch, S = Math.min(W/1.75, H/2.05);
+  const ay = brain.angle, ax = 0.32;
+  const ca = Math.cos(ay), sa = Math.sin(ay), cb = Math.cos(ax), sb = Math.sin(ax);
+  const L = norm(-0.45, 0.6, 0.66);
+  const n = cols*rows, zb = new Float32Array(n).fill(-1e9), lum = new Float32Array(n).fill(-1);
+  for (let i=0; i<pts.length; i+=7){
+    // rotate around y (spin) then x (tilt)
+    let x = pts[i], y = pts[i+1] + 0.2, z = pts[i+2];
+    let x1 = x*ca + z*sa, z1 = -x*sa + z*ca;
+    let y2 = y*cb - z1*sb, z2 = y*sb + z1*cb;
+    const col = Math.round(cols/2 + x1*S/cw), row = Math.round(rows/2 - y2*S/ch);
+    if (col<0 || col>=cols || row<0 || row>=rows) continue;
+    const k = row*cols + col;
+    if (z2 <= zb[k]) continue;
+    zb[k] = z2;
+    let nx = pts[i+3], ny = pts[i+4], nz = pts[i+5];
+    let nx1 = nx*ca + nz*sa, nz1 = -nx*sa + nz*ca;
+    let ny2 = ny*cb - nz1*sb, nz2 = ny*sb + nz1*cb;
+    const d = Math.max(0, nx1*L[0] + ny2*L[1] + nz2*L[2]);
+    lum[k] = Math.sqrt((0.12 + 0.88*d) * pts[i+6]);
+  }
+  let out = "";
+  const fl = flash ? new Set(brain.flashes.map(f => f.k)) : null;
+  for (let r=0; r<rows; r++){
+    for (let c=0; c<cols; c++){
+      const k = r*cols + c, v = lum[k];
+      if (v < 0) { out += " "; continue; }
+      const chr = RAMP[Math.min(9, 1 + Math.floor(v*8.99))];
+      out += (fl && fl.has(k)) ? '<span class="n">@</span>' : chr;
+    }
+    out += "\n";
+  }
+  if (flash){
+    // spawn new neurons on filled cells, drop expired ones
+    const now = performance.now();
+    brain.flashes = brain.flashes.filter(f => f.until > now);
+    for (let j=0; j<6; j++){ const k = (Math.random()*n)|0; if (lum[k] > 0.25) brain.flashes.push({k, until: now + 90 + Math.random()*220}); }
+  } else brain.flashes = [];
+  $("brain").innerHTML = out;
+}
+function brainLoop(ts){
+  requestAnimationFrame(brainLoop);
+  if (document.hidden) { brain.last = ts; return; }
+  const m = brain.mode;
+  const speed = m === "busy" ? 1.5 : m === "on" ? 0.28 : m === "loading" ? 0.7 : 0;
+  if (reduced.matches || speed === 0) {
+    if (brain.dirty) { renderBrain(false); brain.dirty = false; }
+    brain.last = ts; return;
+  }
+  const fps = m === "busy" ? 30 : 20;
+  if (ts - brain.last < 1000/fps) return;
+  const dt = Math.min(0.2, (ts - (brain.last || ts)) / 1000);
+  brain.last = ts;
+  brain.angle += dt * speed;
+  renderBrain(m === "busy");
+}
+function setBrainMode(m){
+  if (m === brain.mode) return;
+  brain.mode = m; brain.dirty = true;
+  $("brain").classList.toggle("off", m === "off");
+  $("brainMode").textContent = {off:"dormant", on:"idle", busy:"firing", loading:"waking"}[m];
+}
+
+/* ---------------- stats ---------------- */
+const hist = { gpu: [], cpu: [] }, HN = 90;
+const SEG = 28;
+function makeSegs(){ document.querySelectorAll(".meter .segs").forEach(s => { s.innerHTML = "<i></i>".repeat(SEG); }); }
+function gb(b){ return (b/1073741824).toFixed(1); }
+function meter(id, used, total, free, warnAt, critAt){
+  const el = $(id); if (!total) { el.querySelector(".val").textContent = "n/a"; return; }
+  const frac = used/total, ff = free/total, on = Math.round(frac*SEG);
+  el.querySelectorAll(".segs i").forEach((s,i) => s.classList.toggle("f", i < on));
+  el.classList.toggle("crit", ff < critAt); el.classList.toggle("warn", ff >= critAt && ff < warnAt);
+  el.querySelector(".val").innerHTML = `<b>${gb(used)}</b>/${gb(total)}G · <b>${gb(free)}</b> free`;
+}
+function drawSpark(cv, data, color){
+  const dpr = (devicePixelRatio || 1) * uiScale, w = cv.clientWidth, h = cv.clientHeight;
+  if (!w || !h) return;
+  if (cv.width !== Math.round(w*dpr)) { cv.width = Math.round(w*dpr); cv.height = Math.round(h*dpr); }
+  const g = cv.getContext("2d"); g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,w,h);
+  g.strokeStyle = cssVar("--bg3"); g.lineWidth = 1; g.beginPath(); g.moveTo(0,h-.5); g.lineTo(w,h-.5); g.stroke();
+  if (data.length < 2) return;
+  const step = w/(HN-1), x0 = w - (data.length-1)*step;
+  g.beginPath();
+  data.forEach((v,i) => { const x = x0 + i*step, y = h - 2 - (Math.min(100,v)/100)*(h-4); i ? g.lineTo(x,y) : g.moveTo(x,y); });
+  g.strokeStyle = color; g.lineWidth = 1.5; g.stroke();
+  g.lineTo(w, h); g.lineTo(x0, h); g.closePath(); g.globalAlpha = .18; g.fillStyle = color; g.fill(); g.globalAlpha = 1;
+}
+function drawSparks(){ drawSpark($("sGpu"), hist.gpu, cssVar("--accent")); drawSpark($("sCpu"), hist.cpu, cssVar("--accent2")); }
+
+function uiState(){
+  if (!S) return "OFF";
+  const st = S.model.state;
+  if (st === "ON" && (S.busy || chatBusy)) return "THINKING";
+  return st;
+}
+function render(){
+  if (!S) return;
+  const m = S.model, st = uiState();
+  $("state").textContent = st; $("state").className = "st-" + st;
+  $("host").textContent = `${S.user}@${S.host}`;
+  const laptop = S.target === "laptop";
+  document.querySelectorAll(".chip.tg").forEach(c => { c.classList.toggle("sel", c.dataset.t === S.target); c.disabled = ctlBusy; });
+  document.querySelectorAll(".chip:not(.tg)").forEach(c => c.classList.toggle("hide", laptop));
+  $("chatHost").textContent = laptop ? "· laptop via PAIR 127.0.0.1:8080" : "· 127.0.0.1:8090";
+  const lc = document.querySelector('.chip.tg[data-t="laptop"]');
+  lc.textContent = (S.laptop_online ? "● " : "○ ") + "laptop";
+  lc.classList.toggle("online", !!S.laptop_online);
+  lc.title = S.laptop_online ? `${S.laptop_name || "laptop"} is on and reachable` : `${S.laptop_name || "laptop"} is off or not reachable`;
+  const key = m.key || (m.state === "OFF" ? null : selected);
+  $("fModel").textContent = laptop ? (m.name || m.note || "–")
+    : m.state === "OFF" ? `off · next: ${selected}` : (m.name || key || "–");
+  $("fModel").title = m.file || "";
+  $("fState").innerHTML = `<span class="st-${st}">${st.toLowerCase()}</span>` + (m.note ? ` · ${esc(m.note)}` : "");
+  $("fCtx").textContent = m.ctx ? m.ctx.toLocaleString() + " tok" : "–";
+  $("fVision").textContent = m.vision == null ? "–" : (m.vision ? "on (mmproj)" : "off");
+  $("fEngine").textContent = m.engine || "llama.cpp";
+  $("fEngine").parentElement.querySelector(".k").textContent = laptop ? "via" : "engine";
+  $("fWho").textContent = `${S.user}@${S.machine_name || S.host}`;
+  $("fRule").textContent = "-".repeat((S.user + (S.machine_name || S.host)).length + 1);
+  $("fGpu").textContent = S.gpu ? S.gpu.name : "n/a";
+  $("cModel").textContent = m.id ? m.id.split(/[\\/]/).pop() : "–"; $("cModel").dataset.full = m.id || "";
+  lastCtx = m.ctx || lastCtx;
+  // controls
+  const on = m.state === "ON" || m.state === "ASLEEP", loading = m.state === "LOADING";
+  if (!laptop && m.key && on) { selected = m.key; }
+  document.querySelectorAll(".chip:not(.tg)").forEach(c => c.classList.toggle("sel", c.dataset.m === selected));
+  const pb = $("powerBtn");
+  pb.textContent = loading ? "… wait" : on ? "⏻ off" : "⏻ on";
+  pb.classList.toggle("on", on);
+  pb.disabled = loading || ctlBusy;
+  document.querySelectorAll(".chip:not(.tg)").forEach(c => c.disabled = loading || ctlBusy);
+  renderUsage();
+  renderTokens();
+  setBrainMode(loading ? "loading" : st === "THINKING" ? "busy" : on ? "on" : "off");
+  $("brainTag").textContent = S.gpu && S.gpu.temp != null ? `${Math.round(S.gpu.temp)}°C` : (S.machine || "");
+}
+/* usage pane: shows either machine. Follows "run on" until you click it, then stays where you put it. */
+let usageView = null;   // null = follow the target; "pc" | "laptop" once clicked
+const mhist = { pc: {gpu: [], cpu: []}, laptop: {gpu: [], cpu: []} };
+function usageKey(){ return usageView || (S && S.target === "laptop" ? "laptop" : "pc"); }
+function renderUsage(){
+  if (!S || !S.machines) return;
+  const k = usageKey(), M = S.machines[k];
+  document.querySelectorAll(".ut").forEach(t => {
+    t.classList.toggle("sel", t.dataset.u === k);
+    const mm = S.machines[t.dataset.u];
+    t.classList.toggle("down", !mm.ok);
+    t.title = (t.dataset.u === "pc" ? "this PC" : "the laptop") + (mm.ok ? "" : " (not reachable)") + " · click to show";
+  });
+  $("usageNote").textContent = M.ok ? M.name : "not reachable";
+  hist.gpu = mhist[k].gpu; hist.cpu = mhist[k].cpu;
+  const segsOff = id => $(id).querySelectorAll(".segs i").forEach(s => s.classList.remove("f"));
+  if (M.gpu) {
+    meter("mVram", M.gpu.used, M.gpu.total, M.gpu.free, 0.12, 0.05);
+    $("vGpu").innerHTML = M.gpu.util == null ? '<span title="PAIR does not report this GPU\'s load">load n/a</span>'
+      : `<b>${M.gpu.util}%</b>` + (M.gpu.temp != null ? ` ${Math.round(M.gpu.temp)}°C` : "") + (M.gpu.watts != null ? ` ${Math.round(M.gpu.watts)}W` : "");
+  } else { segsOff("mVram"); $("mVram").querySelector(".val").textContent = "n/a"; $("vGpu").textContent = "n/a"; }
+  if (M.ram.total) meter("mRam", M.ram.total - M.ram.free, M.ram.total, M.ram.free, 0.15, 0.10);
+  else { segsOff("mRam"); $("mRam").querySelector(".val").textContent = "n/a"; }
+  $("vCpu").innerHTML = M.ok ? `<b>${M.cpu}%</b>` : "n/a";
+  drawSparks();
+}
+function setUsage(k){ usageView = k; renderUsage(); }
+/* tokens burned: both machines at once */
+const fmtTok = n => n == null ? "–" : n >= 1e9 ? (n/1e9).toFixed(2) + "B" : n >= 1e6 ? (n/1e6).toFixed(2) + "M" : n >= 1e4 ? (n/1e3).toFixed(1) + "k" : String(n);
+const fmtAgo = t => { if (!t) return ""; const s = Math.max(0, Date.now()/1000 - t), h = Math.floor(s/3600), m = Math.floor(s%3600/60);
+  return h ? `${h}h ${m}m` : m ? `${m}m` : `${Math.floor(s)}s`; };
+function renderTokens(){
+  const T = S && S.tokens; if (!T) { $("tokRows").textContent = "–"; return; }
+  $("tokRows").innerHTML = ["pc", "laptop"].map(k => {
+    const t = T[k] || {}, approx = t.exact ? "" : "≈";
+    const tip = t.exact ? "exact, from the model server's own counters" : "approximate: output only, counted while this window is open (prompt tokens need --metrics on that server)";
+    return `<div class="tr ${t.on ? "" : "off"}" title="${tip}"><span class="m">${k === "pc" ? "this pc" : "laptop"}</span>
+        <span class="n">${t.exact ? fmtTok(t.in) : "–"} <i>in</i></span>
+        <span class="n">${approx}${fmtTok(t.out)} <i>out</i></span>
+        <span class="r">${t.on && t.tps ? t.tps + " t/s" : t.on ? "idle" : "off"}</span></div>
+      <div class="sub2">${t.on ? "on " + fmtAgo(t.since) + (t.model ? " · " + esc(String(t.model).split(/[\\/]/).pop()) : "") : "not running"} · lifetime ${fmtTok((t.life_in||0) + (t.life_out||0))}</div>`;
+  }).join("");
+}
+async function loadTokLog(){
+  const L = $("tokLog");
+  try {
+    const j = await (await fetch("/api/tokens/log", {cache:"no-store"})).json();
+    L.innerHTML = j.log.length ? j.log.map(e => {
+      const d = new Date(e.start * 1000), mins = Math.round((e.end - e.start) / 60);
+      return `<div>${d.toLocaleDateString(undefined,{month:"short",day:"numeric"})} ${d.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})} · ${e.machine === "pc" ? "pc" : "laptop"} · ${mins}m · ${e.exact ? fmtTok(e.in) + " in · " : ""}${e.exact ? "" : "≈"}${fmtTok(e.out)} out</div>`;
+    }).join("") : "<div>no finished sessions yet: a session is logged when its model turns off</div>";
+  } catch (e) { L.textContent = "could not load the log"; }
+}
+$("tokBox").addEventListener("click", e => e.stopPropagation());   // don't flip the usage pane's machine
+$("tokLogBtn").onclick = () => { const L = $("tokLog"); L.hidden = !L.hidden; if (!L.hidden) loadTokLog(); };
+{ const m = location.hash.match(/usage=(pc|laptop)/); if (m) usageView = m[1]; }
+async function poll(){
+  try {
+    const r = await fetch("/api/stats", {cache:"no-store"});
+    S = await r.json();
+    for (const k of ["pc", "laptop"]) {
+      const M = S.machines && S.machines[k], h = mhist[k];
+      if (!M || !M.ok) continue;
+      if (M.gpu && M.gpu.util != null) { h.gpu.push(M.gpu.util); if (h.gpu.length > HN) h.gpu.shift(); }
+      h.cpu.push(M.cpu || 0); if (h.cpu.length > HN) h.cpu.shift();
+    }
+    render(); drawSparks();
+  } catch (e) {
+    $("state").textContent = "NO UI SERVER"; $("state").className = "st-OFF";
+  }
+  setTimeout(poll, document.hidden ? 4000 : 1000);
+}
+
+/* ---------------- model control ---------------- */
+let ctlBusy = false;
+async function modelAction(action, model){
+  if (ctlBusy) return;
+  ctlBusy = true; render();
+  $("ctlMsg").textContent = action === "off" ? "stopping…" : `starting ${model}…`;
+  try {
+    const r = await fetch("/api/model", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({action, model: model || selected})});
+    const j = await r.json();
+    $("ctlMsg").textContent = j.msg || j.error || "";
+    if (!r.ok) sys(j.error || j.msg || "model action failed", true);
+  } catch (e) { $("ctlMsg").textContent = "failed"; sys("model action failed: " + e.message, true); }
+  ctlBusy = false;
+  setTimeout(() => { $("ctlMsg").textContent = ""; }, 6000);
+}
+$("powerBtn").onclick = () => {
+  const on = S && (S.model.state === "ON" || S.model.state === "ASLEEP");
+  modelAction(on ? "off" : "on", selected);
+};
+async function setTarget(t){
+  if (ctlBusy || !["local","laptop"].includes(t)) return;
+  try {
+    const r = await fetch("/api/target", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({target: t})});
+    if (!r.ok) throw new Error((await r.json()).error);
+    sys(t === "laptop" ? "now using the laptop's model (through PAIR)." : "now using this PC's models.");
+    const j = await (await fetch("/api/stats", {cache:"no-store"})).json(); S = j; render(); loadCline();
+  } catch (e) { sys("could not switch: " + e.message, true); }
+}
+document.querySelectorAll(".chip.tg").forEach(c => c.onclick = () => setTarget(c.dataset.t));
+document.querySelectorAll(".ut").forEach(t => {
+  t.onclick = e => { e.stopPropagation(); setUsage(t.dataset.u); };
+  t.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setUsage(t.dataset.u); } };
+});
+// clicking anywhere else in the usage pane flips to the other machine
+$("usagePane").addEventListener("click", () => setUsage(usageKey() === "pc" ? "laptop" : "pc"));
+document.querySelectorAll(".chip:not(.tg)").forEach(c => c.onclick = () => {
+  const m = c.dataset.m;
+  if (m === selected && S && S.model.state !== "OFF") return;
+  selected = m; store.set("rt.model", m);
+  const on = S && (S.model.state === "ON" || S.model.state === "ASLEEP");
+  if (on) modelAction("on", m); // switch: stops the running one, starts this one
+  render();
+});
+
+/* ---------------- cline pane ---------------- */
+let clineKey = "";
+async function loadCline(){
+  try {
+    const j = await (await fetch("/api/cline", {cache:"no-store"})).json();
+    $("cProv").textContent = j.provider; $("cUrl").textContent = j.base_url; clineKey = j.api_key || "";
+    $("cKeyMask").textContent = j.target === "laptop" ? "anything (PAIR has no key)"
+      : clineKey ? clineKey.slice(0,4) + "•".repeat(Math.max(4, clineKey.length-8)) + clineKey.slice(-4) : "(none)";
+  } catch(e){}
+}
+async function copyText(t, btn){
+  try { await navigator.clipboard.writeText(t); }
+  catch(e){ const ta = document.createElement("textarea"); ta.value = t; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); }
+  if (btn){ const o = btn.textContent; btn.textContent = "ok"; setTimeout(() => btn.textContent = o, 900); }
+}
+document.querySelectorAll("[data-copy]").forEach(b => b.onclick = () => { const e = $(b.dataset.copy); copyText(e.dataset.full || e.textContent, b); });
+$("cKeyBtn").onclick = e => copyText(clineKey, e.currentTarget);
+
+/* ---------------- markdown (escape first) ---------------- */
+function esc(s){ return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function inline(t){
+  return esc(t).replace(/`([^`\n]+)`/g, "<code>$1</code>").replace(/\*\*([^*\n]+?)\*\*/g, "<b>$1</b>");
+}
+function md(src){
+  const parts = src.split("```");
+  let out = "";
+  parts.forEach((p, i) => {
+    if (i % 2 === 1) {
+      const nl = p.indexOf("\n");
+      const lang = nl >= 0 ? p.slice(0, nl).trim() : "";
+      const code = (nl >= 0 ? p.slice(nl+1) : p).replace(/\n$/, "");
+      out += `<div class="code"><div class="bar"><span>${esc(lang || "code")}</span><button class="cp">copy</button></div><pre><code>${esc(code)}</code></pre></div>`;
+    } else out += inline(i ? p.replace(/^\n/, "") : p);
+  });
+  return out;
+}
+$("log").addEventListener("click", e => {
+  const b = e.target.closest(".cp"); if (!b) return;
+  copyText(b.closest(".code").querySelector("code").textContent, b);
+});
+
+/* ---------------- chat ---------------- */
+const log = $("log");
+function atBottom(){ return log.scrollHeight - log.scrollTop - log.clientHeight < 60; }
+function scroll(force){ if (force || atBottom()) log.scrollTop = log.scrollHeight; }
+function el(tag, cls, html){ const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
+function sys(text, err){ const m = el("div", "msg sys" + (err ? " err" : ""), esc(text)); m.style.whiteSpace = "pre-wrap"; log.appendChild(m); scroll(true); }
+function addUser(text, imgs){
+  const m = el("div", "msg user"); m.appendChild(el("div", "who", "❯ you"));
+  if (imgs.length){ const w = el("div", "imgs"); imgs.forEach(u => { const i = new Image(); i.src = u; w.appendChild(i); }); m.appendChild(w); }
+  if (text) m.appendChild(el("div", "body", inline(text)));
+  log.appendChild(m); scroll(true);
+}
+const HELP = `commands
+  /on [standard|uncensored]  start a model (default: the selected one)
+  /off                       stop the model
+  /model standard|uncensored select (switches if one is running)
+  /laptop  /local            run on the laptop (via PAIR) or this PC
+  /theme [tokyo|mocha|gruvbox|matrix]
+  /clear                     clear this chat
+  /help
+keys: Enter send · Shift+Enter newline · paste, drop, or +img to attach images`;
+function command(t){
+  const [c, a] = t.slice(1).trim().split(/\s+/);
+  switch (c) {
+    case "clear": history = []; log.innerHTML = ""; sys("cleared."); return;
+    case "on": if (a && !["standard","uncensored"].includes(a)) return sys("usage: /on [standard|uncensored]", true);
+      if (a) { selected = a; store.set("rt.model", a); } return modelAction("on", selected);
+    case "off": return modelAction("off", selected);
+    case "model": if (!["standard","uncensored"].includes(a)) return sys("usage: /model standard|uncensored", true);
+      document.querySelector(`.chip[data-m="${a}"]`).click(); return;
+    case "theme": return a ? setTheme(a) : cycleTheme();
+    case "laptop": return setTarget("laptop");
+    case "local": return setTarget("local");
+    case "target": return ["local","laptop"].includes(a) ? setTarget(a) : sys("usage: /target local|laptop", true);
+    case "help": return sys(HELP);
+    default: sys(`unknown command /${c} — try /help`, true);
+  }
+}
+
+async function send(){
+  if (chatBusy) { abortCtl && abortCtl.abort(); return; }
+  const ta = $("prompt"), text = ta.value.trim();
+  if (!text && !pending.length) return;
+  if (text.startsWith("/") && !pending.length) { ta.value = ""; autosize(); return command(text); }
+  if (!S || !["ON","ASLEEP"].includes(S.model.state)) {
+    return sys(S && S.model.state === "LOADING" ? "model is still loading, give it a moment." : "model is off. press ⏻ on, or type /on", true);
+  }
+  if (pending.length && S.model.vision === false) sys("note: this model reports vision off, the image may be rejected.", true);
+  const imgs = pending.slice(); pending = []; renderAttach();
+  ta.value = ""; autosize();
+  addUser(text, imgs);
+  const content = imgs.length ? [...(text ? [{type:"text", text}] : []), ...imgs.map(u => ({type:"image_url", image_url:{url:u}}))] : text;
+  history.push({role:"user", content});
+
+  const m = el("div", "msg bot"); m.appendChild(el("div", "who", "◆ " + (S.target === "laptop" ? "laptop · " + (S.model.name || "model") : (S.model.key || "model"))));
+  const think = el("details", "think"); think.innerHTML = "<summary>thinking</summary>"; const tbody = el("div", "tbody"); think.appendChild(tbody); think.hidden = true;
+  const body = el("div", "body cursor"); const stat = el("div", "stat");
+  m.append(think, body, stat); log.appendChild(m); scroll(true);
+
+  chatBusy = true; abortCtl = new AbortController(); setSend(); render();
+  let reply = "", reasoning = "", timings = null, usage = null, finish = null, t0 = performance.now(), tFirst = 0, nTok = 0, inThinkTag = false;
+  let raf = 0;
+  const paint = () => { raf = 0; body.innerHTML = md(reply); if (reasoning) { think.hidden = false; tbody.textContent = reasoning; } scroll(); };
+  try {
+    const r = await fetch("/v1/chat/completions", {method:"POST", signal: abortCtl.signal, headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({model: S.model.id || "local", messages: history, stream: true, stream_options:{include_usage:true}})});
+    if (!r.ok) {
+      let msg = await r.text(); try { const j = JSON.parse(msg); msg = (j.error && (j.error.message || j.error)) || msg; } catch(e){}
+      throw new Error(`HTTP ${r.status}: ${msg}`);
+    }
+    const rd = r.body.getReader(), dec = new TextDecoder(); let buf = "";
+    for (;;) {
+      const {value, done} = await rd.read(); if (done) break;
+      buf += dec.decode(value, {stream:true});
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, i).trim(); buf = buf.slice(i+1);
+        if (!line.startsWith("data:")) continue;
+        const d = line.slice(5).trim(); if (d === "[DONE]") continue;
+        let j; try { j = JSON.parse(d); } catch(e) { continue; }
+        if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
+        if (j.timings) timings = j.timings;
+        if (j.usage) usage = j.usage;
+        const ch = j.choices && j.choices[0]; if (!ch) continue;
+        if (ch.finish_reason) finish = ch.finish_reason;
+        const dl = ch.delta || {};
+        if (dl.reasoning_content) { reasoning += dl.reasoning_content; nTok++; tFirst ||= performance.now(); }
+        if (dl.content) {
+          nTok++; tFirst ||= performance.now();
+          let c = dl.content;
+          // fallback for servers that leave <think> in content
+          if (!reply && !inThinkTag && c.trimStart().startsWith("<think>")) { inThinkTag = true; c = c.trimStart().slice(7); }
+          if (inThinkTag) { const e = c.indexOf("</think>"); if (e >= 0) { reasoning += c.slice(0, e); c = c.slice(e+8); inThinkTag = false; } else { reasoning += c; c = ""; } }
+          reply += c;
+        }
+        if (!raf) raf = requestAnimationFrame(paint);
+      }
+    }
+  } catch (e) {
+    if (e.name === "AbortError") finish = "stopped";
+    else { body.classList.remove("cursor"); paint(); m.appendChild(el("div", "msg sys err", esc(e.message))); }
+  }
+  cancelAnimationFrame(raf); paint(); body.classList.remove("cursor");
+  if (reasoning && !reply) think.open = true;
+  if (reply || reasoning) history.push({role:"assistant", content: reply});
+  else history.pop();
+  // stat line
+  let pp = timings && timings.prompt_per_second, tg = timings && timings.predicted_per_second;
+  if (!tg && tFirst && nTok > 1) tg = (nTok-1) / ((performance.now() - tFirst)/1000);
+  const used = timings ? (timings.cache_n||0) + (timings.prompt_n||0) + (timings.predicted_n||0) : usage ? usage.total_tokens : null;
+  const ctx = lastCtx;
+  const parts = [];
+  if (pp) parts.push(`pp <b>${pp.toFixed(1)}</b> t/s`);
+  if (tg) parts.push(`tg <b>${tg.toFixed(1)}</b> t/s`);
+  if (used != null) parts.push(`ctx ${used.toLocaleString()}${ctx ? " / " + ctx.toLocaleString() : ""}`);
+  if (finish && finish !== "stop") parts.push(finish);
+  parts.push(((performance.now() - t0)/1000).toFixed(1) + "s");
+  stat.innerHTML = parts.join(" · ");
+  if (pp) { $("ppT").textContent = pp >= 100 ? pp.toFixed(0) : pp.toFixed(1); $("ppT").classList.remove("na"); }
+  if (tg) { $("tgT").textContent = tg.toFixed(1); $("tgT").classList.remove("na"); }
+  chatBusy = false; abortCtl = null; setSend(); render(); scroll();
+}
+function setSend(){ const b = $("sendBtn"); b.textContent = chatBusy ? "stop" : "send"; b.classList.toggle("stop", chatBusy); }
+
+/* ---------------- composer, images ---------------- */
+const ta = $("prompt");
+function autosize(){ ta.style.height = "auto"; ta.style.height = Math.min(180, ta.scrollHeight + 2) + "px"; }
+ta.addEventListener("input", autosize);
+ta.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
+$("sendBtn").onclick = send;
+$("fileBtn").onclick = () => $("file").click();
+$("file").onchange = e => { addFiles(e.target.files); e.target.value = ""; };
+function renderAttach(){
+  const a = $("attach"); a.innerHTML = "";
+  pending.forEach((u, i) => { const d = el("div", "th"); const im = new Image(); im.src = u; const x = el("button", "", "×"); x.title = "remove"; x.onclick = () => { pending.splice(i,1); renderAttach(); }; d.append(im, x); a.appendChild(d); });
+}
+function readImage(f){
+  return new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onerror = () => rej(fr.error);
+    fr.onload = () => {
+      const url = fr.result, im = new Image();
+      im.onload = () => {
+        const MAX = 1600, s = Math.min(1, MAX / Math.max(im.width, im.height));
+        if (s >= 1 && f.size < 4e6) return res(url);
+        const c = document.createElement("canvas"); c.width = Math.round(im.width*s); c.height = Math.round(im.height*s);
+        c.getContext("2d").drawImage(im, 0, 0, c.width, c.height); res(c.toDataURL("image/jpeg", 0.9));
+      };
+      im.onerror = () => rej(new Error("not an image"));
+      im.src = url;
+    };
+    fr.readAsDataURL(f);
+  });
+}
+async function addFiles(files){
+  for (const f of files) {
+    if (!f.type.startsWith("image/")) { sys(`skipped ${f.name}: not an image`, true); continue; }
+    try { pending.push(await readImage(f)); } catch(e) { sys(`could not read ${f.name}`, true); }
+  }
+  renderAttach();
+}
+ta.addEventListener("paste", e => {
+  const files = [...(e.clipboardData && e.clipboardData.items || [])].filter(i => i.kind === "file").map(i => i.getAsFile()).filter(Boolean);
+  if (files.length) { e.preventDefault(); addFiles(files); }
+});
+const cp = $("chatPane");
+cp.addEventListener("dragover", e => { e.preventDefault(); cp.classList.add("drag"); });
+cp.addEventListener("dragleave", e => { if (!cp.contains(e.relatedTarget)) cp.classList.remove("drag"); });
+cp.addEventListener("drop", e => { e.preventDefault(); cp.classList.remove("drag"); addFiles(e.dataTransfer.files); });
+ta.addEventListener("focus", () => cp.classList.add("focus"));
+ta.addEventListener("blur", () => cp.classList.remove("focus"));
+
+/* ---------------- scale with the window ----------------
+   The layout is designed at 1400x920. Bigger windows (fullscreen, 1440p, 4K) zoom everything up evenly;
+   the panes still stretch to fill any leftover width, so nothing is letterboxed. Ctrl +/- still works on top. */
+let uiScale = 1;
+function fitScale(){
+  const s = Math.min(innerWidth / 1400, innerHeight / 920);
+  uiScale = Math.max(0.75, Math.min(3, s));
+  document.documentElement.style.zoom = uiScale;
+}
+addEventListener("resize", fitScale);
+fitScale();
+
+/* ---------------- workspaces: 1:llm 2:code 3:web ---------------- */
+let ws = "1", wsTimer = 0;
+function showWs(n){
+  n = String(n); if (!["1","2","3"].includes(n)) n = "1";
+  ws = n; store.set("rt.ws", n);
+  document.querySelectorAll("#tags span").forEach(t => { const on = t.dataset.ws === n; t.classList.toggle("on", on); t.setAttribute("aria-selected", on); });
+  for (const k of ["1","2","3"]) $("ws" + k).hidden = k !== n;
+  clearTimeout(wsTimer);
+  if (n === "1") { measureBrain(); brain.dirty = true; ta.focus(); }
+  else refreshWs();
+}
+async function refreshWs(){
+  clearTimeout(wsTimer);
+  try {
+    if (ws === "2") renderCode(await (await fetch("/api/code", {cache:"no-store"})).json());
+    if (ws === "3") renderWeb(await (await fetch("/api/web", {cache:"no-store"})).json());
+  } catch (e) {}
+  if (ws !== "1") wsTimer = setTimeout(refreshWs, document.hidden ? 15000 : 4000);
+}
+document.querySelectorAll("#tags span").forEach(t => {
+  t.onclick = () => showWs(t.dataset.ws);
+  t.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showWs(t.dataset.ws); } };
+});
+addEventListener("keydown", e => { if (e.altKey && !e.ctrlKey && ["1","2","3"].includes(e.key)) { e.preventDefault(); showWs(e.key); } });
+
+async function postJSON(url, obj){
+  const r = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(obj)});
+  let j = {}; try { j = await r.json(); } catch(e){}
+  return {ok: r.ok && j.ok !== false, msg: j.msg || j.error || (r.ok ? "" : "HTTP " + r.status)};
+}
+function flash(el, text, bad){ if (!el) return; el.textContent = text; el.style.color = bad ? "var(--crit)" : "var(--ok)"; setTimeout(() => { el.textContent = ""; }, 5000); }
+function copyRow(label, value, display){
+  return `<span class="k">${esc(label)}</span><span class="v" title="${esc(value)}">${esc(display ?? value)}</span><button class="cpv" data-v="${esc(value)}">copy</button>`;
+}
+document.addEventListener("click", e => { const b = e.target.closest(".cpv"); if (b) copyText(b.dataset.v, b); });
+const stateDot = st => st === "ON" ? "on" : st === "LOADING" || st === "ASLEEP" ? "warn" : "";
+
+/* 2:code */
+let codeData = null;
+function renderCode(d){
+  codeData = d;
+  for (const k of ["pc", "laptop"]) {
+    const s = d.setups[k], m = s.model || {}, el = $("setup-" + k).querySelector(".sbody");
+    const usable = k === "pc" ? d.installed : d.installed && d.laptop_setup;
+    const mstate = m.state || "OFF";
+    const masked = k === "pc" && s.cline.api_key ? s.cline.api_key.slice(0,4) + "•".repeat(12) + s.cline.api_key.slice(-4) : s.cline.api_key;
+    el.innerHTML = `
+      <div class="shead"><span class="dot ${s.running ? "on" : ""}"></span><span class="big">${esc(s.label)}</span>
+        <span class="sub">${s.running ? "running" : "not running"}</span><span class="grow"></span>
+        <button class="btn-main go" data-launch="${k}" ${usable ? "" : "disabled"}>${s.running ? "new window" : "launch"}</button></div>
+      <div class="kvt">
+        <span class="k">model</span><span class="v"><span class="dot ${stateDot(mstate)}"></span>${esc(m.name || (k === "laptop" ? (m.note || "–") : "off"))}</span><span></span>
+        <span class="k">state</span><span class="v st-${mstate}">${mstate.toLowerCase()}${k === "laptop" ? " · via PAIR" : " · port 8090"}</span><span></span>
+      </div>
+      <div class="sect">cline settings</div>
+      <div class="kvt">
+        ${copyRow("provider", s.cline.provider)}
+        ${copyRow("base url", s.cline.base_url)}
+        ${copyRow("api key", s.cline.api_key, masked)}
+        ${copyRow("model id", s.cline.model_id, String(s.cline.model_id).split(/[\\/]/).pop())}
+      </div>
+      ${mstate === "OFF" ? `<div class="note">The ${k === "pc" ? "PC" : "laptop"} model is off, so Cline in this window will get connection errors. Turn it on in <b>1:llm</b>.</div>` : ""}
+      ${!usable ? `<div class="note">${!d.installed ? "VS Code's <b>code</b> command wasn't found." : "start-vscode-laptop.bat is missing."}</div>` : ""}`;
+  }
+  const r = $("recent");
+  r.innerHTML = d.recent.length ? d.recent.map(p => {
+    const name = p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || p;
+    return `<div class="rec"><span class="name">${esc(name)}</span><span class="path" title="${esc(p)}">&lrm;${esc(p)}</span>
+      <button data-openp="pc" data-p="${esc(p)}">pc</button><button data-openp="laptop" data-p="${esc(p)}">laptop</button><button data-openp="both" data-p="${esc(p)}" title="both agents at once, laptop on its own worktree">both</button>
+      <button class="x" data-forget="${esc(p)}" title="remove from list">×</button></div>`;
+  }).join("") : `<div class="hint">Folders you open from here show up in this list.</div>`;
+  renderRoutes();
+}
+function renderRoutes(){
+  if (!S) return;
+  const pcM = codeData ? codeData.setups.pc.model : S.model, lapM = codeData ? codeData.setups.laptop.model : {};
+  const c = st => st === "ON" ? "ok" : st === "LOADING" || st === "ASLEEP" ? "mid" : "bad";
+  const w = webData;
+  const lines = [
+    `<span class="n">VS Code</span>          ─ cline ─▶ <span class="d">127.0.0.1:8090</span> ─▶ <span class="${c(pcM.state)}">llama-server · ${esc((pcM.key || "off"))}</span>`,
+    `<span class="n">VS Code (laptop)</span> ─ cline ─▶ <span class="d">127.0.0.1:8080</span> ─▶ PAIR ─▶ <span class="${S.laptop_online ? c(lapM.state || "OFF") : "bad"}">${esc(S.laptop_name || "laptop")}${S.laptop_online ? "" : " (offline)"}</span>`,
+    `<span class="n">iPhone</span>           ─ tailscale ─▶ <span class="d">${esc(w && w.self ? w.self.dns.split(".")[0] + ".ts.net" : "your-pc.ts.net")}</span> ─▶ <span class="${w && !w.serve.on ? "bad" : c(pcM.state)}">8090</span>`,
+    `<span class="n">this window</span>      ─ chat ─▶ <span class="d">${S.target === "laptop" ? "PAIR 8080" : "8090"}</span> <span class="d">(1:llm "run on")</span>`,
+  ];
+  $("routes").innerHTML = lines.join("\n") + `\n\n<span class="d">green = up · amber = asleep/loading · red = off</span>`;
+}
+async function openCode(which, path){
+  const res = which === "both" ? await postJSON("/api/code/both", {path: path || ""})
+                               : await postJSON("/api/code/open", {which, path: path || ""});
+  sysToast(res.msg || res.error || (res.ok ? "opening" : "failed"), !res.ok, which === "both" ? 9000 : 4000);
+  if (res.ok) setTimeout(refreshWs, 1500);
+}
+let toastT = 0;
+function sysToast(text, bad, ms){
+  let t = $("toast");
+  if (!t) { t = el("div", ""); t.id = "toast"; document.body.appendChild(t);
+    Object.assign(t.style, {position:"fixed", right:"16px", bottom:"16px", padding:"6px 12px", background:"var(--bg2)", border:"1px solid var(--border)", zIndex:9}); }
+  t.textContent = text; t.style.color = bad ? "var(--crit)" : "var(--ok)"; t.style.borderColor = bad ? "var(--crit)" : "var(--ok)"; t.hidden = false;
+  clearTimeout(toastT); toastT = setTimeout(() => { t.hidden = true; }, ms || 4000);
+}
+$("ws2").addEventListener("click", async e => {
+  const L = e.target.closest("[data-launch]"); if (L) return openCode(L.dataset.launch, "");
+  const O = e.target.closest("[data-open]");
+  if (O) { const p = $("projPath").value.trim(); if (!p) return sysToast("paste a folder path first", true); await openCode(O.dataset.open, p); $("projPath").value = ""; return; }
+  const P = e.target.closest("[data-openp]"); if (P) return openCode(P.dataset.openp, P.dataset.p);
+  const F = e.target.closest("[data-forget]"); if (F) { await postJSON("/api/code/forget", {path: F.dataset.forget}); refreshWs(); }
+});
+$("projPath").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); $("ws2").querySelector('[data-open="pc"]').click(); } });
+
+/* 3:web */
+let webData = null, serveBusy = false;
+function renderWeb(d){
+  webData = d;
+  const p = $("phone");
+  if (!d.installed || d.error) { p.innerHTML = `<div class="note">${esc(d.error || "Tailscale isn't installed")}</div>`; $("tailnet").textContent = ""; return; }
+  const m = d.model || {}, on = d.serve.on, up = m.state === "ON" || m.state === "ASLEEP";
+  const masked = d.api_key ? d.api_key.slice(0,4) + "•".repeat(12) + d.api_key.slice(-4) : "(none)";
+  p.innerHTML = `
+    <div class="shead"><span class="dot ${!d.running ? "crit" : on ? (up ? "on" : "warn") : ""}"></span>
+      <span class="big">${!d.running ? "tailscale is off" : on ? (up ? "phone access is on" : "on, but the model is off") : "phone access is off"}</span>
+      <span class="grow"></span>
+      <button class="btn-main ${on ? "stop" : "go"}" id="serveBtn" ${d.running && !serveBusy ? "" : "disabled"}>${serveBusy ? "…" : on ? "turn off" : "turn on"}</button></div>
+    <div class="hint">address</div>
+    <div class="urlbox">${esc(d.serve.url || "–")}</div>
+    <div class="kvt">
+      ${copyRow("address", d.serve.url || "")}
+      ${copyRow("api key", d.api_key || "", masked)}
+      <span class="k">serves</span><span class="v">${esc(d.serve.target || "127.0.0.1:8090")} · this pc's model</span><span></span>
+      <span class="k">model</span><span class="v"><span class="dot ${stateDot(m.state || "OFF")}"></span>${esc(m.name || "off")}</span><span></span>
+      <span class="k">this pc</span><span class="v">${esc(d.self ? d.self.ip + " · " + d.self.dns : "–")}</span><span></span>
+    </div>
+    ${on && !up ? `<div class="note">The phone will get errors until the PC model is on. Turn it on in <b>1:llm</b> (run on: this pc).</div>` : ""}
+    ${!on && d.running ? `<div class="note">Your phone can't reach the model right now. <b>Turn on</b> shares it with your tailnet only.</div>` : ""}
+    <div class="hint" style="margin-top:8px">The phone always uses this PC's model (port 8090), not the laptop.</div>`;
+  $("tailnetName").textContent = d.self ? "· " + d.self.dns.split(".").slice(1).join(".") : "";
+  const rows = [d.self ? {...d.self, me: true} : null, ...d.peers].filter(Boolean);
+  $("tailnet").innerHTML = `<table class="devs">${rows.map(r => `<tr class="${r.online ? "" : "off"} ${r.me ? "me" : ""}">
+    <td><span class="dot ${r.online ? "on" : ""}"></span>${esc(r.name || "?")}${r.me ? " <span class='hint'>(this pc)</span>" : ""}</td>
+    <td class="os">${esc(r.os || "")}</td><td class="ip">${esc(r.ip || "")}</td><td>${r.online ? "online" : "offline"}</td></tr>`).join("")}</table>
+    <div class="hint" style="margin-top:8px">Devices signed in to your Tailscale account. Your laptop talks to this PC through PAIR on your home network, not Tailscale, so it's fine if it isn't listed.</div>`;
+  renderRoutes();
+}
+$("ws3").addEventListener("click", async e => {
+  if (!e.target.closest("#serveBtn") || serveBusy || !webData) return;
+  const turnOn = !webData.serve.on;
+  if (!turnOn && !confirm("Turn off phone access? Your phone won't be able to reach the model until you turn it back on.")) return;
+  serveBusy = true; renderWeb(webData);
+  const res = await postJSON("/api/web/serve", {action: turnOn ? "on" : "off"});
+  serveBusy = false; sysToast(res.msg, !res.ok); refreshWs();
+});
+
+/* ---------------- boot ---------------- */
+$("themeBtn").onclick = cycleTheme;
+setTheme(store.get("rt.theme") || "tokyo");
+makeSegs();
+buildBrain(); measureBrain(); brain.dirty = true;
+new ResizeObserver(() => { measureBrain(); brain.dirty = true; if (brain.mode === "off" || reduced.matches) renderBrain(false); drawSparks(); }).observe($("brainWrap"));
+renderBrain(false);
+requestAnimationFrame(brainLoop);
+loadCline();
+poll();
+showWs((location.hash.match(/ws=([123])/) || [])[1] || store.get("rt.ws") || "1");
+sys("command center · /help for commands");
+ta.focus();
+</script>
+</body>
+</html>
