@@ -25,6 +25,7 @@ import tokens  # noqa: E402  (tokens burned per machine)
 import chats  # noqa: E402  (saved chat history)
 import memory  # noqa: E402  (long-term memory shared by every model)
 import urllib.parse  # noqa: E402
+import collections  # noqa: E402
 
 PORT = 8099
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -563,7 +564,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     # From the phone: chat, saved chats, model on/off, run-on target and stats. Not VS Code, not the API key,
     # and not phone access itself (turning that off from the phone would lock the phone out).
     REMOTE_BLOCKED = ("/api/code", "/api/cline", "/api/web/serve", "/api/memory/location", "/api/memory/import",
-                      "/api/memory/import-file")
+                      "/api/memory/import-file", "/api/clinecc", "/cline")
 
     def remote_blocked(self, path):
         if self.remote and any(path == p or path.startswith(p + "/") for p in self.REMOTE_BLOCKED):
@@ -597,6 +598,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_json(200, dict(stats(), remote=self.remote, memory=memory.M.brief()))
         elif path == "/api/memory":
             self.send_json(200, memory.M.status())
+        elif path == "/api/clinecc":
+            self.send_json(200, {"route": workspaces.cline_state(), "memory": settings.get("cline_memory", True),
+                                 "learn": settings.get("cline_learn", True), "log": list(cline_log)[::-1],
+                                 "memory_on": memory.M.on and memory.M.ok()})
+        elif path.startswith("/cline/") and path.endswith("/v1/models"):
+            return self.cline_models(path.split("/")[2])
         elif path == "/api/memory/list":
             qs = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
             one = lambda k, d="": (qs.get(k) or [d])[0]
@@ -637,10 +644,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif path == "/api/cline":
             if target["v"] == "laptop":
                 self.send_json(200, {"provider": "OpenAI Compatible", "target": "laptop",
-                                     "base_url": f"http://{PAIR[0]}:{PAIR[1]}/v1", "api_key": "any"})
+                                     "base_url": workspaces.cline_url("laptop", workspaces.ROUTE["laptop"]), "api_key": "any"})
             else:
                 self.send_json(200, {"provider": "OpenAI Compatible", "target": "local",
-                                     "base_url": f"http://{LLAMA[0]}:{LLAMA[1]}/v1", "api_key": api_key()})
+                                     "base_url": workspaces.cline_url("pc", workspaces.ROUTE["pc"]), "api_key": api_key()})
         else:
             self.send_json(404, {"error": "not found"})
 
@@ -670,6 +677,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send_json(400, {"error": "expected a JSON object"})
         if path.startswith("/api/memory/"):
             return self.memory_post(path[len("/api/memory/"):], data)
+        if path.startswith("/cline/") and path.endswith("/v1/chat/completions"):
+            return self.cline_chat(path.split("/")[2], data)
+        if path == "/api/clinecc/route":
+            ok, msg = workspaces.cline_route(data.get("which"), bool(data.get("through")))
+            if ok:
+                settings.setdefault("cline_route", {})[data["which"]] = bool(data.get("through"))
+                save_settings()
+            return self.send_json(200 if ok else 409, {"ok": ok, "msg": msg})
+        if path == "/api/clinecc/settings":
+            for k in ("memory", "learn"):
+                if k in data:
+                    settings["cline_" + k] = bool(data[k])
+            save_settings()
+            return self.send_json(200, {"ok": True})
         if path == "/api/chats/save":
             ok, msg = chats.save_chat(data)
             return self.send_json(200 if ok else 400, {"ok": ok, "msg": msg})
@@ -719,16 +740,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             use_mem = not data.pop("no_memory", False)
             mem_info = {}
             if use_mem and isinstance(data.get("messages"), list) and data["messages"]:
+                cid = chat_id if isinstance(chat_id, str) else None
                 try:
-                    sys_txt, mem_info = memory.M.recall(data["messages"], chat_id if isinstance(chat_id, str) else None)
+                    sys_txt, mem_info = memory.M.recall(data["messages"], cid)
                 except Exception:
                     sys_txt = None
-                if sys_txt:
-                    first = data["messages"][0]
-                    if isinstance(first, dict) and first.get("role") == "system" and isinstance(first.get("content"), str):
-                        data["messages"] = [dict(first, content=sys_txt + "\n\n" + first["content"])] + data["messages"][1:]
-                    else:
-                        data["messages"] = [{"role": "system", "content": sys_txt}] + data["messages"]
+                data["messages"] = memory.M.chat_inject(data["messages"], cid, sys_txt)
             if target["v"] == "laptop":
                 mid = laptop_info()["id"]
                 if not mid:
@@ -788,6 +805,60 @@ class Handler(http.server.BaseHTTPRequestHandler):
         ok, msg = M.import_file(tmp, learn, cleanup=True)
         return self.send_json(200 if ok else 409, {"ok": ok, "msg": msg})
 
+    def cline_chat(self, which, data):
+        """Cline -> (memory) -> the model that VS Code is set up for: "pc" = this PC's llama-server, "laptop" = PAIR.
+        Memory is recalled once per task and put in the task message, so every step of the task sends the same
+        prompt prefix and llama-server's prompt cache keeps working."""
+        if which not in ("pc", "laptop"):
+            return self.send_json(404, {"error": "not found"})
+        info, task, text = {}, "", None
+        if settings.get("cline_memory", True) and isinstance(data.get("messages"), list):
+            try:
+                text, info, task = memory.M.recall_task(data["messages"])
+            except Exception:
+                text = None
+            if text:
+                data["messages"] = memory.inject(data["messages"], text, "first")
+        else:
+            task = memory.cline_task(data.get("messages") or [])
+        entry = {"t": time.time(), "which": which, "task": task[:200], "mem": len(info.get("ids", [])),
+                 "chunks": info.get("chunks", 0), "status": "…", "steps": 1}
+        # one row per task: later steps of the same task update it instead of adding rows
+        prev = next((e for e in reversed(cline_log) if e["task"] == entry["task"] and e["which"] == which
+                     and time.time() - e["t"] < 3600), None)
+        if prev:
+            prev.update(t=time.time(), status="…", steps=prev.get("steps", 1) + 1)
+            entry = prev
+        else:
+            cline_log.append(entry)
+        if which == "laptop":
+            mid = laptop_info()["id"]
+            if not mid:
+                entry["status"] = "laptop offline"
+                return self.send_json(502, {"error": {"message": "no laptop model listed by PAIR. Is the laptop on?"}})
+            data["model"] = mid
+            return self.proxy_chat(json.dumps(data).encode(), PAIR, {}, info, entry)
+        return self.proxy_chat(json.dumps(data).encode(), LLAMA, {"Authorization": "Bearer " + api_key()}, info, entry)
+
+    def cline_models(self, which):
+        if which not in ("pc", "laptop"):
+            return self.send_json(404, {"error": "not found"})
+        host, auth = (PAIR, {}) if which == "laptop" else (LLAMA, {"Authorization": "Bearer " + api_key()})
+        c = http.client.HTTPConnection(*host, timeout=5)
+        try:
+            c.request("GET", "/v1/models", headers=auth)
+            r = c.getresponse()
+            body = r.read()
+        except OSError:
+            return self.send_json(502, {"error": {"message": "model server not reachable"}})
+        finally:
+            c.close()
+        self.send_response(r.status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def memory_post(self, what, data):
         M = memory.M
         if what == "location":
@@ -821,7 +892,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send_json(200, {"ok": bool(n), "msg": "added %d memories%s" % (n, ", tidying them up in the background" if n and M.learn_on else "")})
         return self.send_json(404, {"error": "not found"})
 
-    def proxy_chat(self, body, upstream, auth, mem_info=None):
+    def proxy_chat(self, body, upstream, auth, mem_info=None, entry=None):
         global active_streams
         up = http.client.HTTPConnection(*upstream, timeout=900)
         try:
@@ -830,7 +901,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             resp = up.getresponse()
         except OSError as e:
             up.close()
+            if entry is not None:
+                entry["status"] = "model off"
             return self.send_json(502, {"error": f"model server not reachable on {upstream[1]} ({e.__class__.__name__}). Is it on?"})
+        t0, tail = time.time(), b""
         with lock:
             active_streams += 1
         done = threading.Event()
@@ -866,6 +940,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 chunk = resp.read1(65536)
                 if not chunk:
                     break
+                if entry is not None:
+                    tail = (tail + chunk)[-16384:]
                 self.wfile.write(b"%x\r\n%s\r\n" % (len(chunk), chunk))
             self.wfile.write(b"0\r\n\r\n")
         except (OSError, ValueError, http.client.HTTPException, AttributeError):
@@ -873,6 +949,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         finally:
             done.set()
             up.close()
+            if entry is not None:
+                entry.update(status=resp.status, secs=round(time.time() - t0, 1), **stream_stats(tail))
             with lock:
                 active_streams -= 1
             touch()
@@ -885,6 +963,29 @@ class Server(http.server.ThreadingHTTPServer):
     def server_bind(self):
         self.socket.setsockopt(socket.SOL_SOCKET, getattr(socket, "SO_EXCLUSIVEADDRUSE", socket.SO_REUSEADDR), 1)
         super().server_bind()
+
+
+cline_log = collections.deque(maxlen=80)
+
+
+def stream_stats(tail):
+    """Token counts from the last events of a streamed reply (llama.cpp sends timings; others send usage)."""
+    out = {}
+    for line in tail.split(b"\n")[::-1]:
+        line = line.strip()
+        if not line.startswith(b"data:") or line.endswith(b"[DONE]"):
+            continue
+        try:
+            j = json.loads(line[5:])
+        except ValueError:
+            continue
+        t, u = j.get("timings") or {}, j.get("usage") or {}
+        if t:
+            out.update(prompt=t.get("prompt_n", 0) + t.get("cache_n", 0), cached=t.get("cache_n", 0), out=t.get("predicted_n", 0))
+            break
+        if u and "prompt" not in out:
+            out.update(prompt=u.get("prompt_tokens", 0), out=u.get("completion_tokens", 0))
+    return out
 
 
 def llm_json(messages, schema, max_tokens):
@@ -949,6 +1050,8 @@ def main():
     threading.Thread(target=idle_watch, daemon=True).start()
     threading.Thread(target=laptop_watch, daemon=True).start()
     global token_watch
+    for w in ("pc", "laptop"):
+        workspaces.ROUTE[w] = bool((settings.get("cline_route") or {}).get(w))
     chats.ON_SAVE, chats.ON_DELETE = (lambda c: memory.M.note_chat(c)), (lambda cid: memory.M.forget_chat(cid))
     memory.M.start(settings, save_settings, ROOT, os.path.join(ROOT, "llama.cpp", "llama-server.exe"),
                    llm_json, lambda: active_streams > 0 or switching["on"], chats)

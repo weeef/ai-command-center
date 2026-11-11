@@ -19,6 +19,7 @@ How it works:
             facts out of the exchange: add new memories, update ones that changed, delete ones proven wrong.
 """
 import array
+import hashlib
 import http.client
 import json
 import os
@@ -43,6 +44,7 @@ QUERY_INSTRUCT = ("Instruct: Given a message from the user, retrieve memories ab
                   "snippets that help answer it\nQuery: ")
 # Scores are cosine similarity for the embedding model. Below these, a match is noise.
 MEM_MIN, CHUNK_MIN = 0.36, 0.45
+MAX_BLOCK = 6000  # characters (~1,500 tokens) of recalled memory per request, at most
 README = """This folder is the long-term memory of the local AI command center.
 
 memory.db  - every memory (plain text) plus the search index. Any model can use it.
@@ -461,6 +463,8 @@ class Memory:
         self.chats_mod = None
         self.stop = threading.Event()
         self.job = {}
+        self._tasks = {}   # Cline task -> recalled memory, so a task's steps all get the same block
+        self._blocks = {}  # chat message -> the memory block it was sent with (see chat_inject)
 
     # ---- setup
     def start(self, settings, save_settings, root, llama_exe, llm, busy, chats_mod):
@@ -607,7 +611,7 @@ class Memory:
         self.last_recall = [m["id"] for m in mems]
         if not mems and not chunks:
             return None, {"ids": [], "chunks": 0}
-        lines = ["# Long-term memory",
+        lines = ["# Long-term memory (added automatically; the user didn't type this part)",
                  "You have a long-term memory shared across all of the user's conversations and models. "
                  "Today is %s. Use what is relevant, naturally, without announcing it; ignore what isn't. "
                  "If a memory conflicts with what the user says now, trust the user." % time.strftime("%A %Y-%m-%d")]
@@ -619,7 +623,64 @@ class Memory:
             lines.append("\n## Possibly related earlier conversations")
             for chat, ts, title, text in chunks:
                 lines.append("--- %s · \"%s\"\n%s" % (time.strftime("%Y-%m-%d", time.localtime(ts or 0)), title or "chat", text))
-        return "\n".join(lines), {"ids": [m["id"] for m in mems], "chunks": len(chunks)}
+        text = "\n".join(lines)
+        if len(text) > MAX_BLOCK:  # keep the token cost bounded however much memory there is
+            text = text[:MAX_BLOCK].rsplit("\n", 1)[0] + "\n…"
+        return text, {"ids": [m["id"] for m in mems], "chunks": len(chunks), "chars": len(text)}
+
+    def chat_inject(self, messages, chat_id, text):
+        """Chat: the newest user message gets this turn's memory block, and every earlier user message gets back the
+        exact block it was first sent with. The window keeps its history without the blocks, so without this the
+        conversation would differ from what the model server cached and it would re-read the whole chat each turn."""
+        users = [i for i, m in enumerate(messages) if isinstance(m, dict) and m.get("role") == "user"]
+        if not users:
+            return messages
+
+        def key(i):
+            raw = "%s|%s" % (chat_id or "", json.dumps(messages[i].get("content"), sort_keys=True))
+            return hashlib.sha1(raw.encode("utf-8", "replace")).hexdigest()
+
+        out = messages
+        for i in users[:-1]:
+            b = self._blocks.get(key(i))
+            if b:
+                out = _inject_at(out, i, b)
+        if text:
+            self._blocks[key(users[-1])] = text
+            while len(self._blocks) > 5000:
+                self._blocks.pop(next(iter(self._blocks)))
+            out = _inject_at(out, users[-1], text)
+        return out
+
+    # ---- Cline: recall once per task, so every step of the task sends the identical prompt prefix
+    def recall_task(self, messages):
+        task = cline_task(messages)
+        if not task or not (self.on and self.ok()):
+            return None, {}, task
+        key = hashlib.sha1(task.encode("utf-8", "replace")).hexdigest()
+        hit = self._tasks.get(key)
+        if hit:
+            return hit[0], dict(hit[1], cached=True), task
+        text, info = self.recall([{"role": "user", "content": task}], None)
+        self._tasks[key] = (text, info)
+        while len(self._tasks) > 200:
+            self._tasks.pop(next(iter(self._tasks)))
+        if self.settings.get("cline_learn", True) and self.learn_on:
+            self._note_cline_task(task)
+        return text, info, task
+
+    def _note_cline_task(self, task):
+        """What you ask Cline is worth learning from too: one 'chat' per day collects the day's tasks."""
+        if not self.chats_mod:
+            return
+        cid = "cline-" + time.strftime("%Y%m%d")
+        chat = self.chats_mod.get_chat(cid) or {"id": cid, "title": "Cline · " + time.strftime("%Y-%m-%d"),
+                                                 "created": _now(), "messages": []}
+        chat["messages"].append({"role": "user", "content": task[:4000]})
+        chat["messages"].append({"role": "assistant", "content": "(task handed to Cline, the coding agent in VS Code)"})
+        chat["updated"] = _now()
+        self.chats_mod.write_raw(chat)
+        self.note_chat(chat)
 
     # ---- chats feed memory
     def note_chat(self, chat, learn=True):
@@ -910,6 +971,39 @@ def _text(c):
     if isinstance(c, list):
         return " ".join(p.get("text", "") for p in c if isinstance(p, dict) and p.get("type") == "text")
     return ""
+
+
+def cline_task(messages):
+    """The user's request in a Cline conversation: the <task> in its first user message."""
+    for m in messages or []:
+        if isinstance(m, dict) and m.get("role") == "user":
+            t = _text(m.get("content"))
+            g = re.search(r"<task>\s*(.*?)\s*</task>", t, re.S)
+            t = g.group(1) if g else re.split(r"<environment_details>", t)[0]
+            return t.strip()[:4000]
+    return ""
+
+
+def inject(messages, text, where="last"):
+    """Put the memory block at the start of the last (chat) or first (Cline task) user message. Everything before
+    that message stays byte-identical, so the model server's prompt cache still covers it."""
+    idx = [i for i, m in enumerate(messages) if isinstance(m, dict) and m.get("role") == "user"]
+    if not idx:
+        return messages
+    return _inject_at(messages, idx[-1] if where == "last" else idx[0], text)
+
+
+def _inject_at(messages, i, text):
+    block = "<memory>\n%s\n</memory>" % text
+    m = dict(messages[i])
+    c = m.get("content")
+    if isinstance(c, list):
+        m["content"] = [{"type": "text", "text": block}] + c
+    else:
+        m["content"] = block + "\n\n" + (c or "")
+    out = list(messages)
+    out[i] = m
+    return out
 
 
 def _exchanges(msgs):

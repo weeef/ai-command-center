@@ -63,6 +63,16 @@ One long-term memory shared by every model (standard, uncensored, the laptop, an
   becomes a chat (ids `gpt-…` / `cl-…`, so re-imports skip duplicates), searchable immediately; learning from them runs
   in the background, batched, after live chats. Saved memories can be pasted one per line.
 
+## Cline through the command center (5:cline)
+
+Each VS Code's Cline can point at `http://127.0.0.1:8099/cline/pc/v1` (this PC's model) or `/cline/laptop/v1`
+(the laptop via PAIR) instead of the model server. The command center then adds long-term memory and logs each task.
+Memory is recalled once per task and placed in the task message, so every step sends the same prompt prefix and
+llama-server's prompt cache keeps working (tested: step 2 reused 4,705 of 4,736 tokens). In chat, each turn's memory
+block goes into the newest message and earlier blocks are replayed byte-identical, so the history stays cached too.
+"route through here" / "go direct" rewrites Cline's settings (VS Code must be closed; the original is kept as
+`globalState.json.bak-command-center`). Routed Cline needs the command center to be open.
+
 ## Tokens burned
 
 With `--metrics` (already in `start-llm.bat`) the numbers are exact: llama-server's own

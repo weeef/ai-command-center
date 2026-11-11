@@ -27,6 +27,8 @@ LAPTOP_BRANCH = "cline-laptop"
 TAILSCALE = shutil.which("tailscale") or r"C:\Program Files\Tailscale\tailscale.exe"
 SERVE_TARGET = "http://127.0.0.1:8099"
 MAX_RECENT = 8
+CC_URL = "http://127.0.0.1:8099/cline/%s/v1"   # through the command center: memory + the request log
+ROUTE = {"pc": False, "laptop": False}          # set from settings.json by the server
 
 
 def run(args, timeout=10):
@@ -89,13 +91,54 @@ def cline_points_to(data_dir, expect=None):
 
 
 def pin_laptop_cline(model_id=None):
-    """Point the laptop VS Code's Cline at the laptop (PAIR, :8080) for both plan and act mode.
+    """Point the laptop VS Code's Cline at the laptop for both plan and act mode: through the command center if
+    that route is on (5:cline), else straight to PAIR on :8080.
     Only while that VS Code is closed: a running Cline keeps its settings in memory and would write them back."""
-    d = LAPTOP_CLINE
+    return _point_cline(LAPTOP_CLINE, CC_URL % "laptop" if ROUTE["laptop"] else LAPTOP_URL, model_id)
+
+
+def cline_url(which, through):
+    return CC_URL % which if through else (PC_URL if which == "pc" else LAPTOP_URL)
+
+
+def cline_route(which, through):
+    """Switch one VS Code's Cline between the command center (memory) and its model server directly."""
+    if which not in ("pc", "laptop"):
+        return False, "which must be pc or laptop"
+    _code_cache["t"] = 0
+    if vscode_running()[which]:
+        return False, ("close the %s VS Code first: Cline keeps its settings in memory and would write the old "
+                       "address back when it closes" % ("main" if which == "pc" else "laptop"))
+    d = MAIN_CLINE if which == "pc" else LAPTOP_CLINE
+    gs = os.path.join(d, "globalState.json")
+    if not os.path.exists(gs):
+        return False, "no Cline settings found in %s (open Cline once first)" % d
+    bak = gs + ".bak-command-center"
+    if not os.path.exists(bak):
+        shutil.copy2(gs, bak)  # the very first time, keep the original settings
+    if not _point_cline(d, cline_url(which, through)):
+        return False, "couldn't update Cline's settings"
+    ROUTE[which] = bool(through)
+    return True, ("%s Cline now goes through the command center" if through else "%s Cline now talks to its model directly") % (
+        "main" if which == "pc" else "laptop")
+
+
+def cline_state():
+    run_ = vscode_running()
+    out = {}
+    for w, d in (("pc", MAIN_CLINE), ("laptop", LAPTOP_CLINE)):
+        pts = cline_points_to(d)
+        out[w] = {"points": pts, "routed": (pts or "").rstrip("/") == CC_URL % w, "running": run_[w],
+                  "found": os.path.exists(os.path.join(d, "globalState.json")),
+                  "url_cc": CC_URL % w, "url_direct": cline_url(w, False)}
+    return out
+
+
+def _point_cline(d, url, model_id=None):
     g = _jload(os.path.join(d, "globalState.json"))
     if g is None:
         return False
-    g.update(planModeApiProvider="openai", actModeApiProvider="openai", openAiBaseUrl=LAPTOP_URL)
+    g.update(planModeApiProvider="openai", actModeApiProvider="openai", openAiBaseUrl=url)
     if model_id:
         g.update(planModeOpenAiModelId=model_id, actModeOpenAiModelId=model_id)
     _jsave(os.path.join(d, "globalState.json"), g)
@@ -104,7 +147,7 @@ def pin_laptop_cline(model_id=None):
     if p is not None:
         p["lastUsedProvider"] = "openai-compatible"
         oc = p.setdefault("providers", {}).setdefault("openai-compatible", {}).setdefault("settings", {})
-        oc.update(provider="openai-compatible", baseUrl=LAPTOP_URL)
+        oc.update(provider="openai-compatible", baseUrl=url)
         oc.setdefault("apiKey", "none")
         if model_id:
             oc["model"] = model_id
@@ -112,7 +155,7 @@ def pin_laptop_cline(model_id=None):
     mp = os.path.join(d, "settings", "models.json")
     m = _jload(mp)
     if m is not None and "openai-compatible" in (m.get("providers") or {}):
-        m["providers"]["openai-compatible"].setdefault("provider", {})["baseUrl"] = LAPTOP_URL
+        m["providers"]["openai-compatible"].setdefault("provider", {})["baseUrl"] = url
         _jsave(mp, m)
     return True
 
@@ -126,7 +169,7 @@ def code_info(settings, pc_model, laptop_model, key):
         "setups": {
             "pc": {"running": running["pc"], "label": "VS Code", "model": pc_model,
                    "points_to": cline_points_to(MAIN_CLINE, PC_URL), "expect": PC_URL,
-                   "cline": {"provider": "OpenAI Compatible", "base_url": "http://127.0.0.1:8090/v1",
+                   "cline": {"provider": "OpenAI Compatible", "base_url": cline_url("pc", ROUTE["pc"]),
                              "api_key": key, "model_id": pc_model.get("id") or "(any, the server has one model)"}},
             "laptop": {"running": running["laptop"], "label": "VS Code (laptop)", "model": laptop_model,
                        "points_to": cline_points_to(LAPTOP_CLINE, LAPTOP_URL), "expect": LAPTOP_URL,
