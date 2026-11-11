@@ -28,6 +28,8 @@ server. Read `README.md` first for the user-facing view, then every file below i
   into the newest user message (chat) or the task message (Cline) to keep llama.cpp's prompt cache valid; a
   background learner asks the active model to add/update/delete memories from saved chats.
 - `command-center/importers.py`: ChatGPT / Claude data-export import.
+- `command-center/cloud.py`: optional tools the local model can call in chat (`web_search`, `ask_cloud`) backed by
+  the user's own Claude / ChatGPT / Gemini key; `server.py` `tool_chat` runs the streaming tool loop.
 - `command-center/chats.py`, `workspaces.py`, `tokens.py`, `taskbar.py`, `launch.pyw`: chats on disk, VS Code/Cline
   and Tailscale helpers, token meter, taskbar identity, console-less launcher.
 
@@ -59,6 +61,10 @@ Work through these in order. For each: find the problems, fix the important ones
    Explore: `--n-cpu-moe` vs VRAM headroom, `-ub/-b`, threads (the 9950X3D has two CCDs; try pinning to the V-cache
    CCD), MTP speculative decoding (`--spec-type draft-mtp`, needs MTP GGUFs, no `--mmproj` yet), ngram speculation
    for code edits, newer llama.cpp builds, KV cache type, context size trade-offs. Keep vision available somewhere.
+   Already measured (README "Speed" table): `-ub 2048` = 2.3x prompt speed, `ngram-mod` = 2.5x on code rewrites,
+   threads don't matter, MTP (`models/*-MTP-GGUF`, draft-mtp + ngram-mod, n-max 2) = +15% chat writing speed but
+   no vision and ~15.7 GB peak VRAM at `--n-cpu-moe 23`, so it's not the default yet; a newer llama.cpp build has
+   not been compared (the owner's build is 11798).
    Record results in the README with the exact flags.
 2. **Memory quality.** Build a small offline evaluation (a fixed set of memories + questions with expected recalls)
    and tune: thresholds, hybrid scoring, chunking of old chats, dedupe/consolidation of near-duplicate memories,
@@ -81,8 +87,10 @@ Work through these in order. For each: find the problems, fix the important ones
 7. **Shareability.** A friend with a different NVIDIA GPU (8-24 GB) should go from `git clone` to chatting by
    running `setup.bat`. Test the setup logic paths you can, make VRAM-dependent settings adapt, and make the README
    instructions exact.
-8. **Optional features if time allows**: web search as a tool the local model can call; an optional cloud model
-   (Claude API) the local model can consult; both behind settings, off by default, keys stored outside the repo.
+8. **Cloud tools** (`cloud.py`, `tool_chat`): verify each provider path with a real key if the owner provides one
+   (ask first; it costs money), harden the streaming tool loop (client disconnects mid-tool, malformed tool-call
+   JSON, parallel calls), consider caching identical searches, and check the model doesn't over-search (the test run
+   searched 4 times for one question). Keep it off by default and keys out of the browser and the repo.
 
 ## How to report
 

@@ -365,6 +365,25 @@ details.think .tbody{white-space:pre-wrap;max-height:260px;overflow-y:auto;font-
    1:llm = brain strip + chat, 2:sys = fetch (model on/off, run on) + usage, 3:web = phone access + tailnet.
    2:code (VS Code) is PC-only, so on a phone its tab is replaced by 2:sys. */
 #tags .ph{display:none}
+/* tool use in chat (web search / ask cloud) */
+.tools{margin:2px 0 6px;display:flex;flex-direction:column;gap:3px}
+.tool{font-size:12px;color:var(--dim);border-left:2px solid var(--accent2);padding-left:9px}
+.tool.run{color:var(--accent2)}
+.tool.err{border-color:var(--crit);color:var(--crit)}
+.tool details summary{cursor:pointer;list-style:none}
+.tool details summary::before{content:"▸ "}
+.tool details[open] summary::before{content:"▾ "}
+.tool ol{margin:4px 0 2px;padding-left:20px}
+.tool a{color:var(--cyan);text-decoration:none;overflow-wrap:anywhere}
+.tool a:hover{text-decoration:underline}
+.cprov{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}
+.cprov button.on{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+.ckey{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+.ckey input{flex:1 1 200px;min-width:0;background:var(--bg2);color:var(--fg);border:1px solid var(--border);font:inherit;padding:5px 8px;outline:none}
+.ckey input:focus{border-color:var(--accent)}
+[data-theme="corpus"] .ckey input{border-radius:6px}
+[data-theme="corpus"] .tool{font-family:var(--font);font-size:11.5px;border-color:#fff;color:var(--dim)}
+[data-theme="corpus"] .tool.run{color:#fff}
 /* 4:mem tree */
 #ws4{grid-template-columns:1fr 360px}
 #treePane{flex:1 1 auto;display:flex;flex-direction:column;min-height:0}
@@ -693,6 +712,7 @@ body.remote #tags span[data-ws="2"]{display:none}
   </div>
   <div class="col">
     <section class="pane"><div class="title">appearance</div><div id="themePick" class="memloc" style="margin-top:0"></div></section>
+    <section class="pane"><div class="title">cloud &amp; web search <i>· optional</i></div><div id="cloudBox">loading…</div></section>
     <section class="pane" id="memListPane"><div class="title">memories <i id="memCount"></i></div>
       <div class="memadd"><input id="memNew" maxlength="1000" placeholder="teach it something: e.g. I prefer metric units"><select id="memNewTopic"></select><button id="memAddBtn">remember</button></div>
       <div class="memtools"><input id="memQ" placeholder="search memories"><select id="memTopic"><option value="">all topics</option></select></div>
@@ -1228,6 +1248,7 @@ const HELP = `commands
   /chats                     open saved chats (also the "history" button)
   /title <name>              rename this chat
   /remember <text>           save a memory (every model will know it)
+  /search <query>            ask the model to search the web (needs a cloud key, 6:set)
   /memory                    open the memory (4:mem)
   /help
 keys: Enter send · Shift+Enter newline · paste, drop, or +img to attach images`;
@@ -1237,6 +1258,9 @@ function command(t){
     case "clear": case "new": return newChat(true);
     case "chats": case "history": return toggleHist(true);
     case "memory": case "mem": case "forget": return showWs("4");
+    case "search": { const q = t.slice(1).trim().replace(/^search\s*/, "");
+      if (!q) return sys("usage: /search <what to look up>", true);
+      $("prompt").value = "Search the web for: " + q; return send(); }
     case "remember": { const what = t.slice(1).trim().replace(/^remember\s*/, "");
       if (!what) return sys("usage: /remember <something to remember>", true);
       postJSON("/api/memory/add", {text: what, topic: "other"}).then(r => r.ok ? null : sys("couldn't save that memory: " + r.msg, true));
@@ -1281,6 +1305,7 @@ async function send(){
 
   chatBusy = true; abortCtl = new AbortController(); setSend(); render();
   let memInfo = null;
+  const toolLog = new Map();
   let reply = "", reasoning = "", timings = null, usage = null, finish = null, t0 = performance.now(), tFirst = 0, nTok = 0, inThinkTag = false;
   let raf = 0;
   const paint = () => { raf = 0; body.innerHTML = md(reply); if (reasoning) { think.hidden = false; tbody.textContent = reasoning; } scroll(); };
@@ -1304,6 +1329,7 @@ async function send(){
         const d = line.slice(5).trim(); if (d === "[DONE]") continue;
         let j; try { j = JSON.parse(d); } catch(e) { continue; }
         if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
+        if (j.cc_tool) { toolEvent(m, j.cc_tool); toolLog.set(j.cc_tool.id, j.cc_tool); continue; }
         if (j.timings) timings = j.timings;
         if (j.usage) usage = j.usage;
         const ch = j.choices && j.choices[0]; if (!ch) continue;
@@ -1344,6 +1370,7 @@ async function send(){
   if (history.length && history[history.length-1].role === "assistant") {
     const h = history[history.length-1]; h.stat = stat.innerHTML;
     if (memInfo && (memInfo.ids.length || memInfo.chunks)) h.mem = memInfo;
+    if (toolLog.size) h.tools = [...toolLog.values()];
     saveChat();
   }
   addMemHit(stat, memInfo);
@@ -1390,6 +1417,7 @@ function renderChat(c){
       addUser(textOf(h.content), imgs);
     } else if (h.role === "assistant") {
       const m = el("div", "msg bot"); m.appendChild(el("div", "who", esc(h.who || "◆ model")));
+      if (h.tools) h.tools.forEach(t => toolEvent(m, t));
       if (h.reasoning) { const d = el("details", "think"); d.innerHTML = "<summary>thinking</summary>"; const tb = el("div", "tbody"); tb.textContent = h.reasoning; d.appendChild(tb); m.appendChild(d); }
       m.appendChild(el("div", "body", md(h.content || "")));
       if (h.stat) { const st = el("div", "stat", safeStat(h.stat)); addMemHit(st, h.mem); m.appendChild(st); }
@@ -1659,6 +1687,75 @@ function flashMemories(ids){
   brain.dirty = true;
 }
 loadGraph();
+
+/* ---------------- tools in chat ----------------
+   The server runs web_search / ask_cloud for the local model and streams {cc_tool} progress events. */
+function toolEvent(msg, t){
+  let box = msg.querySelector(".tools");
+  if (!box) { box = el("div", "tools"); msg.insertBefore(box, msg.children[1] || null); }
+  let row = box.querySelector(`[data-tid="${CSS.escape(t.id)}"]`);
+  if (!row) { row = el("div", "tool"); row.dataset.tid = t.id; box.appendChild(row); }
+  const what = t.name === "web_search" ? `searching the web: “${(t.args && t.args.query) || ""}”` : `asking ${t.provider || "the cloud model"}: “${((t.args && t.args.question) || "").slice(0, 140)}”`;
+  row.className = "tool" + (t.status === "running" ? " run" : t.status === "error" ? " err" : "");
+  if (t.status === "running") { row.textContent = (t.name === "web_search" ? "🔎 " : "☁ ") + what + " …"; return; }
+  if (t.status === "error") { row.textContent = "✗ " + what + " · " + (t.error || "failed"); return; }
+  const src = t.sources || [];
+  const head = (t.name === "web_search" ? "🔎 searched: “" + ((t.args && t.args.query) || "") + "”" : "☁ asked " + (t.provider || "the cloud model")) + (src.length ? ` · ${src.length} source${src.length === 1 ? "" : "s"}` : "");
+  if (!src.length) { row.textContent = head; return; }
+  row.innerHTML = `<details><summary>${esc(head)}</summary><ol>${src.map(s => `<li><a href="${esc(/^https?:\/\//.test(s.url) ? s.url : "#")}" target="_blank" rel="noopener noreferrer">${esc(s.title || s.url)}</a></li>`).join("")}</ol></details>`;
+}
+
+/* ---------------- 6:set → cloud & web search ---------------- */
+let cloudSt = null, cloudSel = null, cloudModels = {};
+async function refreshCloud(){
+  try { cloudSt = await (await fetch("/api/cloud", {cache:"no-store"})).json(); } catch(e) { return; }
+  cloudSel = cloudSel || cloudSt.provider; renderCloud();
+}
+function renderCloud(){
+  const c = cloudSt, box = $("cloudBox"); if (!c || !box) return;
+  if (box.contains(document.activeElement) && document.activeElement.tagName === "INPUT") return;  // don't wipe typing
+  const p = cloudSel, N = c.names, hasKey = !!c.keys[p];
+  box.innerHTML = `
+    <div class="shead"><span class="dot ${c.ready ? "on" : c.enabled ? "warn" : ""}"></span>
+      <span class="big">${c.ready ? "on · " + N[c.provider] : c.enabled ? "on, but needs a key" : "off"}</span><span class="grow"></span>
+      <button class="btn-main ${c.enabled ? "stop" : "go"}" id="cOn">${c.enabled ? "turn off" : "turn on"}</button></div>
+    <div class="hint" style="margin-top:0">Lets your local model search the web and ask a stronger model when it needs to. It decides when; you see each search in the chat. Only the query it writes is sent, never your chat or memories. Uses your own API key (billed by that provider).</div>
+    <div class="cprov">${Object.keys(N).map(k => `<button data-cprov="${k}" class="${k === p ? "on" : ""}">${N[k]}${c.keys[k] ? " ✓" : ""}${k === c.provider ? " · in use" : ""}</button>`).join("")}</div>
+    <div class="kvt">
+      <span class="k">api key</span><span class="v">${hasKey ? "saved (" + esc(c.keys[p]) + ")" : "none"}</span>${hasKey ? `<button id="cDelKey">remove</button>` : "<span></span>"}
+      <span class="k">model</span><span class="v">${esc(c.models[p])}</span><span></span>
+    </div>
+    <div class="ckey"><input id="cKey" type="password" autocomplete="off" placeholder="${p === "anthropic" ? "sk-ant-…  (console.anthropic.com)" : p === "openai" ? "sk-…  (platform.openai.com)" : "AIza…  (aistudio.google.com)"}"><button id="cSaveKey">save key</button></div>
+    <div class="ckey"><input id="cModel" list="cModelList" value="${esc(c.models[p])}" placeholder="model id"><datalist id="cModelList">${(cloudModels[p] || []).map(m => `<option value="${esc(m)}">`).join("")}</datalist><button id="cSaveModel">set model</button><button id="cTest" ${hasKey ? "" : "disabled"}>test key</button></div>
+    ${p === "anthropic" && !c.anthropic_sdk ? `<div class="note">Claude needs the anthropic package: run <b>python -m pip install --user anthropic</b> (setup.bat does this), then restart the command center.</div>` : ""}
+    <div id="cMsg" class="hint"></div>
+    <div class="kvt" style="margin-top:10px">
+      <span class="k">use</span><span class="v">${N[c.provider]}${c.provider !== p ? ` (switch to ${N[p]} →)` : ""}</span>${c.provider !== p ? `<button id="cUse">use ${N[p]}</button>` : "<span></span>"}
+      <span class="k">web search</span><span class="v">look things up online</span><button class="tog ${c.web_search ? "on" : ""}" data-ctool="web_search">${c.web_search ? "on" : "off"}</button>
+      <span class="k">ask cloud</span><span class="v">hand hard questions to ${N[c.provider]}</span><button class="tog ${c.ask_cloud ? "on" : ""}" data-ctool="ask_cloud">${c.ask_cloud ? "on" : "off"}</button>
+    </div>`;
+}
+$("cloudBox").addEventListener("click", async e => {
+  const t = e.target, c = cloudSt; if (!c) return;
+  const say = (m, bad) => { const x = $("cMsg"); if (x) { x.textContent = m; x.style.color = bad ? "var(--crit)" : "var(--ok)"; } };
+  if (t.dataset.cprov) { cloudSel = t.dataset.cprov; return renderCloud(); }
+  if (t.id === "cOn") { await postJSON("/api/cloud/settings", {enabled: !c.enabled, provider: c.keys[c.provider] ? c.provider : cloudSel}); return refreshCloud(); }
+  if (t.id === "cUse") { await postJSON("/api/cloud/settings", {provider: cloudSel}); return refreshCloud(); }
+  if (t.dataset.ctool) { await postJSON("/api/cloud/settings", {[t.dataset.ctool]: !c[t.dataset.ctool]}); return refreshCloud(); }
+  if (t.id === "cSaveKey") { const v = $("cKey").value.trim(); if (!v) return say("paste a key first", true);
+    await postJSON("/api/cloud/key", {provider: cloudSel, key: v}); $("cKey").value = ""; document.activeElement.blur();
+    await refreshCloud(); return $("cTest").click(); }
+  if (t.id === "cDelKey") { await postJSON("/api/cloud/key", {provider: cloudSel, key: ""}); return refreshCloud(); }
+  if (t.id === "cSaveModel") { await postJSON("/api/cloud/settings", {model: {provider: cloudSel, id: $("cModel").value}}); document.activeElement.blur(); await refreshCloud(); return say("model set"); }
+  if (t.id === "cTest") {
+    t.disabled = true; t.textContent = "testing…";
+    let j = {}; try { j = await (await fetch("/api/cloud/test", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({provider: cloudSel})})).json(); } catch(err) {}
+    cloudModels[cloudSel] = j.models || [];
+    const cur = cloudSt.models[cloudSel], known = !j.models || !j.models.length || j.models.includes(cur);
+    renderCloud();
+    say((j.msg || "test failed") + (j.ok && !known ? ` · note: "${cur}" isn't in your list, pick one from the model box` : ""), !j.ok || !known);
+  }
+});
 
 /* ---------------- 4:mem: the memory tree ----------------
    Radial tree: "memory" in the middle, the 8 topics around it, every memory a leaf in its topic's colour.
@@ -1978,7 +2075,7 @@ async function refreshWs(){
   try {
     if (ws === "2") renderCode(await (await fetch("/api/code", {cache:"no-store"})).json());
     if (ws === "3") renderWeb(await (await fetch("/api/web", {cache:"no-store"})).json());
-    if (ws === "6") await refreshMem();
+    if (ws === "6") { await refreshMem(); if (!cloudSt) refreshCloud(); }
     if (ws === "4") await refreshTree();
     if (ws === "5") renderCline(await (await fetch("/api/clinecc", {cache:"no-store"})).json());
   } catch (e) {}

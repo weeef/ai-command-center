@@ -24,6 +24,7 @@ import workspaces  # noqa: E402  (2:code and 3:web)
 import tokens  # noqa: E402  (tokens burned per machine)
 import chats  # noqa: E402  (saved chat history)
 import memory  # noqa: E402  (long-term memory shared by every model)
+import cloud  # noqa: E402  (optional web search / stronger cloud model as tools)
 import urllib.parse  # noqa: E402
 import collections  # noqa: E402
 import re  # noqa: E402
@@ -469,7 +470,7 @@ def laptop_action(action):
 
 
 _stats = {"t": 0, "v": None}
-_BUILD_FILES = ("index.html", "server.py", "workspaces.py", "tokens.py", "chats.py", "memory.py", "importers.py")
+_BUILD_FILES = ("index.html", "server.py", "workspaces.py", "tokens.py", "chats.py", "memory.py", "importers.py", "cloud.py")
 
 
 def build_stamp():
@@ -565,7 +566,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     # From the phone: chat, saved chats, model on/off, run-on target and stats. Not VS Code, not the API key,
     # and not phone access itself (turning that off from the phone would lock the phone out).
     REMOTE_BLOCKED = ("/api/code", "/api/cline", "/api/web/serve", "/api/memory/location", "/api/memory/import",
-                      "/api/memory/import-file", "/api/clinecc", "/cline")
+                      "/api/memory/import-file", "/api/clinecc", "/cline", "/api/cloud")
 
     def remote_blocked(self, path):
         if self.remote and any(path == p or path.startswith(p + "/") for p in self.REMOTE_BLOCKED):
@@ -601,6 +602,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_json(200, dict(stats(), remote=self.remote, memory=memory.M.brief()))
         elif path == "/api/memory":
             self.send_json(200, memory.M.status())
+        elif path == "/api/cloud":
+            self.send_json(200, cloud.status(settings))
         elif path == "/api/clinecc":
             self.send_json(200, {"route": workspaces.cline_state(), "memory": settings.get("cline_memory", True),
                                  "learn": settings.get("cline_learn", True), "log": list(cline_log)[::-1],
@@ -691,6 +694,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.memory_post(path[len("/api/memory/"):], data)
         if path.startswith("/cline/") and path.endswith("/v1/chat/completions"):
             return self.cline_chat(path.split("/")[2], data)
+        if path == "/api/cloud/key":
+            ok = cloud.set_key(data.get("provider"), data.get("key"))
+            return self.send_json(200 if ok else 400, {"ok": ok, "msg": "saved" if ok else "unknown provider"})
+        if path == "/api/cloud/test":
+            if data.get("provider") not in cloud.PROVIDERS:
+                return self.send_json(400, {"ok": False, "msg": "unknown provider"})
+            ok, msg, ids = cloud.list_models(data["provider"])
+            return self.send_json(200, {"ok": ok, "msg": msg, "models": ids})
+        if path == "/api/cloud/settings":
+            c = settings.setdefault("cloud", {})
+            for k in ("enabled", "web_search", "ask_cloud"):
+                if k in data:
+                    c[k] = bool(data[k])
+            if data.get("provider") in cloud.PROVIDERS:
+                c["provider"] = data["provider"]
+            m = data.get("model")
+            if isinstance(m, dict) and m.get("provider") in cloud.PROVIDERS and isinstance(m.get("id"), str):
+                mid = m["id"].strip()[:100]
+                c.setdefault("models", {})[m["provider"]] = mid or cloud.DEFAULT_MODELS[m["provider"]]
+            save_settings()
+            return self.send_json(200, {"ok": True})
         if path == "/api/clinecc/route":
             ok, msg = workspaces.cline_route(data.get("which"), bool(data.get("through")))
             if ok:
@@ -763,8 +787,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if not mid:
                     return self.send_json(502, {"error": "no laptop model listed by PAIR. Is the laptop on?"})
                 data["model"] = mid  # the model id always comes from PAIR's listing, never the browser
-                return self.proxy_chat(json.dumps(data).encode(), PAIR, {}, mem_info)
-            return self.proxy_chat(json.dumps(data).encode(), LLAMA, {"Authorization": "Bearer " + api_key()}, mem_info)
+                host, auth = PAIR, {}
+            else:
+                host, auth = LLAMA, {"Authorization": "Bearer " + api_key()}
+            tools = cloud.tools_for(settings) if data.get("stream") and not data.get("tools") else None
+            if tools:
+                return self.tool_chat(data, host, auth, mem_info, tools)
+            return self.proxy_chat(json.dumps(data).encode(), host, auth, mem_info)
         self.send_json(404, {"error": "not found"})
 
     def do_PUT(self):
@@ -816,6 +845,134 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 active_streams -= 1
         ok, msg = M.import_file(tmp, learn, cleanup=True)
         return self.send_json(200 if ok else 409, {"ok": ok, "msg": msg})
+
+    def _raw(self, b):
+        self.wfile.write(b"%x\r\n%s\r\n" % (len(b), b))
+
+    def _sse(self, obj):
+        self._raw(b"data: " + json.dumps(obj).encode() + b"\n\n")
+
+    def tool_chat(self, data, upstream, auth, mem_info, tools):
+        """Chat where the local model may call web_search / ask_cloud. Its reply streams to the browser as usual;
+        tool-call deltas are held back, the tools run here (cloud.py), the browser gets {"cc_tool": ...} progress
+        events, and the model continues with the results. At most 4 tool rounds, then it must answer."""
+        global active_streams
+        msgs = list(data["messages"])
+        # The model doesn't know today's date and distrusts "future" dates in fresh results without this.
+        # Same text all day, so the prompt cache still covers the conversation.
+        note = ("Today is %s. You have tools: web_search looks things up on the live web (more current than your "
+                "training data, so trust it for recent events, prices and releases) and ask_cloud asks a stronger AI. "
+                "Use them only when they help. When you use search results, mention the source briefly."
+                % time.strftime("%A %Y-%m-%d"))
+        if msgs and isinstance(msgs[0], dict) and msgs[0].get("role") == "system" and isinstance(msgs[0].get("content"), str):
+            msgs[0] = dict(msgs[0], content=note + "\n\n" + msgs[0]["content"])
+        else:
+            msgs.insert(0, {"role": "system", "content": note})
+        started, up = False, None
+        with lock:
+            active_streams += 1
+        try:
+            for rnd in range(5):
+                body = dict(data, messages=msgs, stream=True)
+                if rnd < 4:
+                    body["tools"] = tools
+                up = http.client.HTTPConnection(*upstream, timeout=900)
+                try:
+                    up.request("POST", "/v1/chat/completions", json.dumps(body),
+                               {"Content-Type": "application/json", "Accept": "text/event-stream", **auth})
+                    resp = up.getresponse()
+                except OSError as e:
+                    if not started:
+                        return self.send_json(502, {"error": f"model server not reachable on {upstream[1]} ({e.__class__.__name__}). Is it on?"})
+                    self._sse({"error": {"message": "the model server went away"}})
+                    break
+                if resp.status != 200:
+                    err = resp.read()
+                    if not started:
+                        self.send_response(resp.status)
+                        self.send_header("Content-Type", "application/json")
+                        self.send_header("Content-Length", str(len(err)))
+                        self.end_headers()
+                        self.wfile.write(err)
+                        return
+                    self._sse({"error": {"message": err.decode("utf-8", "replace")[:300]}})
+                    break
+                if not started:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream")
+                    self.send_header("Cache-Control", "no-cache")
+                    self.send_header("Transfer-Encoding", "chunked")
+                    if mem_info:
+                        self.send_header("X-Memory", json.dumps(mem_info))
+                    self.end_headers()
+                    started = True
+                calls, content, buf = {}, "", b""
+                while True:
+                    chunk = resp.read1(65536)
+                    if not chunk:
+                        break
+                    buf += chunk
+                    while b"\n" in buf:
+                        line, buf = buf.split(b"\n", 1)
+                        line = line.strip()
+                        if not line.startswith(b"data:"):
+                            continue
+                        payload = line[5:].strip()
+                        if payload == b"[DONE]":
+                            continue
+                        try:
+                            j = json.loads(payload)
+                        except ValueError:
+                            continue
+                        ch = (j.get("choices") or [{}])[0]
+                        d = ch.get("delta") or {}
+                        if d.get("tool_calls"):
+                            for tc in d["tool_calls"]:
+                                c = calls.setdefault(tc.get("index", 0), {"id": "", "name": "", "args": ""})
+                                c["id"] = tc.get("id") or c["id"]
+                                f = tc.get("function") or {}
+                                c["name"] += f.get("name") or ""
+                                c["args"] += f.get("arguments") or ""
+                            continue
+                        content += d.get("content") or ""
+                        self._raw(b"data: " + payload + b"\n\n")
+                up.close()
+                if not calls:
+                    break
+                tcs = [{"id": c["id"] or "call_%d_%d" % (rnd, i), "type": "function",
+                        "function": {"name": c["name"], "arguments": c["args"] or "{}"}} for i, c in sorted(calls.items())]
+                msgs.append({"role": "assistant", "content": content, "tool_calls": tcs})
+                for t in tcs:
+                    name = t["function"]["name"]
+                    try:
+                        args = json.loads(t["function"]["arguments"] or "{}")
+                    except ValueError:
+                        args = {}
+                    self._sse({"cc_tool": {"id": t["id"], "name": name, "args": args, "status": "running",
+                                           "provider": cloud.NAMES[cloud.config(settings)["provider"]]}})
+                    try:
+                        res = cloud.run(settings, name, args)
+                    except Exception as e:
+                        res = {"ok": False, "error": "tool crashed: %s" % e.__class__.__name__, "sources": []}
+                    self._sse({"cc_tool": {"id": t["id"], "name": name, "args": args, "status": "done" if res["ok"] else "error",
+                                           "error": res.get("error"), "sources": res.get("sources", []), "provider": res.get("provider")}})
+                    if res["ok"]:
+                        out = res["text"] or "(no answer)"
+                        if res.get("sources"):
+                            out += "\n\nSources:\n" + "\n".join("- %s: %s" % (s["title"], s["url"]) for s in res["sources"])
+                    else:
+                        out = "The tool failed: %s. Answer without it and say so briefly." % res.get("error")
+                    msgs.append({"role": "tool", "tool_call_id": t["id"], "content": out})
+            self._raw(b"data: [DONE]\n\n")
+            self.wfile.write(b"0\r\n\r\n")
+        except (OSError, ValueError, http.client.HTTPException):
+            self.close_connection = True
+        finally:
+            if up:
+                up.close()
+            with lock:
+                active_streams -= 1
+            touch()
 
     def send_font(self, name):
         """The bundled Inter / IBM Plex Mono files (SIL OFL), so the app looks the same offline and on the phone."""

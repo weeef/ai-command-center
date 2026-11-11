@@ -56,8 +56,8 @@ if (-not $py) {
     exit 1
 }
 Ok "Python: $(& cmd /c "$py --version")"
-& cmd /c "$py -m pip install --user --quiet --disable-pip-version-check numpy" | Out-Null
-if ($LASTEXITCODE -eq 0) { Ok "numpy installed (faster memory search)" } else { Note "numpy didn't install; memory still works, just slower on huge memories" }
+& cmd /c "$py -m pip install --user --quiet --disable-pip-version-check numpy anthropic" | Out-Null
+if ($LASTEXITCODE -eq 0) { Ok "numpy + anthropic installed (faster memory search; optional Claude web search)" } else { Note "numpy/anthropic didn't install; memory still works, Claude web search won't" }
 
 # ------------------------------------------------------------------ 2. llama.cpp
 Step "llama.cpp (the engine that runs the models)"

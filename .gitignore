@@ -22,6 +22,7 @@ command-center/*
 !command-center/chats.py
 !command-center/memory.py
 !command-center/importers.py
+!command-center/cloud.py
 !command-center/taskbar.py
 !command-center/launch.pyw
 !command-center/index.html
@@ -33,6 +34,8 @@ command-center/*
 
 # never, even if someone adds a broader rule above
 api-key.txt
+**/secrets.json
+llm-config.bat
 **/settings.json
 **/tokens.json
 **/tokens-log.jsonl

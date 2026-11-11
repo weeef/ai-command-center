@@ -40,7 +40,7 @@ That's it. Everything below is optional.
 | **3:web** | Phone access over Tailscale: one button to turn it on, the address to open on your phone, your devices. |
 | **4:mem** | The **memory tree**: "memory" in the centre, 8 topics around it, every memory a leaf. Bigger leaf = recalled more often, ring = pinned, glow = just learned or just recalled. Click a leaf to read/edit/pin/forget it and see related memories; click a topic to open that branch; scroll to zoom, drag to move. |
 | **5:cline** | Route Cline through the command center so it gets memory too, plus a log of every Cline task (steps, memories used, tokens, cache hit rate). |
-| **6:set** | Memory on/off and auto-learning, the memory folder (move it to another drive), import from ChatGPT/Claude, export, the searchable memory list, and the theme. |
+| **6:set** | Memory on/off and auto-learning, the memory folder (move it to another drive), import from ChatGPT/Claude, export, the searchable memory list, the theme, and **cloud & web search** (API keys for Claude / ChatGPT / Gemini). |
 
 Keyboard: **Alt+1 … Alt+6** switch tabs. In chat: **Enter** sends, **Shift+Enter** new line, `/help` lists commands
 (`/new`, `/chats`, `/remember …`, `/on`, `/off`, `/theme`, …). **history** (top right of the chat) reopens old chats.
@@ -99,6 +99,29 @@ speed; `UB 2048` costs ~1.5 GB VRAM. Writing speed is limited by system-RAM band
 
 ---
 
+## Web search and a stronger cloud model (optional)
+
+Give your local model two tools it can use when it decides they help:
+
+- **web_search**: looks things up on the live web (news, prices, releases, docs) and returns a summary with sources.
+- **ask_cloud**: hands a hard question to a much stronger model.
+
+Any one API key is enough: **Claude** (console.anthropic.com), **ChatGPT** (platform.openai.com) or **Gemini**
+(aistudio.google.com). Each provider's own built-in web search is used, so there's no separate search account.
+
+1. **6:set → cloud & web search**: pick the provider, paste the key, **save key** (it tests the key and lists the
+   models it can use), optionally set the model, then **turn on**.
+2. Chat as usual. When the model searches you'll see `🔎 searching the web: "…"` in its reply, then the sources
+   (click to expand). `/search <query>` asks it to search explicitly.
+
+Privacy: only the query or question the local model writes is sent; never your conversation or memories. Keys stay in
+`command-center\secrets.json` on your PC (never committed, never shown in full in the app). Usage is billed by the
+provider. Claude uses the official `anthropic` Python package (setup installs it) with `claude-opus-5-5` by default
+and server-side refusal fallbacks enabled; ChatGPT uses the Responses API web search tool; Gemini uses Google Search
+grounding. Defaults can be changed per provider in 6:set. Not used by Cline (it has its own tools).
+
+---
+
 ## Phone access (optional)
 
 1. Install [Tailscale](https://tailscale.com/download) on the PC and your phone, signed in to the same account.
@@ -142,6 +165,7 @@ command-center\
   server.py      HTTP server on 127.0.0.1:8099: UI, chat proxy (adds the API key), model control, stats, Cline proxy
   memory.py      long-term memory (recall, learning, embedding server, moving, import/export)
   importers.py   ChatGPT / Claude export readers
+  cloud.py       optional web search / stronger-model tools (Claude, ChatGPT, Gemini)
   chats.py       saved chats
   workspaces.py  VS Code / Cline / Tailscale helpers
   tokens.py      tokens-used meter
@@ -150,7 +174,7 @@ command-center\
 docs\review-prompt.md      a prompt for a full review/improvement pass with a strong model
 ```
 
-**Not in the repo** (created on your PC): `api-key.txt`, `llm-config.bat`, `llama.cpp\`, `models\`, `memory\`,
+**Not in the repo** (created on your PC): `api-key.txt`, `command-center\secrets.json` (cloud keys), `llm-config.bat`, `llama.cpp\`, `models\`, `memory\`,
 `command-center\settings.json`, token logs, browser/VS Code profiles.
 
 ## Privacy and security
