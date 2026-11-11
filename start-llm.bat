@@ -17,7 +17,7 @@ set "MOE_BIG=26"
 set "MOE_MTP=25"
 set "MOE_MTP_UNC=27"
 set "UB=2048"
-set "SPEC=--spec-type ngram-mod"
+set "SPEC=--spec-type ngram-mod --spec-ngram-mod-n-min 16 --spec-ngram-mod-n-max 256 --spec-ngram-mod-n-match 16"
 set "NGL=99"
 set "THREADS=16"
 set "CACHE_RAM=16384"
@@ -91,7 +91,8 @@ if defined NOVISION ( echo Fast MTP mode: text only, no image input. ) else if e
 rem Port 8080 belongs to NVIDIA PAIR. --load-mode none copies CPU weights into RAM; much faster prompts than mmap.
 rem --no-mmproj-offload : vision runs on the CPU; a few seconds slower per image, but leaves VRAM for text speed
 rem -ub 2048 : reads long prompts (Cline, long chats) ~2.3x faster than 512 (measured), for ~1.5 GB VRAM
-rem --spec-type ngram-mod : drafts text that repeats earlier context; Cline-style rewrites ~2.4x faster (measured)
+rem --spec-type ngram-mod : drafts text that repeats earlier context; Cline-style rewrites ~3.9x faster (measured:
+rem   74 -> 292 tok/s with drafts of up to 256 tokens; the default of 64 gave 191). Plain writing is unaffected.
 rem --metrics : token counters for the command center's "tokens burned" readout (read-only, local only)
 "%LLAMA%" -m "%MODEL%" %VISION% ^
   --host 127.0.0.1 --port 8090 --api-key-file "%KEYFILE%" ^

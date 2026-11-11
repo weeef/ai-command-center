@@ -152,7 +152,7 @@ if (Test-Path $cfg) {
     $moeStd = MoeFor (12.9 - $save) 24 0.464 0
     $moeUnc = MoeFor (12.6 - $save) 26 0.56 0
     $ub = if ($big) { 2048 } else { 512 }
-    $spec = "--spec-type ngram-mod"
+    $spec = "--spec-type ngram-mod --spec-ngram-mod-n-min 16 --spec-ngram-mod-n-max 256 --spec-ngram-mod-n-match 16"
     if ($vramGB -eq 0) { $ngl = "0" } else { $ngl = "99" }
     $cores = (Get-CimInstance Win32_Processor | Measure-Object NumberOfCores -Sum).Sum
     $cacheRam = if ($ramGB -ge 64) { 16384 } elseif ($ramGB -ge 48) { 8192 } else { 2048 }
