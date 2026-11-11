@@ -1,82 +1,170 @@
-# ai command center
+# AI command center
 
-A small local "command center" for running local LLMs on Windows with llama.cpp, plus a second machine
-reached through NVIDIA's Personal AI Router (PAIR), and VS Code + Cline agents on top of both.
+Run big open AI models **on your own Windows PC**, privately, with a polished control panel on top:
+chat with saved history, a long-term **memory** shared by every model, a coding agent (VS Code + Cline) that uses the
+same memory, and access from your **phone**. Nothing leaves your machine unless you turn on phone access, and even
+then only your own devices can reach it.
 
-Standard-library Python only, no dependencies. It serves a terminal-styled page on `127.0.0.1:8099`
-(opened as an Edge app window) and only ever binds to localhost.
+It's built on [llama.cpp](https://github.com/ggml-org/llama.cpp) and a small Python server with no required
+dependencies. The default models are Qwen3.6-35B-A3B (a fast "mixture of experts" model that runs well on a 12-16 GB
+graphics card plus 32-64 GB of RAM).
 
-## What's in it
+---
 
-| tab | what it does |
+## Quick start
+
+**You need:** Windows 10/11, an NVIDIA graphics card (8 GB+, 12-16 GB recommended), 32 GB+ RAM (64 GB recommended),
+~50 GB free disk, and [Python 3.10+](https://www.python.org/downloads/) (`winget install Python.Python.3.13`).
+
+1. **Get the code**: `git clone https://github.com/weeef/ai-command-center` (or download the ZIP from GitHub and
+   unzip it). Use a folder on a fast drive with plenty of space.
+2. **Run `setup.bat`** in that folder. It:
+   - checks your GPU, RAM and Python, installs `numpy`
+   - downloads llama.cpp (the official CUDA build) into `llama.cpp\`
+   - creates `api-key.txt` (a private key for the local model server)
+   - asks which model(s) to download (22-25 GB each) and fetches the 0.6 GB memory-search model
+   - writes `llm-config.bat` with settings sized for **your** graphics card
+   - puts a **Command Center** shortcut on your desktop
+3. **Double-click Command Center.** In **1:llm** press **⏻ on** (the first start takes ~30 s), then type in the chat.
+
+That's it. Everything below is optional.
+
+---
+
+## The tabs
+
+| tab | what it's for |
 |---|---|
-| **1:llm** | turn the local model on/off and pick a model, chat with it, live VRAM/RAM/GPU/CPU usage for this PC and the PAIR laptop, and **tokens burned** since each model was turned on (plus lifetime and a session log) |
-| **2:code** | two VS Code + Cline setups: the main VS Code → this PC's model (`:8090`), a separate "laptop" VS Code → the laptop via PAIR (`:8080`). Open projects in either, or **open · both**: the PC window on the repo and the laptop window on its own git worktree (`<repo>-laptop`, branch `cline-laptop`) so two agents can work at once without touching the same files |
-| **3:web** | phone access over Tailscale (`tailscale serve` → this command center on `:8099`) with an on/off toggle and the tailnet's devices. On a phone the same UI stacks into tabs: **1:llm** (brain + chat), **2:sys** (model on/off, run on, usage), **3:web**. From the phone, VS Code, the API key and the phone-access toggle are blocked; requests must carry Tailscale's `Tailscale-User-Login` header. The phone works while the command center is open on the PC; it shuts down ~3 min after the window closes, as before |
+| **1:llm** | Turn the model on/off, pick *standard* or *uncensored*, choose **run on** *this pc* or *laptop*, and chat. Paste or drop images (vision). Live GPU/RAM/CPU usage, speed of the last reply (pp = reading, tg = writing) and tokens used. The **brain** shows the state: grey = off, nodes lighting up = loading, pulses = thinking. In the *corpus* theme its glowing nodes are your memories. |
+| **2:code** | Open projects in VS Code with the Cline coding agent wired to your local model. Optional second "laptop" VS Code (see *Two machines*). |
+| **3:web** | Phone access over Tailscale: one button to turn it on, the address to open on your phone, your devices. |
+| **4:mem** | The **memory tree**: "memory" in the centre, 8 topics around it, every memory a leaf. Bigger leaf = recalled more often, ring = pinned, glow = just learned or just recalled. Click a leaf to read/edit/pin/forget it and see related memories; click a topic to open that branch; scroll to zoom, drag to move. |
+| **5:cline** | Route Cline through the command center so it gets memory too, plus a log of every Cline task (steps, memories used, tokens, cache hit rate). |
+| **6:set** | Memory on/off and auto-learning, the memory folder (move it to another drive), import from ChatGPT/Claude, export, the searchable memory list, and the theme. |
 
-## Layout
+Keyboard: **Alt+1 … Alt+6** switch tabs. In chat: **Enter** sends, **Shift+Enter** new line, `/help` lists commands
+(`/new`, `/chats`, `/remember …`, `/on`, `/off`, `/theme`, …). **history** (top right of the chat) reopens old chats.
+
+---
+
+## Memory
+
+Every model you run (standard, uncensored, the laptop, any model you add later) shares **one** memory.
+
+- **It learns by itself.** After each reply, when the model is idle, it notes durable facts ("prefers short answers",
+  "is building X", "sister lives in Denver") as short sentences in 8 topics. You'll see `◉ remembered: …` in the chat.
+- **It recalls by itself.** Each message pulls in the relevant memories and snippets of older chats. The reply's
+  stats line shows `◉ 3 memories`; click it to see which. Unrelated questions recall nothing.
+- **You stay in control.** `/remember <fact>` in chat, or edit / pin (★ = always included) / forget in **4:mem** or
+  **6:set**. Turn learning or memory off in **6:set**.
+- **It's cheap.** At most ~1.5k tokens per message (usually ~150), placed so the model's prompt cache keeps working:
+  a new chat turn only processes the new text.
+- **It's portable.** Everything lives in one folder (`memory\` by default): `memory.db` + `chats\`. To use another
+  drive: **6:set → location**, type e.g. `E:\ai-memory`, **move here**. It copies, verifies, switches, and keeps the
+  old folder as a backup. If the drive is unplugged, memory pauses (chat still works) instead of starting over.
+- **Bring your history.** **6:set → import**: pick the `.zip` from ChatGPT (*Settings → Data controls → Export data*)
+  or Claude (*Settings → Privacy → Export data*). Old conversations become searchable chats right away, and memories
+  are learned from them in the background. Saved memories can be pasted one per line.
+
+How it works: `command-center\memory.py`. SQLite with full-text search plus embedding vectors from a small model
+(Qwen3-Embedding-0.6B) that runs in its own llama-server on the **CPU** (port 8091), so it never takes VRAM.
+
+---
+
+## Speed and settings for your GPU
+
+`start-llm.bat` reads `llm-config.bat` (written by setup, never committed). The knobs:
+
+| setting | what it does |
+|---|---|
+| `MOE_STD`, `MOE_UNC` | how many of the model's expert layers stay in system RAM. **Lower = faster but more VRAM.** Each layer moved to the GPU costs ~0.46 GB (Q4) / ~0.56 GB (Q5). 40 = all in RAM (8 GB cards). |
+| `UB` | prompt batch size. 2048 reads long prompts (Cline, long chats) ~2.3x faster than 512 for ~1.5 GB VRAM. |
+| `SPEC` | `--spec-type ngram-mod` drafts repeated text, making code rewrites (what Cline does all day) ~2.4x faster. |
+| `THREADS`, `CACHE_RAM`, `NGL` | CPU threads, RAM for llama.cpp's prompt cache (MB), GPU layers (0 = CPU only). |
+
+If a model fails to start with an out-of-memory error, raise `MOE_*` by 2. If VRAM has room to spare (watch **usage**
+in 1:llm while chatting), lower it by 1-2.
+
+**Measured on the reference PC** (RTX 5080 16 GB, Ryzen 9 9950X3D, 64 GB DDR5-6000, 12k-token prompt):
+
+| model | settings | reading a prompt | writing | rewriting code (Cline) | peak VRAM |
+|---|---|---|---|---|---|
+| standard Q4 | old: `MOE 24, UB 512` | 1,818 tok/s | 77 tok/s | 79 tok/s | 12.6 GB |
+| standard Q4 | **new default: `MOE 23, UB 2048, ngram-mod`** | **4,240 tok/s** | ~78 tok/s | **200 tok/s** | 14.2 GB |
+| uncensored Q5 | old: `MOE 26, UB 512` | 1,460 tok/s | 69 tok/s | 71 tok/s | 12.9 GB |
+| uncensored Q5 | **new default: `MOE 25, UB 2048, ngram-mod`** | **~3,600 tok/s** | ~70 tok/s | **~165 tok/s** | ~14 GB |
+
+Also measured: CPU threads (8/12/16) make no difference; every expert layer moved to the GPU adds ~2.5% writing
+speed; `UB 2048` costs ~1.5 GB VRAM. Writing speed is limited by system-RAM bandwidth for the experts kept in RAM.
+
+---
+
+## Phone access (optional)
+
+1. Install [Tailscale](https://tailscale.com/download) on the PC and your phone, signed in to the same account.
+2. In **3:web**, press **turn on**. Open the address it shows on your phone (Safari: Share → *Add to Home Screen*).
+
+The phone gets the same app in a phone layout: chat, saved chats, memory, model on/off. It can't open VS Code, see the
+API key, move the memory or switch phone access off. It works while the command center is open on the PC. Only
+devices signed in to your Tailscale account can reach it; it is not on the public internet.
+
+## VS Code + Cline (optional)
+
+Install [VS Code](https://code.visualstudio.com/) and the **Cline** extension. In Cline's settings choose
+*OpenAI Compatible*, base URL `http://127.0.0.1:8099/cline/pc/v1` (through the command center, with memory; or
+`http://127.0.0.1:8090/v1` directly), any model id, and the key from `api-key.txt`. Or let **5:cline** set it for you
+(close VS Code first). Routed Cline needs the command center to be open.
+
+## Two machines (optional)
+
+If a second PC runs NVIDIA's Personal AI Router (PAIR), the command center can use its model: **run on → laptop** in
+1:llm. `start-vscode-laptop.bat` opens a separate VS Code whose Cline uses the laptop, and **2:code → open · both**
+puts the two agents on separate git worktrees of the same repo so they can work side by side.
+
+---
+
+## Using other models
+
+Any GGUF model works. Put it under `models\` and point `start-llm.bat` at it (the `:q4` / `:q5` sections set
+`MODEL`), or add a new menu entry. Smaller models for smaller GPUs: e.g. Qwen3-8B or Gemma-3-12B GGUFs from
+Hugging Face (Q4_K_M), with `MOE_*` irrelevant (dense models: use `-ngl` only). Memory keeps working with any model.
+
+## Files
 
 ```
-start-llm.bat              llama-server launcher (menu: standard / uncensored / 256K context), port 8090, --metrics on
-start-standard.bat         start-llm.bat 1
-start-uncensored.bat       start-llm.bat 2
-check-model.bat            which model is running on 8090
-start-vscode-laptop.bat    VS Code with its own profile (vscode-laptop\, cline-laptop\) for the laptop's Cline
-start-command-center.bat   opens the UI
-sync.bat                   commit + push everything in one step
+setup.bat / setup.ps1      first-time setup (safe to re-run)
+start-llm.bat              model launcher (menu), port 8090; reads llm-config.bat
+start-standard.bat / start-uncensored.bat / check-model.bat
+start-command-center.bat   opens the app (the desktop shortcut does the same without a console)
+start-vscode-laptop.bat    second VS Code for the laptop's Cline (optional)
+sync.bat                   commit + push in one step (for maintainers)
 command-center\
-  server.py                HTTP server + model control + stats + chat proxy (adds the API key server-side)
-  workspaces.py            2:code and 3:web
-  chats.py                 saved chats (one JSON per chat in <memory folder>\chats\, never committed)
-  memory.py                long-term memory shared by every model (recall + learning + the embedding server)
-  tokens.py                token meter (llama.cpp /metrics counters; falls back to sampling /slots)
-  index.html               the whole UI
-  launch.pyw, taskbar.py   console-less launcher and its own taskbar identity
+  server.py      HTTP server on 127.0.0.1:8099: UI, chat proxy (adds the API key), model control, stats, Cline proxy
+  memory.py      long-term memory (recall, learning, embedding server, moving, import/export)
+  importers.py   ChatGPT / Claude export readers
+  chats.py       saved chats
+  workspaces.py  VS Code / Cline / Tailscale helpers
+  tokens.py      tokens-used meter
+  index.html     the whole UI (no build step, works offline)
+  fonts\         Inter and IBM Plex Mono (SIL Open Font License)
+docs\review-prompt.md      a prompt for a full review/improvement pass with a strong model
 ```
 
-## Not in the repo (create/supply locally)
+**Not in the repo** (created on your PC): `api-key.txt`, `llm-config.bat`, `llama.cpp\`, `models\`, `memory\`,
+`command-center\settings.json`, token logs, browser/VS Code profiles.
 
-- `api-key.txt`: the llama-server API key (one line)
-- `llama.cpp\`: a llama.cpp CUDA build (`llama-server.exe` and DLLs)
-- `models\`: the GGUF files that `start-llm.bat` points at
-- per-machine state the app writes itself: `command-center\settings.json`, `tokens.json`, `tokens-log.jsonl`, `chats\`,
-  `edge-profile\`, `vscode-laptop\`, `cline-laptop\`
+## Privacy and security
 
-## Memory (4:mem)
+- Every server listens on `127.0.0.1` only. The browser never sees the API key; the command center adds it.
+- Requests are checked for the right Host/Origin, so other websites can't drive the app.
+- Phone access is Tailscale-only and requires Tailscale's signed-in user header.
+- Your memories, chats and settings stay in files on your PC (the memory folder). Nothing is uploaded anywhere.
 
-One long-term memory shared by every model (standard, uncensored, the laptop, any future model) and every device
-(this window, the phone). It lives in **one folder**, `memory\` by default (`settings.json` -> `memory_dir`):
-`memory.db` (SQLite: memories as plain sentences, chat snippets, FTS5 keyword index, embedding vectors) and `chats\`.
+## Troubleshooting
 
-- **recall**: before each chat request the newest message is matched against memories (meaning + keywords) and
-  against snippets of other chats; the best matches go into the prompt as a system message. The reply's stat line
-  shows what was recalled.
-- **learn**: after each reply is saved, the active model (when idle) extracts durable facts: add / update / delete.
-- **embedding model**: `models\Qwen3-Embedding-0.6B-GGUF\Qwen3-Embedding-0.6B-Q8_0.gguf` in its own llama-server on
-  127.0.0.1:8091, CPU only (no VRAM). Vectors are tagged with the model's name; switch models (`embed_model` in
-  settings.json) and the index rebuilds itself. Without it, recall falls back to keywords. numpy speeds up search.
-- **moving drives**: 4:mem -> location -> *move here* copies the folder, verifies it, switches; the old copy stays as a
-  backup. *use existing* points at a folder you copied yourself. A missing drive pauses memory instead of starting
-  an empty one elsewhere. Export/import as plain JSON for anything else.
-- **importing from ChatGPT / Claude**: 4:mem -> import takes their "Export data" .zip as-is (`importers.py` reads
-  `conversations.json`; ChatGPT's branch tree is walked along the shown branch, tool calls skipped). Each conversation
-  becomes a chat (ids `gpt-…` / `cl-…`, so re-imports skip duplicates), searchable immediately; learning from them runs
-  in the background, batched, after live chats. Saved memories can be pasted one per line.
-
-## Cline through the command center (5:cline)
-
-Each VS Code's Cline can point at `http://127.0.0.1:8099/cline/pc/v1` (this PC's model) or `/cline/laptop/v1`
-(the laptop via PAIR) instead of the model server. The command center then adds long-term memory and logs each task.
-Memory is recalled once per task and placed in the task message, so every step sends the same prompt prefix and
-llama-server's prompt cache keeps working (tested: step 2 reused 4,705 of 4,736 tokens). In chat, each turn's memory
-block goes into the newest message and earlier blocks are replayed byte-identical, so the history stays cached too.
-"route through here" / "go direct" rewrites Cline's settings (VS Code must be closed; the original is kept as
-`globalState.json.bak-command-center`). Routed Cline needs the command center to be open.
-
-## Tokens burned
-
-With `--metrics` (already in `start-llm.bat`) the numbers are exact: llama-server's own
-`prompt_tokens_total` / `tokens_predicted_total` counters, so they stay right even if the command center was closed.
-If a server runs without `--metrics` (for example the PAIR laptop, unless `--metrics` is added to its launch
-arguments in PAIR's llama.cpp engine settings), it falls back to counting generated tokens from `/slots` while the
-window is open, shown with `≈`.
+- **"model is off" / ECONNREFUSED 127.0.0.1:8090**: start the model (1:llm → on, or `start-standard.bat`).
+- **Cline: connection refused on 8099**: the command center isn't open (or switch Cline to direct in 5:cline).
+- **Model window closes right away**: usually out of VRAM: raise `MOE_STD`/`MOE_UNC` in `llm-config.bat`.
+- **Memory says "folder not found"**: the drive with the memory folder isn't connected; plug it in or pick another
+  folder in 6:set.
+- **Something else**: run `start-llm.bat` from a terminal to see llama.cpp's messages.

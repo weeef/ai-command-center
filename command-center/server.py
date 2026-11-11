@@ -26,6 +26,7 @@ import chats  # noqa: E402  (saved chat history)
 import memory  # noqa: E402  (long-term memory shared by every model)
 import urllib.parse  # noqa: E402
 import collections  # noqa: E402
+import re  # noqa: E402
 
 PORT = 8099
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -578,6 +579,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if self.remote_blocked(path):
             return
+        if path.startswith("/fonts/"):
+            return self.send_font(path[len("/fonts/"):])
         if path in ("/", "/index.html"):
             with open(os.path.join(HERE, "index.html"), "rb") as f:
                 body = f.read()
@@ -617,6 +620,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 ids = [int(x) for x in one("ids").split(",")[:50] if x.strip().isdigit()]
                 return self.send_json(200, {"memories": [m for m in map(memory.M.store.get, ids) if m]})
             self.send_json(200, {"memories": memory.M.store.list(one("q"), one("topic"), lim, off)})
+        elif path == "/api/memory/tree":
+            self.send_json(200, memory.M.tree())
+        elif path == "/api/memory/related":
+            qs = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            try:
+                mid = int((qs.get("id") or ["0"])[0])
+            except ValueError:
+                mid = 0
+            self.send_json(200, {"related": memory.M.related(mid)})
         elif path == "/api/memory/graph":
             self.send_json(200, {"nodes": memory.M.graph()})
         elif path == "/api/memory/export":
@@ -804,6 +816,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 active_streams -= 1
         ok, msg = M.import_file(tmp, learn, cleanup=True)
         return self.send_json(200 if ok else 409, {"ok": ok, "msg": msg})
+
+    def send_font(self, name):
+        """The bundled Inter / IBM Plex Mono files (SIL OFL), so the app looks the same offline and on the phone."""
+        if not re.fullmatch(r"[a-z0-9-]+\.woff2", name):
+            return self.send_json(404, {"error": "not found"})
+        try:
+            with open(os.path.join(HERE, "fonts", name), "rb") as f:
+                body = f.read()
+        except OSError:
+            return self.send_json(404, {"error": "not found"})
+        self.send_response(200)
+        self.send_header("Content-Type", "font/woff2")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "max-age=604800")
+        self.end_headers()
+        self.wfile.write(body)
 
     def cline_chat(self, which, data):
         """Cline -> (memory) -> the model that VS Code is set up for: "pc" = this PC's llama-server, "laptop" = PAIR.

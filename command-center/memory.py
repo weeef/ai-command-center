@@ -435,7 +435,7 @@ From the LATEST EXCHANGE, extract only durable things worth knowing in future co
 - anything else important                                                            topic: other
 
 Rules:
-- One self-contained sentence per memory, third person, about "the user" (e.g. "The user's laptop is called JordansLaptop.").
+- One self-contained sentence per memory, third person, about "the user" (e.g. "The user's laptop is a ThinkPad X1.").
 - Never write relative dates ("next week", "tomorrow", "in March"): turn them into absolute dates using TODAY, e.g. "around 2026-11-18".
 - Skip small talk, greetings, one-off questions, general knowledge, and things the assistant claimed but the user didn't confirm.
 - Skip anything already covered by an EXISTING MEMORY. If the exchange changes or corrects one, return {"op":"update","id":<its id>,"text":<new sentence>}.
@@ -554,6 +554,32 @@ class Memory:
                   indexed=indexed, to_index=max(0, sum(by_topic.values()) + chunks - indexed), to_learn=pend,
                   free=shutil.disk_usage(self.home).free if os.path.isdir(self.home) else None)
         return st
+
+    def tree(self, limit=3000):
+        """Everything the 4:mem tree draws: all memories plus what was just recalled and learned."""
+        if not self.ok():
+            return {"memories": [], "recalled": [], "learned": [], "error": self.store.error if self.store else None}
+        rows = self.store.q("SELECT %s FROM memories ORDER BY updated DESC LIMIT ?" % Store.COLS, (int(limit),))
+        return {"memories": [self.store.row(r) for r in rows], "recalled": list(self.last_recall),
+                "learned": [e["id"] for e in self.last_learned if e.get("op") != "delete"]}
+
+    def related(self, mid, k=6):
+        """The memories closest in meaning to one memory (keyword match if it isn't indexed yet)."""
+        if not self.ok() or not self.store.get(mid):
+            return []
+        model = self.embedder.name
+        ids, mat = self.store.matrix("m", model)
+        if mid in ids:
+            row = mat[ids.index(mid)]
+            hits = [(i, round(float(s), 3)) for i, s in self.store.similar("m", model, list(row), k + 1) if i != mid][:k]
+        else:
+            hits = [(i, None) for i in self.store.keyword("m", self.store.get(mid)["text"], k + 1) if i != mid][:k]
+        out = []
+        for i, s in hits:
+            m = self.store.get(i)
+            if m and (s is None or s >= 0.3):
+                out.append(dict(m, score=s))
+        return out
 
     def graph(self):
         """Memories for the brain view: the most used and most recent, with their topic."""

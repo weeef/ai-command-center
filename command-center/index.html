@@ -11,6 +11,17 @@
 <title>command center</title>
 <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAvUlEQVR42mNgQAJVi74HA/EmIH4LxP+pjN9CzQ5mwAaAEouQNUhJq1EVozlmEVbLqW0pAccsQg52ulmO5ohgBmi8DJQDNjHAEtwAOeAtw0BYjuyIweuA3bO+w/GAO4BWDiHZAdR2BME0QGtHEJUIaekIonMBrRxBUjakhSNILgeo7Yih5YABjYIBTYQDmg1JsXzeuSycmC5FMV0cgC84aeqAkdkgoacDBrxROuDN8oHtmAx412xQdE4HsnsOAN3q9zr1wm/GAAAAAElFTkSuQmCC">
 <style>
+/* bundled fonts (SIL Open Font License, see fonts/OFL-*.txt) */
+@font-face{font-family:"Inter";font-style:normal;font-display:swap;font-weight:100 900;src:url(/fonts/inter-latin.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:"IBM Plex Mono";font-style:normal;font-display:swap;font-weight:400;src:url(/fonts/plex-mono-latin-400.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:"IBM Plex Mono";font-style:normal;font-display:swap;font-weight:500;src:url(/fonts/plex-mono-latin-500.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:"IBM Plex Mono";font-style:normal;font-display:swap;font-weight:600;src:url(/fonts/plex-mono-latin-600.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:"IBM Plex Mono";font-style:normal;font-display:swap;font-weight:700;src:url(/fonts/plex-mono-latin-700.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:"Inter";font-style:normal;font-display:swap;font-weight:100 900;src:url(/fonts/inter-latin-ext.woff2) format("woff2");unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF}
+@font-face{font-family:"IBM Plex Mono";font-style:normal;font-display:swap;font-weight:400;src:url(/fonts/plex-mono-latin-ext-400.woff2) format("woff2");unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF}
+@font-face{font-family:"IBM Plex Mono";font-style:normal;font-display:swap;font-weight:500;src:url(/fonts/plex-mono-latin-ext-500.woff2) format("woff2");unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF}
+@font-face{font-family:"IBM Plex Mono";font-style:normal;font-display:swap;font-weight:600;src:url(/fonts/plex-mono-latin-ext-600.woff2) format("woff2");unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF}
+@font-face{font-family:"IBM Plex Mono";font-style:normal;font-display:swap;font-weight:700;src:url(/fonts/plex-mono-latin-ext-700.woff2) format("woff2");unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF}
 :root{
   --bg:#1a1b26;--bg2:#16161e;--bg3:#24283b;--fg:#c0caf5;--dim:#565f89;--border:#3b4261;
   --accent:#7aa2f7;--accent2:#bb9af7;--ok:#9ece6a;--warn:#e0af68;--crit:#f7768e;--cyan:#7dcfff;
@@ -354,6 +365,57 @@ details.think .tbody{white-space:pre-wrap;max-height:260px;overflow-y:auto;font-
    1:llm = brain strip + chat, 2:sys = fetch (model on/off, run on) + usage, 3:web = phone access + tailnet.
    2:code (VS Code) is PC-only, so on a phone its tab is replaced by 2:sys. */
 #tags .ph{display:none}
+/* 4:mem tree */
+#ws4{grid-template-columns:1fr 360px}
+#treePane{flex:1 1 auto;display:flex;flex-direction:column;min-height:0}
+.treebar{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
+.treebar input{flex:1 1 160px;min-width:0;background:var(--bg2);color:var(--fg);border:1px solid var(--border);font:inherit;padding:4px 8px;outline:none}
+.treebar input:focus{border-color:var(--accent)}
+.tchips{display:flex;gap:4px;flex-wrap:wrap}
+.tchip{font-size:11px;padding:0 7px;display:inline-flex;align-items:center;gap:5px;color:var(--dim)}
+.tchip::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--c)}
+.tchip.on{border-color:var(--c);color:var(--fg)}
+.tchip:disabled{opacity:.35}
+#treeWrap{flex:1;position:relative;min-height:0;overflow:hidden;cursor:grab;touch-action:none}
+#treeWrap.drag{cursor:grabbing}
+#treeSvg{position:absolute;inset:0;width:100%;height:100%;user-select:none}
+#treeSvg .tl{fill:none;stroke-width:1;opacity:.42}
+#treeSvg .tl-root{opacity:.75;stroke-width:1.6}
+#treeSvg .tl.dim{opacity:.06}
+#treeSvg .tl.on{opacity:1;stroke-width:2.2}
+#treeSvg .leaf{cursor:pointer}
+#treeSvg .leaf.dim{opacity:.13}
+#treeSvg .leaf .dot.pinned{stroke:var(--fg);stroke-width:1.6}
+#treeSvg .leaf.sel .dot{stroke:var(--fg);stroke-width:2.6}
+#treeSvg .leaf .halo{opacity:.28;animation:halo 2.2s ease-in-out infinite}
+@keyframes halo{50%{opacity:.04}}
+#treeSvg .lbl{font-size:11px;fill:var(--fg);opacity:.72;pointer-events:none}
+#treeSvg .leaf:hover .lbl,#treeSvg .leaf.sel .lbl{opacity:1;font-weight:600}
+#treeSvg .tlbl{font-size:11.5px;fill:var(--fg);font-weight:600;pointer-events:none;paint-order:stroke;stroke:var(--bg);stroke-width:4px;stroke-linejoin:round}
+#treeSvg .topic{cursor:pointer}
+#treeSvg .topic:hover circle:first-child{stroke-width:3}
+#treeSvg .root{cursor:pointer}
+#treeSvg .root circle{fill:var(--bg2);stroke:var(--fg);stroke-width:1.4}
+#treeSvg .rlbl{font-size:9.5px;fill:var(--dim);text-transform:uppercase;letter-spacing:.1em}
+#treeSvg .rcnt{font-size:16px;font-weight:700;fill:var(--fg)}
+#treeSvg .rel{fill:none;stroke:var(--fg);stroke-dasharray:3 4;opacity:.7;stroke-width:1.2}
+#treeEmpty{position:absolute;left:50%;top:calc(50% + 46px);transform:translateX(-50%);color:var(--dim);text-align:center;width:300px;max-width:90%;font-size:12px;pointer-events:none}
+.tdtopic{display:flex;align-items:center;gap:8px;color:var(--dim);font-size:12px}
+.tdtext{font-size:15px;line-height:1.5;margin-top:8px;overflow-wrap:anywhere}
+#treeDetail textarea{width:100%;min-height:80px;background:var(--bg2);color:var(--fg);border:1px solid var(--border);font:inherit;padding:6px 8px;resize:vertical;margin-top:8px}
+#treeDetail select{background:var(--bg2);color:var(--fg);border:1px solid var(--border);font:inherit;padding:3px}
+.trrow{display:flex;gap:8px;padding:6px 2px;border-bottom:1px solid var(--bg3);cursor:pointer;align-items:flex-start;font-size:12.5px}
+.trrow:hover{background:var(--bg2)}
+.trrow .tdot,.tdtopic .tdot{width:8px;height:8px;border-radius:50%;flex:0 0 auto;margin-top:5px}
+.tdtopic .tdot{margin-top:0}
+.trrow i{margin-left:auto;color:var(--dim);font-style:normal;font-size:11px;padding-left:6px;white-space:nowrap}
+#treeRecentPane{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
+#treeRecent{flex:1;overflow-y:auto;min-height:0}
+[data-theme="corpus"] .treebar input,[data-theme="corpus"] #treeDetail textarea{border-radius:6px}
+[data-theme="corpus"] .tdtext{font-size:16px;letter-spacing:-.01em}
+[data-theme="corpus"] #treeSvg .rlbl,[data-theme="corpus"] .trrow i,[data-theme="corpus"] .tdtopic{font-family:var(--font)}
+@media (prefers-reduced-motion:reduce){#treeSvg .leaf .halo{animation:none}}
+@media (max-width:760px){#ws4{display:flex}#treePane{flex:0 0 auto;height:66vh}#treeRecentPane{flex:0 0 auto;max-height:50vh}}
 /* 4:mem */
 #memListPane{flex:1 1 auto;display:flex;flex-direction:column;min-height:0}
 .memtools,.memadd{display:flex;gap:8px;margin-bottom:8px;align-items:center}
@@ -378,7 +440,8 @@ details.think .tbody{white-space:pre-wrap;max-height:260px;overflow-y:auto;font-
 .topiclegend span::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--c);margin-right:5px}
 .memloc{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
 .memloc input{flex:1 1 220px}
-#ws4 .col:first-child{overflow-y:auto}
+#ws6 .col:first-child{overflow-y:auto}
+.tpk.on{background:var(--accent);color:var(--bg);border-color:var(--accent)}
 #ws5 .col:first-child{overflow-y:auto}
 #clLogPane{flex:1 1 auto;display:flex;flex-direction:column;min-height:0}
 #clLog{flex:1;overflow-y:auto;min-height:0}
@@ -451,8 +514,9 @@ body.remote #tags span[data-ws="2"]{display:none}
     <span data-ws="2" role="tab" tabindex="0" title="VS Code and Cline (Alt+2)">2:code</span>
     <span class="ph" data-ws="s" role="tab" tabindex="0" title="model on/off and usage">2:sys</span>
     <span data-ws="3" role="tab" tabindex="0" title="phone access over Tailscale (Alt+3)">3:web</span>
-    <span data-ws="4" role="tab" tabindex="0" title="long-term memory, shared by every model (Alt+4)">4:mem</span>
+    <span data-ws="4" role="tab" tabindex="0" title="the memory tree: everything the models remember (Alt+4)">4:mem</span>
     <span data-ws="5" role="tab" tabindex="0" title="Cline through the command center: memory + request log (Alt+5)">5:cline</span>
+    <span data-ws="6" role="tab" tabindex="0" title="settings: memory, location, import, appearance (Alt+6)">6:set</span>
   </div>
   <div id="state" class="st-OFF">OFF</div>
   <div class="sep">│</div>
@@ -594,8 +658,23 @@ body.remote #tags span[data-ws="2"]{display:none}
   </div>
 </main>
 
-<!-- 4:mem ─ long-term memory, shared by every model -->
+<!-- 4:mem ─ the memory tree -->
 <main id="ws4" class="ws" hidden>
+  <div class="col">
+    <section class="pane" id="treePane"><div class="title">memory tree <i id="treeInfo"></i></div>
+      <div class="treebar"><input id="treeQ" placeholder="search the tree"><div class="tchips" id="treeChips"></div><button id="treeReset" title="back to the whole tree (double-click the tree does the same)">reset view</button></div>
+      <div id="treeWrap"><svg id="treeSvg" aria-label="memory tree"></svg>
+        <div id="treeEmpty" hidden>No memories yet. Chat normally and they grow here, or add some in <b>6:set</b>.</div></div>
+    </section>
+  </div>
+  <div class="col">
+    <section class="pane"><div class="title">memory</div><div id="treeDetail"></div></section>
+    <section class="pane" id="treeRecentPane"><div class="title">newest</div><div id="treeRecent"></div></section>
+  </div>
+</main>
+
+<!-- 6:set ─ settings: memory, location, import, appearance -->
+<main id="ws6" class="ws" hidden>
   <div class="col">
     <section class="pane"><div class="title">memory <i>· shared by every model</i></div><div id="memStatus">loading…</div></section>
     <section class="pane"><div class="title">location <i>· one folder, any drive</i></div><div id="memLoc">loading…</div></section>
@@ -613,6 +692,7 @@ body.remote #tags span[data-ws="2"]{display:none}
     </section>
   </div>
   <div class="col">
+    <section class="pane"><div class="title">appearance</div><div id="themePick" class="memloc" style="margin-top:0"></div></section>
     <section class="pane" id="memListPane"><div class="title">memories <i id="memCount"></i></div>
       <div class="memadd"><input id="memNew" maxlength="1000" placeholder="teach it something: e.g. I prefer metric units"><select id="memNewTopic"></select><button id="memAddBtn">remember</button></div>
       <div class="memtools"><input id="memQ" placeholder="search memories"><select id="memTopic"><option value="">all topics</option></select></div>
@@ -643,7 +723,7 @@ function setTheme(t){
   document.documentElement.dataset.theme = t;
   $("themeBtn").textContent = "◐ " + t;
   store.set("rt.theme", t);
-  buildSwatch(); drawSparks();
+  buildSwatch(); drawSparks(); renderThemePick();
   if (typeof brain !== "undefined") { brain.dirty = true; renderBrain(brain.mode === "busy"); }
 }
 function cycleTheme(){ const cur = document.documentElement.dataset.theme || "corpus"; setTheme(THEMES[(THEMES.indexOf(cur)+1) % THEMES.length]); }
@@ -1417,7 +1497,8 @@ function memNotice(m){
     d.style.cursor = "pointer"; d.onclick = () => showWs("4"); log.appendChild(d); scroll();
   }
   memSeq = m.seq; loadGraph();
-  if (ws === "4") refreshMem(true);
+  if (ws === "6") refreshMem(true);
+  if (ws === "4") refreshTree();
 }
 async function refreshMem(forceList){
   let st; try { st = await (await fetch("/api/memory", {cache:"no-store"})).json(); } catch(e) { return; }
@@ -1523,7 +1604,7 @@ async function memAdd(){
 }
 $("memAddBtn").onclick = memAdd;
 $("memNew").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); memAdd(); } });
-$("ws4").addEventListener("click", async e => {
+$("ws6").addEventListener("click", async e => {
   const id = e.target.id;
   if (id === "memOnBtn") { await postJSON("/api/memory/settings", {on: !memStat.on}); return refreshMem(); }
   if (id === "memLearnBtn") { await postJSON("/api/memory/settings", {learn: !memStat.learn}); return refreshMem(); }
@@ -1555,7 +1636,7 @@ $("impPasteBtn").onclick = async () => {
   sysToast(r.msg || (r.ok ? "added" : "nothing added"), !r.ok, 6000);
   if (r.ok) { $("impPaste").value = ""; refreshMem(true); }
 };
-$("ws4").addEventListener("change", async e => {
+$("ws6").addEventListener("change", async e => {
   if (e.target.id !== "memImport" || !e.target.files[0]) return;
   try {
     const data = JSON.parse(await e.target.files[0].text());
@@ -1578,6 +1659,188 @@ function flashMemories(ids){
   brain.dirty = true;
 }
 loadGraph();
+
+/* ---------------- 4:mem: the memory tree ----------------
+   Radial tree: "memory" in the middle, the 8 topics around it, every memory a leaf in its topic's colour.
+   Leaf size = how often it's recalled, ring = pinned, glow = just learned or recalled for the last reply.
+   Click a leaf for the full memory + what it's related to (dashed lines), click a topic to open that branch. */
+const SVGNS = "http://www.w3.org/2000/svg";
+const tree = {data: null, key: "", sel: null, focus: "", q: "", k: 1, x: 0, y: 0, related: []};
+function svgEl(tag, attrs, parent){ const e = document.createElementNS(SVGNS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+async function refreshTree(force){
+  let d; try { d = await (await fetch("/api/memory/tree", {cache:"no-store"})).json(); } catch(e) { return; }
+  const key = JSON.stringify([d.memories.map(m => [m.id, m.updated, m.uses, m.pinned, m.topic]), d.recalled, d.learned]);
+  if (!force && key === tree.key) return;
+  tree.key = key; tree.data = d;
+  if (tree.sel && !d.memories.some(m => m.id === tree.sel)) tree.sel = null;
+  renderTree(); renderTreeDetail(); renderTreeRecent();
+}
+function renderTreeChips(){
+  const box = $("treeChips"), d = tree.data; if (!d) return;
+  box.innerHTML = TOPICS.map(t => { const n = d.memories.filter(m => m.topic === t).length;
+    return `<button class="tchip ${tree.focus === t ? "on" : ""}" style="--c:${topicCol(t)}" data-topic="${t}" ${n ? "" : "disabled"} title="${TOPIC_NAME[t]}: ${n}">${TOPIC_NAME[t]}</button>`; }).join("");
+}
+function renderTree(){
+  const svg = $("treeSvg"), wrap = $("treeWrap");
+  const W = wrap.clientWidth, H = wrap.clientHeight; if (!W || !H || !tree.data) return;
+  renderTreeChips();
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.innerHTML = "";
+  const g = svgEl("g", {transform: `translate(${W/2 + tree.x},${H/2 + tree.y}) scale(${tree.k})`}, svg); tree.g = g;
+  const all = tree.data.memories || [];
+  const mems = tree.focus ? all.filter(m => m.topic === tree.focus) : all;
+  const q = tree.q.trim().toLowerCase(), match = m => !q || m.text.toLowerCase().includes(q) || m.topic.includes(q);
+  const recalled = new Set(tree.data.recalled || []), learned = new Set(tree.data.learned || []);
+  const groups = TOPICS.map(t => ({t, items: mems.filter(m => m.topic === t)})).filter(x => tree.focus ? x.t === tree.focus : true);
+  const n = mems.length, R = Math.min(W, H) / 2, labels = n <= 150 || tree.k >= 1.7;
+  const Rl = Math.max(R * 0.42, R - (labels ? 168 : 36)), Rt = Math.min(Rl * 0.42, 130);
+  const weights = groups.map(x => Math.max(x.items.length, n ? 1.4 : 1)), tot = weights.reduce((a, b) => a + b, 0);
+  const gap = groups.length > 1 ? 0.05 : 0;
+  const links = svgEl("g", {}, g), rels = svgEl("g", {}, g), nodes = svgEl("g", {}, g);
+  const P = (a, r) => [Math.cos(a) * r, Math.sin(a) * r], pos = new Map();
+  let a0 = -Math.PI / 2;
+  groups.forEach((x, i) => {
+    const span = (2 * Math.PI - gap * groups.length) * weights[i] / tot, am = a0 + span / 2, col = topicCol(x.t);
+    const [tx, ty] = groups.length === 1 ? [0, 0] : P(am, Rt);
+    if (groups.length > 1) svgEl("path", {d: `M0,0 L${tx},${ty}`, stroke: col, class: "tl tl-root"}, links);
+    const items = x.items.slice().sort((a, b) => (b.pinned - a.pinned) || ((b.uses || 0) - (a.uses || 0)) || (b.updated - a.updated));
+    const step = items.length ? span / items.length : 0, rings = step * Rl < 7 ? 3 : step * Rl < 12 ? 2 : 1;
+    items.forEach((m, j) => {
+      const a = a0 + step * (j + 0.5), r = Rl + (j % rings) * 24, [lx, ly] = P(a, r);
+      const rm = (Math.hypot(tx, ty) + r) / 2, [c1x, c1y] = groups.length === 1 ? [0, 0] : P(am, rm), [c2x, c2y] = P(a, rm);
+      const hit = match(m);
+      svgEl("path", {d: `M${tx},${ty} C${c1x},${c1y} ${c2x},${c2y} ${lx},${ly}`, stroke: col, class: "tl" + (hit ? "" : " dim") + (tree.sel === m.id ? " on" : "")}, links);
+      pos.set(m.id, [lx, ly]);
+      const leaf = svgEl("g", {class: "leaf" + (hit ? "" : " dim") + (tree.sel === m.id ? " sel" : ""), transform: `translate(${lx},${ly})`, tabindex: 0, "data-id": m.id, role: "button"}, nodes);
+      const rr = 3.4 + Math.min(5, Math.log2(1 + (m.uses || 0)) * 1.3);
+      if (recalled.has(m.id) || learned.has(m.id)) svgEl("circle", {r: rr + 6, class: "halo", fill: col}, leaf);
+      svgEl("circle", {r: rr, fill: col, class: "dot" + (m.pinned ? " pinned" : "")}, leaf);
+      if (labels) {
+        const deg = a * 180 / Math.PI, flip = Math.cos(a) < 0;
+        const t = svgEl("text", {class: "lbl", transform: `rotate(${flip ? deg + 180 : deg})`, x: flip ? -(rr + 6) : rr + 6, dy: "0.32em", "text-anchor": flip ? "end" : "start"}, leaf);
+        const short = treeLabel(m.text);
+        t.textContent = short.length > 30 ? short.slice(0, 29).replace(/\s+\S*$/, "") + "…" : short;
+      }
+      svgEl("title", {}, leaf).textContent = `${m.text}\n${TOPIC_NAME[m.topic]}${m.uses ? " · recalled " + m.uses + "×" : ""}${m.pinned ? " · pinned" : ""}`;
+    });
+    if (groups.length > 1) {
+      const tn = svgEl("g", {class: "topic", transform: `translate(${tx},${ty})`, "data-topic": x.t, tabindex: 0, role: "button"}, nodes);
+      svgEl("circle", {r: 10, fill: "var(--bg)", stroke: col, "stroke-width": 2}, tn);
+      svgEl("circle", {r: 4.5, fill: col}, tn);
+      const [ox, oy] = P(am, 20), c = Math.cos(am);
+      svgEl("text", {class: "tlbl", x: ox, y: oy, dy: "0.32em", "text-anchor": Math.abs(c) < 0.35 ? "middle" : c > 0 ? "start" : "end"}, tn).textContent = `${TOPIC_NAME[x.t]} ${x.items.length}`;
+      svgEl("title", {}, tn).textContent = `open the ${TOPIC_NAME[x.t]} branch`;
+    }
+    a0 += span + gap;
+  });
+  const root = svgEl("g", {class: "root", tabindex: 0, role: "button"}, nodes);
+  svgEl("circle", {r: 28}, root);
+  svgEl("text", {"text-anchor": "middle", dy: "-0.25em", class: "rlbl"}, root).textContent = tree.focus ? TOPIC_NAME[tree.focus] : "memory";
+  svgEl("text", {"text-anchor": "middle", dy: "1.05em", class: "rcnt"}, root).textContent = n;
+  svgEl("title", {}, root).textContent = tree.focus ? "back to the whole tree" : "all memories";
+  if (tree.sel && pos.has(tree.sel)) {
+    const [sx, sy] = pos.get(tree.sel);
+    for (const r of tree.related) if (pos.has(r.id)) {
+      const [ex, ey] = pos.get(r.id);
+      svgEl("path", {d: `M${sx},${sy} Q${(sx + ex) * 0.2},${(sy + ey) * 0.2} ${ex},${ey}`, class: "rel"}, rels);
+    }
+  }
+  $("treeEmpty").hidden = !!all.length;
+  $("treeInfo").textContent = !all.length ? "" : q ? `· ${mems.filter(match).length} of ${n} match` : `· ${n}${tree.focus ? " in " + TOPIC_NAME[tree.focus] : ""}`;
+}
+// leaves are all about the user, so labels drop the "The user ..." opening: "prefers dark themes"
+function treeLabel(t){ return t.replace(/^(sample:\s*)?the user('s)?\s+/i, (_, s, p) => p ? "my " : "").replace(/\.$/, ""); }
+async function selectMemory(id){
+  tree.sel = id; tree.related = [];
+  renderTree(); renderTreeDetail();
+  try { tree.related = (await (await fetch("/api/memory/related?id=" + id, {cache:"no-store"})).json()).related || []; } catch(e) {}
+  if (tree.sel === id) { renderTree(); renderTreeDetail(); }
+}
+function memSource(m){ return (m.source || "").startsWith("chat:cline-") ? "a Cline task" : (m.source || "").startsWith("chat:gpt-") ? "an imported ChatGPT chat" :
+  (m.source || "").startsWith("chat:cl-") ? "imported from Claude" : (m.source || "").startsWith("chat:") ? "a chat" : m.source === "manual" ? "added by you" : m.source === "import" ? "imported" : (m.source || "–"); }
+function renderTreeDetail(){
+  const box = $("treeDetail"), m = tree.data && tree.data.memories.find(x => x.id === tree.sel);
+  if (!m) { box.innerHTML = `<div class="hint" style="margin-top:0">Click a leaf to read a memory, edit it, and see what it connects to. Click a topic to open just that branch; click the centre to go back. Scroll to zoom, drag to move, double-click to reset.</div>`; return; }
+  box.innerHTML = `
+    <div class="tdtopic"><span class="tdot" style="background:${topicCol(m.topic)}"></span>${esc(TOPIC_NAME[m.topic] || m.topic)}${m.pinned ? " · ★ pinned" : ""}</div>
+    <div class="tdtext" id="tdText">${esc(m.text)}</div>
+    <div class="kvt" style="margin-top:10px">
+      <span class="k">from</span><span class="v">${esc(memSource(m))}</span><span></span>
+      <span class="k">added</span><span class="v">${new Date(m.created * 1000).toLocaleDateString()}</span><span></span>
+      <span class="k">changed</span><span class="v">${ago(m.updated)}</span><span></span>
+      <span class="k">recalled</span><span class="v">${m.uses || 0}×${m.last_used ? " · last " + ago(m.last_used) : ""}</span><span></span>
+    </div>
+    <div class="memloc"><button id="tdPin" title="pinned memories go to the model every time">${m.pinned ? "★ unpin" : "☆ pin"}</button><button id="tdEdit">edit</button><button id="tdDel">forget</button></div>
+    <div class="sect">connected</div>
+    <div>${tree.related.length ? tree.related.map(r => `<div class="trrow" data-id="${r.id}"><span class="tdot" style="background:${topicCol(r.topic)}"></span><span>${esc(r.text)}</span>${r.score != null ? `<i>${Math.round(r.score * 100)}%</i>` : ""}</div>`).join("") : `<div class="hint">nothing closely related yet</div>`}</div>`;
+}
+function renderTreeRecent(){
+  const ms = (tree.data && tree.data.memories || []).slice().sort((a, b) => b.updated - a.updated).slice(0, 25);
+  $("treeRecent").innerHTML = ms.length ? ms.map(m => `<div class="trrow" data-id="${m.id}"><span class="tdot" style="background:${topicCol(m.topic)}"></span><span>${esc(m.text)}</span><i>${ago(m.updated)}</i></div>`).join("")
+    : `<div class="hint" style="margin-top:0">nothing yet</div>`;
+}
+$("treeDetail").addEventListener("click", async e => {
+  const m = tree.data && tree.data.memories.find(x => x.id === tree.sel); if (!m) return;
+  const row = e.target.closest(".trrow"); if (row) return selectMemory(+row.dataset.id);
+  const id = e.target.id;
+  if (id === "tdPin") { await postJSON("/api/memory/update", {id: m.id, pinned: !m.pinned}); return refreshTree(true); }
+  if (id === "tdDel") {
+    if (e.target.textContent !== "sure?") { e.target.textContent = "sure?"; e.target.style.color = "var(--crit)"; return; }
+    await postJSON("/api/memory/delete", {id: m.id}); tree.sel = null; return refreshTree(true);
+  }
+  if (id === "tdEdit") {
+    const box = el("textarea"); box.value = m.text; box.maxLength = 1000;
+    const tp = el("select"); TOPICS.forEach(x => tp.add(new Option(TOPIC_NAME[x], x))); tp.value = m.topic;
+    const sv = el("button", "", "save"), cc = el("button", "", "cancel"), r = el("div", "memloc");
+    sv.onclick = async () => { await postJSON("/api/memory/update", {id: m.id, text: box.value, topic: tp.value}); refreshTree(true); };
+    cc.onclick = () => renderTreeDetail();
+    r.append(tp, sv, cc); $("tdText").replaceWith(box); box.after(r); box.focus();
+  }
+});
+$("treeRecent").addEventListener("click", e => { const r = e.target.closest(".trrow"); if (r) selectMemory(+r.dataset.id); });
+$("treeChips").addEventListener("click", e => { const b = e.target.closest("[data-topic]"); if (!b) return; tree.focus = tree.focus === b.dataset.topic ? "" : b.dataset.topic; tree.x = tree.y = 0; tree.k = 1; renderTree(); });
+$("treeQ").addEventListener("input", e => { tree.q = e.target.value; renderTree(); });
+function resetTree(){ tree.focus = ""; tree.x = tree.y = 0; tree.k = 1; renderTree(); }
+$("treeReset").onclick = resetTree;
+{ // zoom, pan, click
+  const w = $("treeWrap"); let drag = null;
+  const apply = () => tree.g && tree.g.setAttribute("transform", `translate(${w.clientWidth/2 + tree.x},${w.clientHeight/2 + tree.y}) scale(${tree.k})`);
+  w.addEventListener("wheel", e => {
+    e.preventDefault();
+    const r = w.getBoundingClientRect(), px = (e.clientX - r.left) / uiScale - w.clientWidth / 2, py = (e.clientY - r.top) / uiScale - w.clientHeight / 2;
+    const k2 = Math.max(0.4, Math.min(6, tree.k * Math.exp(-e.deltaY * 0.0015)));
+    tree.x = px - (px - tree.x) * k2 / tree.k; tree.y = py - (py - tree.y) * k2 / tree.k;
+    const relabel = (tree.k < 1.7) !== (k2 < 1.7); tree.k = k2; relabel ? renderTree() : apply();
+  }, {passive: false});
+  w.addEventListener("pointerdown", e => { drag = {x: e.clientX, y: e.clientY, ox: tree.x, oy: tree.y, moved: false}; });
+  w.addEventListener("pointermove", e => {
+    if (!drag) return; const dx = (e.clientX - drag.x) / uiScale, dy = (e.clientY - drag.y) / uiScale;
+    if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+    if (!drag.moved) { drag.moved = true; w.setPointerCapture(e.pointerId); w.classList.add("drag"); }
+    tree.x = drag.ox + dx; tree.y = drag.oy + dy; apply();
+  });
+  const end = e => {
+    if (!drag) return; const moved = drag.moved; drag = null; w.classList.remove("drag");
+    if (moved) return;
+    const leaf = e.target.closest && e.target.closest(".leaf"), topic = e.target.closest && e.target.closest(".topic"), root = e.target.closest && e.target.closest(".root");
+    if (leaf) selectMemory(+leaf.dataset.id);
+    else if (topic) { tree.focus = topic.dataset.topic; tree.x = tree.y = 0; tree.k = 1; renderTree(); }
+    else if (root) { if (tree.focus) resetTree(); else { tree.sel = null; renderTree(); renderTreeDetail(); } }
+  };
+  w.addEventListener("pointerup", end);
+  w.addEventListener("pointercancel", () => { drag = null; w.classList.remove("drag"); });
+  w.addEventListener("dblclick", resetTree);
+  w.addEventListener("keydown", e => {
+    if (e.key !== "Enter") return; const t = e.target.closest(".leaf,.topic,.root"); if (!t) return;
+    if (t.classList.contains("leaf")) selectMemory(+t.dataset.id); else if (t.classList.contains("topic")) { tree.focus = t.dataset.topic; renderTree(); } else resetTree();
+  });
+  new ResizeObserver(() => { if (ws === "4") renderTree(); }).observe(w);
+}
+function renderThemePick(){
+  const b = $("themePick"); if (!b) return;
+  const cur = document.documentElement.dataset.theme;
+  b.innerHTML = THEMES.map(t => `<button class="tpk ${t === cur ? "on" : ""}" data-theme-pick="${t}">${t}</button>`).join("") + `<span class="hint" style="margin:0 0 0 6px">also the ◐ button, or /theme</span>`;
+}
+document.addEventListener("click", e => { const b = e.target.closest("[data-theme-pick]"); if (b) { setTheme(b.dataset.themePick); } });
 
 /* ---------------- 5:cline ----------------
    Cline sends its requests to the command center (http://127.0.0.1:8099/cline/<pc|laptop>/v1), which adds the
@@ -1602,7 +1865,7 @@ function renderCline(d){
   }
   $("clMem").innerHTML = `
     <div class="kvt">
-      <span class="k">recall</span><span class="v">${d.memory ? "memories go into each task" : "off"}${d.memory && !d.memory_on ? " (memory itself is off, see 4:mem)" : ""}</span><button class="tog ${d.memory ? "on" : ""}" data-clset="memory">${d.memory ? "on" : "off"}</button>
+      <span class="k">recall</span><span class="v">${d.memory ? "memories go into each task" : "off"}${d.memory && !d.memory_on ? " (memory itself is off, see 6:set)" : ""}</span><button class="tog ${d.memory ? "on" : ""}" data-clset="memory">${d.memory ? "on" : "off"}</button>
       <span class="k">learn</span><span class="v">${d.learn ? "learns from what you ask Cline" : "off"}</span><button class="tog ${d.learn ? "on" : ""}" data-clset="learn">${d.learn ? "on" : "off"}</button>
     </div>
     <div class="hint" style="margin-top:10px">Memory is looked up once per task and put in the task message, so every step of the task sends the same prompt and the model server's cache keeps working: about 1–2k extra tokens once per task, not per step. The command center has to be open for routed Cline to work; "go direct" undoes it.</div>`;
@@ -1694,13 +1957,14 @@ fitScale();
 let ws = "1", wsTimer = 0;
 let remote = false;
 function showWs(n){
-  n = String(n); if (!["1","2","3","4","5","s"].includes(n)) n = "1";
+  n = String(n); if (!["1","2","3","4","5","6","s"].includes(n)) n = "1";
   if (phone.matches || remote) { if (n === "2") n = phone.matches ? "s" : "1"; if (n === "5") n = "1"; }  // VS Code lives on the PC
   if (!phone.matches && n === "s") n = "1";
   ws = n; store.set("rt.ws", n);
   document.body.classList.toggle("sysview", n === "s");
   document.querySelectorAll("#tags span").forEach(t => { const on = t.dataset.ws === n; t.classList.toggle("on", on); t.setAttribute("aria-selected", on); });
-  for (const k of ["1","2","3","4","5"]) $("ws" + k).hidden = k !== (n === "s" ? "1" : n);
+  for (const k of ["1","2","3","4","5","6"]) $("ws" + k).hidden = k !== (n === "s" ? "1" : n);
+  if (n === "4") requestAnimationFrame(renderTree);
   clearTimeout(wsTimer);
   if (n === "1") { measureBrain(); brain.dirty = true; if (!phone.matches) ta.focus(); }
   else if (n !== "s") refreshWs();
@@ -1714,7 +1978,8 @@ async function refreshWs(){
   try {
     if (ws === "2") renderCode(await (await fetch("/api/code", {cache:"no-store"})).json());
     if (ws === "3") renderWeb(await (await fetch("/api/web", {cache:"no-store"})).json());
-    if (ws === "4") await refreshMem();
+    if (ws === "6") await refreshMem();
+    if (ws === "4") await refreshTree();
     if (ws === "5") renderCline(await (await fetch("/api/clinecc", {cache:"no-store"})).json());
   } catch (e) {}
   if (ws !== "1") wsTimer = setTimeout(refreshWs, document.hidden ? 15000 : 4000);
@@ -1723,7 +1988,7 @@ document.querySelectorAll("#tags span").forEach(t => {
   t.onclick = () => showWs(t.dataset.ws);
   t.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showWs(t.dataset.ws); } };
 });
-addEventListener("keydown", e => { if (e.altKey && !e.ctrlKey && ["1","2","3","4","5"].includes(e.key)) { e.preventDefault(); showWs(e.key); } });
+addEventListener("keydown", e => { if (e.altKey && !e.ctrlKey && ["1","2","3","4","5","6"].includes(e.key)) { e.preventDefault(); showWs(e.key); } });
 function setRemote(r){ if (r === remote) return; remote = r; document.body.classList.toggle("remote", r); if (r && ws === "2") showWs("1"); }
 
 async function postJSON(url, obj){
@@ -1867,7 +2132,7 @@ renderBrain(false);
 requestAnimationFrame(brainLoop);
 loadCline();
 poll();
-showWs((location.hash.match(/ws=([1-5])/) || [])[1] || store.get("rt.ws") || "1");
+showWs((location.hash.match(/ws=([1-6])/) || [])[1] || store.get("rt.ws") || "1");
 sys("command center · /help for commands");
 ta.focus();
 </script>

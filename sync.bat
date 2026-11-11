@@ -8,6 +8,6 @@ if "%MSG%"=="" set "MSG=sync"
 git add -A
 git diff --cached --quiet && echo Nothing new to commit.
 git diff --cached --quiet || git commit -q -m "%MSG%"
-git push -q origin main && echo Pushed to github.com/weeef/ai-command-center
+git push -q origin main && echo Pushed.
 if errorlevel 1 echo Push failed - check your connection and run sync.bat again.
 if "%~1"=="" pause

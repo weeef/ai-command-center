@@ -10,6 +10,10 @@
 !start-command-center.bat
 !start-vscode-laptop.bat
 !sync.bat
+!setup.bat
+!setup.ps1
+!docs/
+!docs/*.md
 !command-center/
 command-center/*
 !command-center/server.py
@@ -22,6 +26,9 @@ command-center/*
 !command-center/launch.pyw
 !command-center/index.html
 !command-center/command-center.ico
+!command-center/fonts/
+!command-center/fonts/*.woff2
+!command-center/fonts/*.txt
 !command-center/start-command-center.bat
 
 # never, even if someone adds a broader rule above
