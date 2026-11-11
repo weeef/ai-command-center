@@ -45,7 +45,8 @@ The README "Speed" table has not been updated with these numbers yet.
 
 ## 2. Found, fixed only on the branch `review-pass-wip`
 
-The most important finding is a **security bug in `server.py` on `main`**:
+The most important finding was a **security bug in `server.py`**. The minimal fix for it is now on `main` as well
+(connections are closed unless the request body was read in full; verified that a smuggled request is no longer answered):
 
 - **Request smuggling past the Origin check.** When a request is refused (bad Origin, wrong Content-Type, too large)
   the server answers without reading the request body and keeps the connection open, so the body is then parsed as

@@ -29,7 +29,7 @@ import urllib.parse  # noqa: E402
 import collections  # noqa: E402
 import re  # noqa: E402
 
-PORT = 8099
+PORT = int(os.environ.get("CC_PORT") or 8099)
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 LLAMA = ("127.0.0.1", 8090)
@@ -574,7 +574,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return True
         return False
 
+    def hold(self):
+        """Call first in every do_*. Until a request's body has been read in full, the connection must not be
+        reused: whatever is left unread would be parsed as the next request, with headers of the sender's choosing
+        (no Origin, a local Host). That would let any web page smuggle an API call past guard() inside the body
+        of a refused request. Returns whether the connection may be kept once the body has been read."""
+        keep = not self.close_connection
+        if (self.headers.get("Content-Length") or "0").strip() != "0" or "Transfer-Encoding" in self.headers:
+            self.close_connection = True
+        return keep
+
     def do_GET(self):
+        self.hold()
         if not self.guard():
             return
         path = self.path.split("?", 1)[0]
@@ -669,8 +680,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_json(404, {"error": "not found"})
 
     def do_POST(self):
+        keep = self.hold()
         if not self.guard():
             return
+        if "Transfer-Encoding" in self.headers:
+            return self.send_json(400, {"error": "Transfer-Encoding is not supported; send Content-Length"})
         if self.path.split("?", 1)[0] == "/api/memory/import-file":
             return self.import_upload()
         if not (self.headers.get("Content-Type", "").split(";")[0].strip().lower() == "application/json"):
@@ -683,6 +697,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.close_connection = True
             return self.send_json(413, {"error": "body too large (64 MB max)"})
         body = self.rfile.read(n)
+        if len(body) == n:
+            self.close_connection = not keep   # fully read: the connection is safe to reuse
         try:
             data = json.loads(body)
         except ValueError:
@@ -799,6 +815,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_json(404, {"error": "not found"})
 
     def do_PUT(self):
+        self.hold()
         self.guard() and self.send_json(405, {"error": "method not allowed"})
 
     do_DELETE = do_PATCH = do_PUT
