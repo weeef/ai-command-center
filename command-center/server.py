@@ -22,6 +22,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import workspaces  # noqa: E402  (2:code and 3:web)
 import tokens  # noqa: E402  (tokens burned per machine)
+import chats  # noqa: E402  (saved chat history)
 
 PORT = 8099
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -464,7 +465,7 @@ def laptop_action(action):
 
 
 _stats = {"t": 0, "v": None}
-_BUILD_FILES = ("index.html", "server.py", "workspaces.py", "tokens.py")
+_BUILD_FILES = ("index.html", "server.py", "workspaces.py", "tokens.py", "chats.py")
 
 
 def build_stamp():
@@ -572,6 +573,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_json(200, stats())
         elif path == "/api/tokens/log":
             return self.send_json(200, {"log": token_watch.recent_log(30) if token_watch else []})
+        elif path == "/api/chats":
+            self.send_json(200, {"chats": chats.list_chats()})
+        elif path.startswith("/api/chats/"):
+            c = chats.get_chat(path[len("/api/chats/"):])
+            self.send_json(200 if c else 404, c or {"error": "no such chat"})
         elif path == "/api/code":
             self.send_json(200, workspaces.code_info(settings, model_info(None), laptop_info(), api_key()))
         elif path == "/api/web":
@@ -606,6 +612,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if not isinstance(data, dict):
             return self.send_json(400, {"error": "expected a JSON object"})
+        if path == "/api/chats/save":
+            ok, msg = chats.save_chat(data)
+            return self.send_json(200 if ok else 400, {"ok": ok, "msg": msg})
+        if path == "/api/chats/delete":
+            ok, msg = chats.delete_chat(data.get("id"))
+            return self.send_json(200 if ok else 404, {"ok": ok, "msg": msg})
+        if path == "/api/chats/prune":
+            return self.send_json(200, {"ok": True, "deleted": chats.prune(data.get("days", 30), data.get("keep") or "")})
+        if path == "/api/chats/rename":
+            ok, msg = chats.rename_chat(data.get("id"), data.get("title"))
+            return self.send_json(200 if ok else 404, {"ok": ok, "msg": msg})
         if path == "/api/code/open":
             lid = laptop_info()["id"] if data.get("which") == "laptop" else None
             ok, msg = workspaces.open_code(data.get("which"), data.get("path") or "", settings, save_settings, lid)

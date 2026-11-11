@@ -10,6 +10,7 @@
   --bg:#1a1b26;--bg2:#16161e;--bg3:#24283b;--fg:#c0caf5;--dim:#565f89;--border:#3b4261;
   --accent:#7aa2f7;--accent2:#bb9af7;--ok:#9ece6a;--warn:#e0af68;--crit:#f7768e;--cyan:#7dcfff;
   --g1:#7aa2f7;--g2:#bb9af7;--g3:#f7768e;
+  --b1:#5ffbff;--b2:#00b4ff;--b3:#a66bff;--bglow:0,246,255;
   --font:"Cascadia Mono","Cascadia Code",Consolas,"JetBrains Mono","Fira Code",monospace;
 }
 [data-theme="mocha"]{--bg:#1e1e2e;--bg2:#181825;--bg3:#313244;--fg:#cdd6f4;--dim:#6c7086;--border:#45475a;
@@ -17,7 +18,7 @@
 [data-theme="gruvbox"]{--bg:#282828;--bg2:#1d2021;--bg3:#3c3836;--fg:#ebdbb2;--dim:#928374;--border:#504945;
   --accent:#fabd2f;--accent2:#fe8019;--ok:#b8bb26;--warn:#fabd2f;--crit:#fb4934;--cyan:#8ec07c;--g1:#fabd2f;--g2:#fe8019;--g3:#fb4934}
 [data-theme="matrix"]{--bg:#000;--bg2:#030803;--bg3:#0b1a0b;--fg:#9cff9c;--dim:#2f6b2f;--border:#1f4d1f;
-  --accent:#00ff66;--accent2:#7dff7d;--ok:#00ff66;--warn:#d4ff00;--crit:#ff3355;--cyan:#66ffcc;--g1:#003b12;--g2:#00ff66;--g3:#d6ffd6}
+  --accent:#00ff66;--accent2:#7dff7d;--ok:#00ff66;--warn:#d4ff00;--crit:#ff3355;--cyan:#66ffcc;--g1:#003b12;--g2:#00ff66;--g3:#d6ffd6;--b1:#d6ffd6;--b2:#00ff66;--b3:#00a83f;--bglow:0,255,102}
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:13px/1.45 var(--font);overflow:hidden}
 button{font:inherit;color:inherit;background:var(--bg3);border:1px solid var(--border);padding:1px 8px;cursor:pointer;border-radius:0}
@@ -114,14 +115,37 @@ main{display:grid;grid-template-columns:432px 1fr;gap:14px;padding:6px 12px 12px
 
 /* brain */
 #brainPane{flex:1 1 auto;padding:8px 4px 4px;display:flex}
-#brainWrap{flex:1;position:relative;overflow:hidden;min-height:0}
-#brain{position:absolute;inset:0;margin:0;font:10px/10px var(--font);letter-spacing:0;white-space:pre;
-  background:linear-gradient(160deg,var(--g1) 10%,var(--g2) 50%,var(--g3) 90%);-webkit-background-clip:text;background-clip:text;color:transparent;
-  transition:opacity .6s;text-align:left;user-select:none}
-#brain.off{opacity:.28}
-#brain .n{color:#fff;text-shadow:0 0 6px var(--accent2)}
-#brainTag{position:absolute;right:6px;bottom:2px;color:var(--dim);font-size:11px}
-#measure{position:absolute;visibility:hidden;font:10px/10px var(--font);white-space:pre}
+#brainWrap{flex:1;position:relative;overflow:hidden;min-height:0;
+  background:
+    radial-gradient(ellipse at 50% 48%,rgba(var(--bglow),.10),transparent 62%),
+    repeating-linear-gradient(0deg,rgba(var(--bglow),.045) 0 1px,transparent 1px 22px),
+    repeating-linear-gradient(90deg,rgba(var(--bglow),.045) 0 1px,transparent 1px 22px)}
+/* HUD corner brackets */
+#brainWrap::before{content:"";position:absolute;inset:4px;pointer-events:none;z-index:2;opacity:.75;
+  background:
+    linear-gradient(var(--b1),var(--b1)) top left/16px 1px no-repeat,linear-gradient(var(--b1),var(--b1)) top left/1px 16px no-repeat,
+    linear-gradient(var(--b1),var(--b1)) top right/16px 1px no-repeat,linear-gradient(var(--b1),var(--b1)) top right/1px 16px no-repeat,
+    linear-gradient(var(--b3),var(--b3)) bottom left/16px 1px no-repeat,linear-gradient(var(--b3),var(--b3)) bottom left/1px 16px no-repeat,
+    linear-gradient(var(--b3),var(--b3)) bottom right/16px 1px no-repeat,linear-gradient(var(--b3),var(--b3)) bottom right/1px 16px no-repeat}
+/* CRT scanlines + a slow sweep bar */
+#brainWrap::after{content:"";position:absolute;inset:0;pointer-events:none;z-index:2;
+  background:
+    linear-gradient(180deg,transparent 0,rgba(var(--bglow),.07) 50%,transparent 100%) 0 -60px/100% 60px no-repeat,
+    repeating-linear-gradient(0deg,rgba(0,0,0,.14) 0 1px,transparent 1px 4px);
+  animation:sweep 5s linear infinite}
+@keyframes sweep{to{background-position:0 calc(100% + 60px),0 0}}
+#brain{position:absolute;inset:0;margin:0;font:bold 10px/10px var(--font);letter-spacing:0;white-space:pre;
+  background:linear-gradient(165deg,var(--b1) 8%,var(--b2) 50%,var(--b3) 92%);-webkit-background-clip:text;background-clip:text;color:transparent;
+  filter:brightness(1.2) drop-shadow(0 0 2px rgba(var(--bglow),.9)) drop-shadow(0 0 9px rgba(var(--bglow),.35));
+  transition:opacity .6s,filter .6s;text-align:left;user-select:none}
+#brain.off{opacity:.22;filter:grayscale(.7)}
+#brain.busy{filter:brightness(1.35) drop-shadow(0 0 3px rgba(var(--bglow),1)) drop-shadow(0 0 14px rgba(var(--bglow),.5))}
+#brain .n{color:#fff;text-shadow:0 0 4px var(--b1),0 0 10px var(--b1)}
+#brain .d1{color:rgba(var(--bglow),.85)}
+#brain .d2{color:rgba(var(--bglow),.45)}
+#brain .d3{color:rgba(var(--bglow),.2)}
+#brainTag{position:absolute;right:10px;bottom:6px;color:var(--b1);opacity:.7;font-size:11px;letter-spacing:.08em;z-index:3}
+#measure{position:absolute;visibility:hidden;font:bold 10px/10px var(--font);white-space:pre}
 
 /* fetch */
 #fetch{display:flex;gap:14px;flex:0 0 auto}
@@ -227,7 +251,21 @@ details.think .tbody{white-space:pre-wrap;max-height:260px;overflow-y:auto;font-
 #sendBtn.stop{color:var(--crit);border-color:var(--crit)}
 #fileBtn{height:34px}
 #chatPane.drag{border-color:var(--accent2);border-style:dashed}
-@media (prefers-reduced-motion:reduce){.cursor::after{animation:none}#brain{transition:none}}
+#chatPane{position:relative}
+#chatBtns{position:absolute;top:-.75em;right:10px;background:var(--bg);padding:0 4px;display:flex;gap:6px;line-height:1.4;z-index:3}
+#chatBtns button{font-size:11px;padding:0 6px}
+#chatBtns button.on{border-color:var(--accent);color:var(--accent)}
+#hist{position:absolute;top:10px;right:10px;width:min(420px,calc(100% - 20px));max-height:calc(100% - 80px);overflow-y:auto;background:var(--bg2);border:1px solid var(--accent);z-index:4;box-shadow:0 6px 24px rgba(0,0,0,.45)}
+#hist .hhead{display:flex;justify-content:space-between;align-items:center;padding:6px 10px;border-bottom:1px solid var(--border);color:var(--dim);font-size:12px;position:sticky;top:0;background:var(--bg2)}
+#hist .hrow{display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--border);cursor:pointer}
+#hist .hrow:hover,#hist .hrow:focus-visible{background:var(--bg3);outline:none}
+#hist .hrow.cur{border-left:2px solid var(--accent);padding-left:8px}
+#hist .ht{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#hist .hm{color:var(--dim);font-size:11px;white-space:nowrap}
+#hist .hrow button{font-size:11px;padding:0 5px;opacity:.6}
+#hist .hrow button:hover{opacity:1;color:var(--crit);border-color:var(--crit)}
+#hist .hempty{padding:14px 10px;color:var(--dim)}
+@media (prefers-reduced-motion:reduce){.cursor::after{animation:none}#brain{transition:none}#brainWrap::after{animation:none}}
 </style>
 </head>
 <body>
@@ -307,6 +345,8 @@ details.think .tbody{white-space:pre-wrap;max-height:260px;overflow-y:auto;font-
     </section>
   </aside>
   <section class="pane" id="chatPane"><div class="title">chat <i id="chatHost">· 127.0.0.1:8090</i></div>
+    <div id="chatBtns"><button id="newChat" title="start a new chat (/new). The current one stays saved">+ new</button><button id="histBtn" title="saved chats (/chats)">history</button></div>
+    <div id="hist" hidden></div>
     <div id="log" aria-live="polite"></div>
     <div id="composer">
       <div id="attach"></div>
@@ -400,8 +440,9 @@ function tick(){ const d = new Date(); $("clock").textContent = d.toTimeString()
 setInterval(tick, 1000); tick();
 
 /* ---------------- brain ---------------- */
-const RAMP = " .:-=+*#%@";
-const brain = { pts:null, cols:0, rows:0, cw:6, ch:10, angle:0.6, mode:"off", last:0, flashes:[] };
+const RAMP = " .:;=+x*#▓";
+const HEX = "0123456789ABCDEF";
+const brain = { pts:null, cols:0, rows:0, cw:6, ch:10, angle:0.6, mode:"off", last:0, flashes:[], rain:[], glitch:null };
 function fib(n, cb){ const g = Math.PI*(3-Math.sqrt(5)); for(let i=0;i<n;i++){ const y=1-2*(i+.5)/n, r=Math.sqrt(1-y*y), t=g*i; cb(Math.cos(t)*r, y, Math.sin(t)*r); } }
 function norm(x,y,z){ const l = Math.hypot(x,y,z) || 1; return [x/l,y/l,z/l]; }
 function buildBrain(){
@@ -468,15 +509,32 @@ function renderBrain(flash){
   }
   let out = "";
   const fl = flash ? new Set(brain.flashes.map(f => f.k)) : null;
+  // data rain: short falling hex streams in the empty space, only while the model is generating
+  const rain = new Map();
+  if (flash) {
+    if (brain.rain.length < cols/5 && Math.random() < 0.5) brain.rain.push({c: (Math.random()*cols)|0, r: -4, s: 0.5 + Math.random()});
+    brain.rain = brain.rain.filter(d => (d.r += d.s) - 4 < rows);
+    for (const d of brain.rain) for (let t=0; t<4; t++) { const rr = Math.floor(d.r) - t; if (rr >= 0 && rr < rows) rain.set(rr*cols + d.c, t); }
+  } else brain.rain = [];
+  // glitch: now and then a band of rows tears sideways for a few frames
+  if (flash && !brain.glitch && Math.random() < 0.05) brain.glitch = {r: (Math.random()*rows)|0, h: 1 + (Math.random()*3)|0, dx: (Math.random() < .5 ? -1 : 1) * (2 + (Math.random()*4)|0), n: 2 + (Math.random()*3)|0};
+  const g = flash ? brain.glitch : null;
   for (let r=0; r<rows; r++){
+    const dx = g && r >= g.r && r < g.r + g.h ? g.dx : 0;
     for (let c=0; c<cols; c++){
-      const k = r*cols + c, v = lum[k];
-      if (v < 0) { out += " "; continue; }
+      const sc = c - dx, k = r*cols + c, ks = r*cols + sc;
+      const v = sc >= 0 && sc < cols ? lum[ks] : -1;
+      if (v < 0) {
+        const t = rain.get(k);
+        out += t == null ? " " : `<span class="d${Math.min(3, t+1)}">${HEX[(Math.random()*16)|0]}</span>`;
+        continue;
+      }
       const chr = RAMP[Math.min(9, 1 + Math.floor(v*8.99))];
-      out += (fl && fl.has(k)) ? '<span class="n">@</span>' : chr;
+      out += (fl && fl.has(ks)) ? '<span class="n">█</span>' : chr;
     }
     out += "\n";
   }
+  if (g && --g.n <= 0) brain.glitch = null;
   if (flash){
     // spawn new neurons on filled cells, drop expired ones
     const now = performance.now();
@@ -505,6 +563,7 @@ function setBrainMode(m){
   if (m === brain.mode) return;
   brain.mode = m; brain.dirty = true;
   $("brain").classList.toggle("off", m === "off");
+  $("brain").classList.toggle("busy", m === "busy");
   $("brainMode").textContent = {off:"dormant", on:"idle", busy:"firing", loading:"waking"}[m];
 }
 
@@ -644,8 +703,8 @@ async function poll(){
     S = await r.json();
     // the app's files changed since this page loaded: reload so the window always shows the current version
     if (S.build) { if (!window.__build) window.__build = S.build; else if (S.build !== window.__build && !chatBusy) {
-      if (!history.length) return location.reload();
-      if (!window.__buildNote) { window.__buildNote = 1; sys("the command center was updated: press Ctrl+R to load it (this clears the chat)."); } } }
+      if (!$("prompt").value.trim() && !pending.length) return location.reload();  // the chat is saved and comes back
+      if (!window.__buildNote) { window.__buildNote = 1; sys("the command center was updated: press Ctrl+R to load it (your chat is saved and comes back)."); } } }
     for (const k of ["pc", "laptop"]) {
       const M = S.machines && S.machines[k], h = mhist[k];
       if (!M || !M.ok) continue;
@@ -762,13 +821,20 @@ const HELP = `commands
   /model standard|uncensored select (switches if one is running)
   /laptop  /local            run on the laptop (via PAIR) or this PC
   /theme [tokyo|mocha|gruvbox|matrix]
-  /clear                     clear this chat
+  /new                       start a new chat (the current one stays saved)
+  /chats                     open saved chats (also the "history" button)
+  /title <name>              rename this chat
   /help
 keys: Enter send · Shift+Enter newline · paste, drop, or +img to attach images`;
 function command(t){
   const [c, a] = t.slice(1).trim().split(/\s+/);
   switch (c) {
-    case "clear": history = []; log.innerHTML = ""; sys("cleared."); return;
+    case "clear": case "new": return newChat(true);
+    case "chats": case "history": return toggleHist(true);
+    case "title": { const name = t.slice(1).trim().replace(/^title\s*/, "");
+      if (!name) return sys("usage: /title <name>", true);
+      if (!history.length) return sys("nothing to name yet: send a message first.", true);
+      chatTitle = name.slice(0, 120); saveChat(); return sys(`renamed to "${chatTitle}".`); }
     case "on": if (a && !["standard","uncensored"].includes(a)) return sys("usage: /on [standard|uncensored]", true);
       if (a) { selected = a; store.set("rt.model", a); } return modelAction("on", selected);
     case "off": return modelAction("off", selected);
@@ -809,7 +875,7 @@ async function send(){
   const paint = () => { raf = 0; body.innerHTML = md(reply); if (reasoning) { think.hidden = false; tbody.textContent = reasoning; } scroll(); };
   try {
     const r = await fetch("/v1/chat/completions", {method:"POST", signal: abortCtl.signal, headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({model: S.model.id || "local", messages: history, stream: true, stream_options:{include_usage:true}})});
+      body: JSON.stringify({model: S.model.id || "local", messages: history.map(h => ({role: h.role, content: h.content})), stream: true, stream_options:{include_usage:true}})});
     if (!r.ok) {
       let msg = await r.text(); try { const j = JSON.parse(msg); msg = (j.error && (j.error.message || j.error)) || msg; } catch(e){}
       throw new Error(`HTTP ${r.status}: ${msg}`);
@@ -848,7 +914,7 @@ async function send(){
   }
   cancelAnimationFrame(raf); paint(); body.classList.remove("cursor");
   if (reasoning && !reply) think.open = true;
-  if (reply || reasoning) history.push({role:"assistant", content: reply});
+  if (reply || reasoning) history.push({role:"assistant", content: reply, who: m.firstChild.textContent, ...(reasoning ? {reasoning} : {})});
   else history.pop();
   // stat line
   let pp = timings && timings.prompt_per_second, tg = timings && timings.predicted_per_second;
@@ -862,11 +928,125 @@ async function send(){
   if (finish && finish !== "stop") parts.push(finish);
   parts.push(((performance.now() - t0)/1000).toFixed(1) + "s");
   stat.innerHTML = parts.join(" · ");
+  if (history.length && history[history.length-1].role === "assistant") { history[history.length-1].stat = stat.innerHTML; saveChat(); }
   if (pp) { $("ppT").textContent = pp >= 100 ? pp.toFixed(0) : pp.toFixed(1); $("ppT").classList.remove("na"); }
   if (tg) { $("tgT").textContent = tg.toFixed(1); $("tgT").classList.remove("na"); }
   chatBusy = false; abortCtl = null; setSend(); render(); scroll();
 }
 function setSend(){ const b = $("sendBtn"); b.textContent = chatBusy ? "stop" : "send"; b.classList.toggle("stop", chatBusy); }
+
+/* ---------------- saved chats ----------------
+   Every chat is saved on this PC (command-center\chats\<id>.json) after each reply. The open chat comes back
+   when the window is reopened; "history" lists the rest. */
+let chatId = null, chatTitle = "", chatCreated = 0, saveQ = Promise.resolve();
+function newId(){ return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8); }
+function textOf(c){ return typeof c === "string" ? c : (c || []).filter(p => p.type === "text").map(p => p.text).join(" "); }
+function autoTitle(){
+  const first = history.find(h => h.role === "user");
+  const t = first ? textOf(first.content).replace(/\s+/g, " ").trim() : "";
+  return t ? (t.length > 60 ? t.slice(0, 57) + "…" : t) : (first ? "image" : "untitled");
+}
+function saveChat(){
+  if (!history.length) return;
+  if (!chatId) { chatId = newId(); chatCreated = Math.floor(Date.now()/1000); }
+  if (!chatTitle) chatTitle = autoTitle();
+  store.set("rt.chat", chatId);
+  const payload = JSON.stringify({id: chatId, title: chatTitle, created: chatCreated, model: (S && (S.model.key || S.model.name)) || "", messages: history});
+  saveQ = saveQ.then(() => fetch("/api/chats/save", {method:"POST", headers:{"Content-Type":"application/json"}, body: payload})
+    .then(r => { if (!r.ok) throw 0; if (!$("hist").hidden) renderHist(); })
+    .catch(() => sys("could not save this chat (is the command center still running?)", true)));
+}
+function newChat(announce){
+  if (chatBusy) { abortCtl && abortCtl.abort(); }
+  history = []; chatId = null; chatTitle = ""; chatCreated = 0; log.innerHTML = "";
+  store.set("rt.chat", "");
+  toggleHist(false);
+  if (announce) sys("new chat. The previous one is saved under history.");
+}
+function safeStat(h){ return esc(h || "").replace(/&lt;(\/?)b&gt;/g, "<$1b>"); }
+function renderChat(c){
+  log.innerHTML = "";
+  for (const h of history) {
+    if (h.role === "user") {
+      const imgs = Array.isArray(h.content) ? h.content.filter(p => p.type === "image_url").map(p => p.image_url.url) : [];
+      addUser(textOf(h.content), imgs);
+    } else if (h.role === "assistant") {
+      const m = el("div", "msg bot"); m.appendChild(el("div", "who", esc(h.who || "◆ model")));
+      if (h.reasoning) { const d = el("details", "think"); d.innerHTML = "<summary>thinking</summary>"; const tb = el("div", "tbody"); tb.textContent = h.reasoning; d.appendChild(tb); m.appendChild(d); }
+      m.appendChild(el("div", "body", md(h.content || "")));
+      if (h.stat) m.appendChild(el("div", "stat", safeStat(h.stat)));
+      log.appendChild(m);
+    }
+  }
+  const when = c.updated ? new Date(c.updated * 1000).toLocaleString() : "";
+  sys(`── reopened "${c.title}"${when ? " · last used " + when : ""} · /new for a fresh chat ──`);
+  scroll(true);
+}
+async function loadChat(id, quiet){
+  if (chatBusy) return sys("wait for the reply to finish (or press stop) first.", true);
+  try {
+    const r = await fetch("/api/chats/" + encodeURIComponent(id), {cache:"no-store"});
+    if (!r.ok) throw new Error("not found");
+    const c = await r.json();
+    history = Array.isArray(c.messages) ? c.messages : [];
+    chatId = c.id; chatTitle = c.title || ""; chatCreated = c.created || 0;
+    store.set("rt.chat", chatId);
+    toggleHist(false); renderChat(c);
+  } catch (e) { if (!quiet) sys("could not open that chat.", true); else store.set("rt.chat", ""); }
+}
+function ago(t){
+  const s = Date.now()/1000 - t;
+  if (s < 60) return "just now"; if (s < 3600) return Math.floor(s/60) + "m ago";
+  if (s < 86400) return Math.floor(s/3600) + "h ago"; if (s < 86400*7) return Math.floor(s/86400) + "d ago";
+  return new Date(t*1000).toLocaleDateString();
+}
+const jpost = (url, obj) => fetch(url, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(obj)});
+async function renderHist(){
+  const H = $("hist");
+  let list = [];
+  try { list = (await (await fetch("/api/chats", {cache:"no-store"})).json()).chats || []; } catch(e) {}
+  H.innerHTML = "";
+  const head = el("div", "hhead", `<span>saved chats · ${list.length}</span>`);
+  const acts = el("span"); acts.style.cssText = "display:flex;gap:6px";
+  const prune = (label, days, ask) => { const b = el("button", "", label); b.title = ask;
+    b.onclick = async () => { if (!confirm(ask + "?")) return;
+      const r = await (await jpost("/api/chats/prune", {days, keep: chatId || ""})).json().catch(() => ({}));
+      sys(`deleted ${r.deleted || 0} old chat${r.deleted === 1 ? "" : "s"}.`); renderHist(); };
+    return b; };
+  if (list.length) acts.append(prune("clear >30d", 30, "delete chats not used in the last 30 days"),
+                               prune("clear all", 0, "delete every saved chat except the one open now"));
+  const x = el("button", "", "close"); x.onclick = () => toggleHist(false); acts.appendChild(x); head.appendChild(acts); H.appendChild(head);
+  if (!list.length) H.appendChild(el("div", "hempty", "no saved chats yet. They're saved automatically after each reply."));
+  for (const c of list) {
+    const row = el("div", "hrow" + (c.id === chatId ? " cur" : "")); row.tabIndex = 0;
+    row.title = c.title + (c.model ? " · " + c.model : "");
+    row.appendChild(el("span", "ht", esc(c.title)));
+    row.appendChild(el("span", "hm", `${Math.ceil(c.count/2)} msg · ${ago(c.updated)}`));
+    const ren = el("button", "", "✎"); ren.title = "rename";
+    ren.onclick = async e => { e.stopPropagation(); const t = prompt("rename chat", c.title); if (t == null || !t.trim()) return;
+      await jpost("/api/chats/rename", {id: c.id, title: t});
+      if (c.id === chatId) chatTitle = t.trim().slice(0, 120); renderHist(); };
+    const del = el("button", "", "×"); del.title = "delete this chat (click twice)";
+    del.onclick = async e => { e.stopPropagation();
+      if (del.textContent === "×") { del.textContent = "sure?"; del.style.opacity = 1; del.style.color = "var(--crit)";
+        setTimeout(() => { if (del.isConnected) { del.textContent = "×"; del.style.cssText = ""; } }, 3000); return; }
+      await jpost("/api/chats/delete", {id: c.id});
+      if (c.id === chatId) newChat(false); renderHist(); };
+    row.append(ren, del);
+    row.onclick = () => loadChat(c.id);
+    row.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); loadChat(c.id); } };
+    H.appendChild(row);
+  }
+}
+function toggleHist(show){
+  const H = $("hist"); show = show == null ? H.hidden : show;
+  H.hidden = !show; $("histBtn").classList.toggle("on", show);
+  if (show) renderHist();
+}
+$("histBtn").onclick = () => toggleHist();
+$("newChat").onclick = () => newChat(true);
+addEventListener("keydown", e => { if (e.key === "Escape" && !$("hist").hidden) toggleHist(false); });
+{ const last = store.get("rt.chat"); if (last) loadChat(last, true); }
 
 /* ---------------- composer, images ---------------- */
 const ta = $("prompt");

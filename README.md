@@ -27,6 +27,7 @@ sync.bat                   commit + push everything in one step
 command-center\
   server.py                HTTP server + model control + stats + chat proxy (adds the API key server-side)
   workspaces.py            2:code and 3:web
+  chats.py                 saved chats (one JSON per chat in command-center\chats\, never committed)
   tokens.py                token meter (llama.cpp /metrics counters; falls back to sampling /slots)
   index.html               the whole UI
   launch.pyw, taskbar.py   console-less launcher and its own taskbar identity
@@ -37,7 +38,7 @@ command-center\
 - `api-key.txt`: the llama-server API key (one line)
 - `llama.cpp\`: a llama.cpp CUDA build (`llama-server.exe` and DLLs)
 - `models\`: the GGUF files that `start-llm.bat` points at
-- per-machine state the app writes itself: `command-center\settings.json`, `tokens.json`, `tokens-log.jsonl`,
+- per-machine state the app writes itself: `command-center\settings.json`, `tokens.json`, `tokens-log.jsonl`, `chats\`,
   `edge-profile\`, `vscode-laptop\`, `cline-laptop\`
 
 ## Tokens burned
