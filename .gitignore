@@ -16,6 +16,7 @@ command-center/*
 !command-center/workspaces.py
 !command-center/tokens.py
 !command-center/chats.py
+!command-center/memory.py
 !command-center/taskbar.py
 !command-center/launch.pyw
 !command-center/index.html
@@ -29,4 +30,5 @@ api-key.txt
 **/tokens-log.jsonl
 **/edge-profile/
 **/chats/
+memory/
 **/*.bak

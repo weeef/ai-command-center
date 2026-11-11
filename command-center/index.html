@@ -15,6 +15,7 @@
   --bg:#1a1b26;--bg2:#16161e;--bg3:#24283b;--fg:#c0caf5;--dim:#565f89;--border:#3b4261;
   --accent:#7aa2f7;--accent2:#bb9af7;--ok:#9ece6a;--warn:#e0af68;--crit:#f7768e;--cyan:#7dcfff;
   --g1:#7aa2f7;--g2:#bb9af7;--g3:#f7768e;
+  --l0:#FF5A5F;--l1:#FF9F1C;--l2:#FFE14D;--l3:#7CFF6B;--l4:#2EE6D6;--l5:#4DA3FF;--l6:#9B7BFF;--l7:#FF6BD6;
   --b1:#5ffbff;--b2:#00b4ff;--b3:#a66bff;--bglow:0,246,255;
   --font:"Cascadia Mono","Cascadia Code",Consolas,"JetBrains Mono","Fira Code",monospace;
 }
@@ -347,6 +348,41 @@ details.think .tbody{white-space:pre-wrap;max-height:260px;overflow-y:auto;font-
    1:llm = brain strip + chat, 2:sys = fetch (model on/off, run on) + usage, 3:web = phone access + tailnet.
    2:code (VS Code) is PC-only, so on a phone its tab is replaced by 2:sys. */
 #tags .ph{display:none}
+/* 4:mem */
+#memListPane{flex:1 1 auto;display:flex;flex-direction:column;min-height:0}
+.memtools,.memadd{display:flex;gap:8px;margin-bottom:8px;align-items:center}
+.memtools input,.memadd input,.memloc input,#memList textarea{flex:1;min-width:0;background:var(--bg2);color:var(--fg);border:1px solid var(--border);font:inherit;padding:5px 8px;outline:none}
+.memtools input:focus,.memadd input:focus,.memloc input:focus,#memList textarea:focus{border-color:var(--accent)}
+.memtools select,.memadd select{background:var(--bg2);color:var(--fg);border:1px solid var(--border);font:inherit;padding:4px}
+#memList{flex:1;overflow-y:auto;min-height:0;border-top:1px solid var(--border)}
+.mrow{display:flex;gap:10px;padding:8px 4px;border-bottom:1px solid var(--bg3);align-items:flex-start}
+.mrow:hover{background:var(--bg2)}
+.mrow .tdot{width:8px;height:8px;border-radius:50%;margin-top:6px;flex:0 0 auto}
+.mrow .mt{flex:1;min-width:0}
+.mrow .mtext{overflow-wrap:anywhere}
+.mrow .mmeta{color:var(--dim);font-size:11px;margin-top:2px}
+.mrow .mbtns{display:flex;gap:4px;flex:0 0 auto;opacity:.55}
+.mrow:hover .mbtns,.mrow .mbtns:focus-within{opacity:1}
+.mrow .mbtns button{font-size:11px;padding:0 6px}
+.mrow .pin.on{color:var(--warn);border-color:var(--warn)}
+.mrow textarea{width:100%;min-height:52px;resize:vertical}
+.topicbar{display:flex;height:8px;margin:10px 0 4px;gap:2px}
+.topicbar i{display:block;min-width:2px}
+.topiclegend{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11px;color:var(--dim)}
+.topiclegend span::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--c);margin-right:5px}
+.memloc{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.memloc input{flex:1 1 220px}
+.tog{min-width:44px}
+.tog.on{color:var(--ok);border-color:var(--ok)}
+.memhit{color:var(--accent2);cursor:pointer;margin-left:8px}
+.memhit:hover{text-decoration:underline}
+.msg.sys.mem{color:var(--accent2)}
+[data-theme="corpus"] .mrow .mtext{font-size:14px;line-height:1.5}
+[data-theme="corpus"] .mrow .mmeta,[data-theme="corpus"] .topiclegend{font-family:var(--font)}
+[data-theme="corpus"] .memtools input,[data-theme="corpus"] .memadd input,[data-theme="corpus"] .memloc input,[data-theme="corpus"] #memList textarea,
+[data-theme="corpus"] .memtools select,[data-theme="corpus"] .memadd select{border-radius:6px}
+[data-theme="corpus"] .memhit{color:#fff;font-family:var(--font)}
+[data-theme="corpus"] .msg.sys.mem{color:#fff;opacity:.75}
 @media (max-width:760px){
   html,body{height:100%;height:100dvh}
   body{padding:env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left)}
@@ -391,6 +427,7 @@ body.remote #tags span[data-ws="2"]{display:none}
     <span data-ws="2" role="tab" tabindex="0" title="VS Code and Cline (Alt+2)">2:code</span>
     <span class="ph" data-ws="s" role="tab" tabindex="0" title="model on/off and usage">2:sys</span>
     <span data-ws="3" role="tab" tabindex="0" title="phone access over Tailscale (Alt+3)">3:web</span>
+    <span data-ws="4" role="tab" tabindex="0" title="long-term memory, shared by every model (Alt+4)">4:mem</span>
   </div>
   <div id="state" class="st-OFF">OFF</div>
   <div class="sep">│</div>
@@ -519,6 +556,21 @@ body.remote #tags span[data-ws="2"]{display:none}
     <section class="pane" id="tailnetPane"><div class="title">tailnet <i id="tailnetName"></i></div><div id="tailnet">loading…</div></section>
   </div>
 </main>
+
+<!-- 4:mem ─ long-term memory, shared by every model -->
+<main id="ws4" class="ws" hidden>
+  <div class="col">
+    <section class="pane"><div class="title">memory <i>· shared by every model</i></div><div id="memStatus">loading…</div></section>
+    <section class="pane"><div class="title">location <i>· one folder, any drive</i></div><div id="memLoc">loading…</div></section>
+  </div>
+  <div class="col">
+    <section class="pane" id="memListPane"><div class="title">memories <i id="memCount"></i></div>
+      <div class="memadd"><input id="memNew" maxlength="1000" placeholder="teach it something: e.g. I prefer metric units"><select id="memNewTopic"></select><button id="memAddBtn">remember</button></div>
+      <div class="memtools"><input id="memQ" placeholder="search memories"><select id="memTopic"><option value="">all topics</option></select></div>
+      <div id="memList"></div>
+    </section>
+  </div>
+</main>
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
@@ -620,7 +672,8 @@ function buildNet(){
   }
   // nodes: spread-out surface points (farthest-point sampling), every 9th one white
   const nodes = [(rnd() * n) | 0], dmin = new Float32Array(n).fill(1e9);
-  while (nodes.length < 44) {
+  const N = Math.max(28, Math.min(110, memGraph.length));
+  while (nodes.length < N) {
     const last = nodes[nodes.length - 1];
     let best = 0, bi = 0;
     for (let i = 0; i < n; i += 3) {
@@ -630,7 +683,10 @@ function buildNet(){
     }
     nodes.push(bi);
   }
-  net.nodes = nodes.map((p, k) => ({p, c: k % 9 === 4 ? -1 : (k * 3) % 8, r: 2.2 + rnd() * 2.2, flash: 0}));
+  // node k is memory k (most used first); spare nodes are empty, waiting to be filled
+  net.nodes = nodes.map((p, k) => { const m = memGraph[k];
+    return m ? {p, mem: m.id, c: Math.max(0, TOPICS.indexOf(m.topic)), r: 2.4 + rnd() * 2.0, flash: 0}
+             : {p, mem: null, c: -2, r: 1.5, flash: 0}; });
   // edges: each node to its 2-3 nearest, no duplicates
   const seen = new Set(); net.edges = [];
   net.nodes.forEach((a, i) => {
@@ -683,7 +739,7 @@ function renderNet(flash){
   } else net.pulses = [];
   // nodes, back to front
   net.nodes.map((nd, k) => [k, P[k][2]]).sort((u, v) => u[1] - v[1]).forEach(([k]) => {
-    const nd = net.nodes[k], [x, y, z] = P[k], c = nd.c < 0 ? "#fff" : col[nd.c];
+    const nd = net.nodes[k], [x, y, z] = P[k], c = nd.c === -2 ? "#5a5a5a" : nd.c < 0 ? "#fff" : col[nd.c];
     const r = nd.r * (z > 0 ? 1 : 0.75) * (1 + nd.flash * 0.9);
     g.globalAlpha = z > 0 ? 1 : 0.55;
     g.fillStyle = c; g.shadowColor = c; g.shadowBlur = 6 + nd.flash * 14;
@@ -915,6 +971,7 @@ async function poll(){
     const r = await fetch("/api/stats", {cache:"no-store"});
     S = await r.json();
     setRemote(!!S.remote);
+    memNotice(S.memory);
     // the app's files changed since this page loaded: reload so the window always shows the current version
     if (S.build) { if (!window.__build) window.__build = S.build; else if (S.build !== window.__build && !chatBusy) {
       if (!$("prompt").value.trim() && !pending.length) return location.reload();  // the chat is saved and comes back
@@ -1038,6 +1095,8 @@ const HELP = `commands
   /new                       start a new chat (the current one stays saved)
   /chats                     open saved chats (also the "history" button)
   /title <name>              rename this chat
+  /remember <text>           save a memory (every model will know it)
+  /memory                    open the memory (4:mem)
   /help
 keys: Enter send · Shift+Enter newline · paste, drop, or +img to attach images`;
 function command(t){
@@ -1045,6 +1104,11 @@ function command(t){
   switch (c) {
     case "clear": case "new": return newChat(true);
     case "chats": case "history": return toggleHist(true);
+    case "memory": case "mem": case "forget": return showWs("4");
+    case "remember": { const what = t.slice(1).trim().replace(/^remember\s*/, "");
+      if (!what) return sys("usage: /remember <something to remember>", true);
+      postJSON("/api/memory/add", {text: what, topic: "other"}).then(r => r.ok ? null : sys("couldn't save that memory: " + r.msg, true));
+      return; }
     case "title": { const name = t.slice(1).trim().replace(/^title\s*/, "");
       if (!name) return sys("usage: /title <name>", true);
       if (!history.length) return sys("nothing to name yet: send a message first.", true);
@@ -1084,12 +1148,15 @@ async function send(){
   m.append(think, body, stat); log.appendChild(m); scroll(true);
 
   chatBusy = true; abortCtl = new AbortController(); setSend(); render();
+  let memInfo = null;
   let reply = "", reasoning = "", timings = null, usage = null, finish = null, t0 = performance.now(), tFirst = 0, nTok = 0, inThinkTag = false;
   let raf = 0;
   const paint = () => { raf = 0; body.innerHTML = md(reply); if (reasoning) { think.hidden = false; tbody.textContent = reasoning; } scroll(); };
   try {
     const r = await fetch("/v1/chat/completions", {method:"POST", signal: abortCtl.signal, headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({model: S.model.id || "local", messages: history.map(h => ({role: h.role, content: h.content})), stream: true, stream_options:{include_usage:true}})});
+      body: JSON.stringify({model: S.model.id || "local", messages: history.map(h => ({role: h.role, content: h.content})), chat_id: chatId || undefined, stream: true, stream_options:{include_usage:true}})});
+    try { memInfo = JSON.parse(r.headers.get("X-Memory") || "null"); } catch(e) { memInfo = null; }
+    if (memInfo && memInfo.ids && memInfo.ids.length) flashMemories(memInfo.ids);
     if (!r.ok) {
       let msg = await r.text(); try { const j = JSON.parse(msg); msg = (j.error && (j.error.message || j.error)) || msg; } catch(e){}
       throw new Error(`HTTP ${r.status}: ${msg}`);
@@ -1142,7 +1209,12 @@ async function send(){
   if (finish && finish !== "stop") parts.push(finish);
   parts.push(((performance.now() - t0)/1000).toFixed(1) + "s");
   stat.innerHTML = parts.join(" · ");
-  if (history.length && history[history.length-1].role === "assistant") { history[history.length-1].stat = stat.innerHTML; saveChat(); }
+  if (history.length && history[history.length-1].role === "assistant") {
+    const h = history[history.length-1]; h.stat = stat.innerHTML;
+    if (memInfo && (memInfo.ids.length || memInfo.chunks)) h.mem = memInfo;
+    saveChat();
+  }
+  addMemHit(stat, memInfo);
   if (pp) { $("ppT").textContent = pp >= 100 ? pp.toFixed(0) : pp.toFixed(1); $("ppT").classList.remove("na"); }
   if (tg) { $("tgT").textContent = tg.toFixed(1); $("tgT").classList.remove("na"); }
   chatBusy = false; abortCtl = null; setSend(); render(); scroll();
@@ -1188,7 +1260,7 @@ function renderChat(c){
       const m = el("div", "msg bot"); m.appendChild(el("div", "who", esc(h.who || "◆ model")));
       if (h.reasoning) { const d = el("details", "think"); d.innerHTML = "<summary>thinking</summary>"; const tb = el("div", "tbody"); tb.textContent = h.reasoning; d.appendChild(tb); m.appendChild(d); }
       m.appendChild(el("div", "body", md(h.content || "")));
-      if (h.stat) m.appendChild(el("div", "stat", safeStat(h.stat)));
+      if (h.stat) { const st = el("div", "stat", safeStat(h.stat)); addMemHit(st, h.mem); m.appendChild(st); }
       log.appendChild(m);
     }
   }
@@ -1262,6 +1334,178 @@ $("newChat").onclick = () => newChat(true);
 addEventListener("keydown", e => { if (e.key === "Escape" && !$("hist").hidden) toggleHist(false); });
 { const last = store.get("rt.chat"); if (last) loadChat(last, true); }
 
+/* ---------------- long-term memory ----------------
+   One memory, shared by every model and device. The server recalls relevant memories into each request and
+   learns new ones from saved chats in the background; this is the window onto it. */
+const TOPICS = ["you","preference","project","people","fact","event","howto","other"];
+const TOPIC_NAME = {you:"about you", preference:"preferences", project:"projects", people:"people", fact:"facts", event:"events", howto:"how-tos", other:"other"};
+const topicCol = t => `var(--l${Math.max(0, TOPICS.indexOf(t))})`;
+let memSeq = null, memStat = null, memListKey = "", memEditing = false;
+function addMemHit(stat, info){
+  if (!info || !((info.ids && info.ids.length) || info.chunks)) return;
+  const n = info.ids.length, c = info.chunks || 0;
+  const b = el("span", "memhit", esc(`◉ ${n ? n + " memor" + (n === 1 ? "y" : "ies") : ""}${n && c ? " + " : ""}${c ? c + " old chat" + (c === 1 ? "" : "s") : ""}`));
+  b.title = "what memory recalled for this reply (click to see)";
+  b.onclick = async () => {
+    if (!n) return sys(`recalled ${c} snippet${c === 1 ? "" : "s"} of earlier chats.`);
+    try {
+      const j = await (await fetch("/api/memory/list?ids=" + info.ids.join(","), {cache:"no-store"})).json();
+      sys("recalled for this reply:\n" + (j.memories || []).map(m => `  ◉ [${m.topic}] ${m.text}`).join("\n") + (c ? `\n  + ${c} snippet${c === 1 ? "" : "s"} of earlier chats` : ""));
+    } catch(e) { sys("couldn't load those memories.", true); }
+  };
+  stat.appendChild(b);
+}
+function memNotice(m){
+  if (!m) return;
+  if (memSeq === null || m.seq < memSeq) { memSeq = m.seq; return; }
+  if (m.seq === memSeq) return;
+  for (const e of (m.learned || []).filter(e => e.seq > memSeq)) {
+    const verb = e.op === "update" ? "updated" : e.op === "delete" ? "forgot" : "remembered";
+    const d = el("div", "msg sys mem", esc(`◉ ${verb}: ${e.text}`)); d.title = "open 4:mem to edit or delete";
+    d.style.cursor = "pointer"; d.onclick = () => showWs("4"); log.appendChild(d); scroll();
+  }
+  memSeq = m.seq; loadGraph();
+  if (ws === "4") refreshMem(true);
+}
+async function refreshMem(forceList){
+  let st; try { st = await (await fetch("/api/memory", {cache:"no-store"})).json(); } catch(e) { return; }
+  memStat = st; renderMemStatus(st);
+  const key = [st.count, $("memQ").value, $("memTopic").value].join("|");
+  if ((forceList || key !== memListKey) && !memEditing) { memListKey = key; renderMemList(); }
+}
+function fmtBytes(b){ if (b == null) return "–"; const u = ["B","KB","MB","GB","TB"]; let i = 0; while (b >= 1024 && i < 4) { b /= 1024; i++; } return b.toFixed(i ? 1 : 0) + " " + u[i]; }
+function renderMemStatus(st){
+  const box = $("memStatus");
+  if (!$("memNewTopic").options.length) {
+    for (const t of TOPICS) { $("memNewTopic").add(new Option(TOPIC_NAME[t], t)); $("memTopic").add(new Option(TOPIC_NAME[t], t)); }
+    $("memNewTopic").value = "you";
+  }
+  $("memCount").textContent = st.ok ? `· ${st.count}` : "";
+  if (!st.ok) {
+    box.innerHTML = `<div class="shead"><span class="dot crit"></span><span class="big">memory unavailable</span></div>
+      <div class="note">${esc(st.error || "unknown error")}</div>
+      <div class="hint" style="margin-top:8px">Chat still works, without memory. Plug the drive back in, or pick another folder under location.</div>`;
+  } else {
+    const total = st.count || 0, by = st.by_topic || {};
+    const bar = total ? TOPICS.filter(t => by[t]).map(t => `<i style="flex:${by[t]};background:${topicCol(t)}" title="${TOPIC_NAME[t]}: ${by[t]}"></i>`).join("") : `<i style="flex:1;background:var(--bg3)"></i>`;
+    const e = st.embed || {};
+    box.innerHTML = `
+      <div class="shead"><span class="dot ${st.on ? "on" : ""}"></span>
+        <span class="big">${st.on ? "memory is on" : "memory is off"}</span><span class="sub">${total} memor${total === 1 ? "y" : "ies"} · ${st.chunks || 0} chat snippets</span>
+        <span class="grow"></span><button class="btn-main ${st.on ? "stop" : "go"}" id="memOnBtn">${st.on ? "turn off" : "turn on"}</button></div>
+      <div class="topicbar">${bar}</div>
+      <div class="topiclegend">${TOPICS.map(t => `<span style="--c:${topicCol(t)}">${TOPIC_NAME[t]} ${by[t] || 0}</span>`).join("")}</div>
+      <div class="kvt" style="margin-top:12px">
+        <span class="k">learning</span><span class="v">${st.learn ? "learns from every chat, in the background" : "off: only what you add yourself"}${st.to_learn ? ` · ${st.to_learn} chat${st.to_learn === 1 ? "" : "s"} queued` : ""}</span><button class="tog ${st.learn ? "on" : ""}" id="memLearnBtn">${st.learn ? "on" : "off"}</button>
+        <span class="k">recall</span><span class="v" title="${esc(e.model || "")}">${esc((e.model || "none").replace(/\.gguf$/i, ""))} · ${e.running ? "running (cpu)" : e.available ? "starts when needed" : "model missing: keyword search only"}</span><span></span>
+        <span class="k">indexed</span><span class="v">${st.to_index ? `${st.indexed} · ${st.to_index} still indexing` : "all of it"}</span><span></span>
+        <span class="k">size</span><span class="v">${fmtBytes(st.size)}</span><span></span>
+      </div>
+      ${remote ? "" : `<div class="memloc"><button id="memExport">export as JSON</button><button id="memImportBtn">import JSON</button><input type="file" id="memImport" accept=".json,application/json" hidden></div>`}
+      <div class="hint" style="margin-top:10px">Every model reads this same memory: standard, uncensored, the laptop, and any model you add later, on the PC or the phone. Memories are plain sentences, so nothing is tied to one model.</div>`;
+  }
+  const loc = $("memLoc"), drive = (st.home || "").slice(0, 2);
+  loc.innerHTML = `
+    <div class="hint">memory folder</div>
+    <div class="urlbox" style="font-size:14px">${esc(st.home || "–")}</div>
+    <div class="kvt">
+      <span class="k">holds</span><span class="v">memory.db (memories + search index) · chats\\</span><span></span>
+      <span class="k">free on ${esc(drive)}</span><span class="v">${fmtBytes(st.free)}</span><span></span>
+    </div>
+    ${remote ? `<div class="hint" style="margin-top:8px">Change the location from the PC.</div>` : `
+    <div class="memloc"><input id="memPath" placeholder="new folder, e.g. E:\\ai-memory" value="">
+      <button id="memMove" title="copy everything to the new folder, check it, then switch">move here</button>
+      <button id="memUse" title="switch to a folder that already holds a memory (or start a new one there)">use existing</button></div>
+    <div class="hint" style="margin-top:8px"><b>move here</b> copies memories, index and chats to the new folder (empty or new), checks the copy, then switches. The old folder stays as a backup until you delete it. <b>use existing</b> points at a memory folder you copied yourself.</div>`}
+    ${st.msg ? `<div class="note">${esc(st.msg)}</div>` : ""}`;
+}
+async function renderMemList(){
+  const list = $("memList");
+  const q = $("memQ").value.trim(), t = $("memTopic").value;
+  let j; try { j = await (await fetch(`/api/memory/list?limit=300&q=${encodeURIComponent(q)}&topic=${encodeURIComponent(t)}`, {cache:"no-store"})).json(); } catch(e) { return; }
+  const ms = j.memories || [];
+  list.innerHTML = "";
+  if (!ms.length) { list.appendChild(el("div", "hint", q || t ? "nothing matches." : "no memories yet. Chat normally and it learns, or teach it something above.")); list.lastChild.style.padding = "12px 4px"; return; }
+  for (const m of ms) {
+    const row = el("div", "mrow"); row.dataset.id = m.id;
+    const dot = el("span", "tdot"); dot.style.background = topicCol(m.topic); dot.title = TOPIC_NAME[m.topic] || m.topic;
+    const mt = el("div", "mt");
+    mt.appendChild(el("div", "mtext", esc(m.text)));
+    const src = (m.source || "").startsWith("chat:") ? "learned from a chat" : m.source === "manual" ? "added by you" : m.source || "";
+    mt.appendChild(el("div", "mmeta", esc(`${TOPIC_NAME[m.topic] || m.topic} · ${src}${src ? " · " : ""}${ago(m.updated)}${m.uses ? ` · recalled ${m.uses}×` : ""}`)));
+    const b = el("div", "mbtns");
+    const pin = el("button", "pin" + (m.pinned ? " on" : ""), m.pinned ? "★" : "☆"); pin.title = m.pinned ? "pinned: always given to the model. Click to unpin" : "pin: always give this to the model";
+    pin.onclick = async () => { await postJSON("/api/memory/update", {id: m.id, pinned: !m.pinned}); renderMemList(); };
+    const ed = el("button", "", "edit");
+    ed.onclick = () => {
+      memEditing = true;
+      const box = el("textarea"); box.value = m.text; box.maxLength = 1000;
+      const tp = el("select"); TOPICS.forEach(x => tp.add(new Option(TOPIC_NAME[x], x))); tp.value = m.topic;
+      const sv = el("button", "", "save"), cc = el("button", "", "cancel");
+      const done = () => { memEditing = false; renderMemList(); };
+      sv.onclick = async () => { await postJSON("/api/memory/update", {id: m.id, text: box.value, topic: tp.value}); done(); };
+      cc.onclick = done;
+      box.onkeydown = e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sv.click(); } if (e.key === "Escape") cc.click(); };
+      mt.innerHTML = ""; mt.append(box); const r = el("div", "memtools"); r.style.marginTop = "6px"; r.append(tp, sv, cc); mt.append(r); box.focus();
+    };
+    const del = el("button", "", "×"); del.title = "forget this (click twice)";
+    del.onclick = async () => {
+      if (del.textContent === "×") { del.textContent = "sure?"; del.style.color = "var(--crit)"; setTimeout(() => { if (del.isConnected) { del.textContent = "×"; del.style.color = ""; } }, 3000); return; }
+      await postJSON("/api/memory/delete", {id: m.id}); row.remove(); refreshMem();
+    };
+    b.append(pin, ed, del);
+    row.append(dot, mt, b); list.appendChild(row);
+  }
+}
+let memQT = 0;
+$("memQ").addEventListener("input", () => { clearTimeout(memQT); memQT = setTimeout(() => { memListKey = ""; renderMemList(); }, 220); });
+$("memTopic").addEventListener("change", () => { memListKey = ""; renderMemList(); });
+async function memAdd(){
+  const inp = $("memNew"), text = inp.value.trim(); if (!text) return;
+  const r = await postJSON("/api/memory/add", {text, topic: $("memNewTopic").value});
+  if (r.ok) { inp.value = ""; refreshMem(true); } else sysToast(r.msg || "couldn't save", true);
+}
+$("memAddBtn").onclick = memAdd;
+$("memNew").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); memAdd(); } });
+$("ws4").addEventListener("click", async e => {
+  const id = e.target.id;
+  if (id === "memOnBtn") { await postJSON("/api/memory/settings", {on: !memStat.on}); return refreshMem(); }
+  if (id === "memLearnBtn") { await postJSON("/api/memory/settings", {learn: !memStat.learn}); return refreshMem(); }
+  if (id === "memExport") { location.href = "/api/memory/export"; return; }
+  if (id === "memImportBtn") return $("memImport").click();
+  if (id === "memMove" || id === "memUse") {
+    const path = $("memPath").value.trim(); if (!path) return sysToast("type the new folder first, e.g. E:\\ai-memory", true);
+    const mode = id === "memMove" ? "move" : "use";
+    if (!confirm(mode === "move" ? `Copy the whole memory to ${path} and switch to it?` : `Switch to the memory in ${path}?`)) return;
+    e.target.disabled = true; e.target.textContent = "…";
+    const r = await postJSON("/api/memory/location", {path, mode});
+    sysToast(r.msg, !r.ok, 9000); refreshMem(true); loadGraph();
+  }
+});
+$("ws4").addEventListener("change", async e => {
+  if (e.target.id !== "memImport" || !e.target.files[0]) return;
+  try {
+    const data = JSON.parse(await e.target.files[0].text());
+    const r = await fetch("/api/memory/import", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(data)});
+    const j = await r.json(); sysToast(j.msg || (r.ok ? "imported" : "import failed"), !r.ok); refreshMem(true);
+  } catch(err) { sysToast("that file isn't a memory export", true); }
+  e.target.value = "";
+});
+/* brain: in the corpus theme its nodes are the memories, coloured by topic, and recalled ones light up */
+let memGraph = [], memGraphKey = "";
+async function loadGraph(){
+  try { memGraph = (await (await fetch("/api/memory/graph", {cache:"no-store"})).json()).nodes || []; } catch(e) { return; }
+  const k = memGraph.map(n => n.id + n.topic).join(",");
+  if (k !== memGraphKey) { memGraphKey = k; net.nodes = null; brain.dirty = true; }
+}
+function flashMemories(ids){
+  if (!net.nodes) return;
+  const set = new Set(ids);
+  net.nodes.forEach(nd => { if (nd.mem != null && set.has(nd.mem)) nd.flash = 1.6; });
+  brain.dirty = true;
+}
+loadGraph();
+
 /* ---------------- composer, images ---------------- */
 const ta = $("prompt");
 function autosize(){ ta.style.height = "auto"; ta.style.height = Math.min(180, ta.scrollHeight + 2) + "px"; }
@@ -1328,13 +1572,13 @@ fitScale();
 let ws = "1", wsTimer = 0;
 let remote = false;
 function showWs(n){
-  n = String(n); if (!["1","2","3","s"].includes(n)) n = "1";
+  n = String(n); if (!["1","2","3","4","s"].includes(n)) n = "1";
   if (phone.matches || remote) { if (n === "2") n = phone.matches ? "s" : "1"; }  // VS Code lives on the PC
   if (!phone.matches && n === "s") n = "1";
   ws = n; store.set("rt.ws", n);
   document.body.classList.toggle("sysview", n === "s");
   document.querySelectorAll("#tags span").forEach(t => { const on = t.dataset.ws === n; t.classList.toggle("on", on); t.setAttribute("aria-selected", on); });
-  for (const k of ["1","2","3"]) $("ws" + k).hidden = k !== (n === "s" ? "1" : n);
+  for (const k of ["1","2","3","4"]) $("ws" + k).hidden = k !== (n === "s" ? "1" : n);
   clearTimeout(wsTimer);
   if (n === "1") { measureBrain(); brain.dirty = true; if (!phone.matches) ta.focus(); }
   else if (n !== "s") refreshWs();
@@ -1348,6 +1592,7 @@ async function refreshWs(){
   try {
     if (ws === "2") renderCode(await (await fetch("/api/code", {cache:"no-store"})).json());
     if (ws === "3") renderWeb(await (await fetch("/api/web", {cache:"no-store"})).json());
+    if (ws === "4") await refreshMem();
   } catch (e) {}
   if (ws !== "1") wsTimer = setTimeout(refreshWs, document.hidden ? 15000 : 4000);
 }
@@ -1355,7 +1600,7 @@ document.querySelectorAll("#tags span").forEach(t => {
   t.onclick = () => showWs(t.dataset.ws);
   t.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showWs(t.dataset.ws); } };
 });
-addEventListener("keydown", e => { if (e.altKey && !e.ctrlKey && ["1","2","3"].includes(e.key)) { e.preventDefault(); showWs(e.key); } });
+addEventListener("keydown", e => { if (e.altKey && !e.ctrlKey && ["1","2","3","4"].includes(e.key)) { e.preventDefault(); showWs(e.key); } });
 function setRemote(r){ if (r === remote) return; remote = r; document.body.classList.toggle("remote", r); if (r && ws === "2") showWs("1"); }
 
 async function postJSON(url, obj){
@@ -1499,7 +1744,7 @@ renderBrain(false);
 requestAnimationFrame(brainLoop);
 loadCline();
 poll();
-showWs((location.hash.match(/ws=([123])/) || [])[1] || store.get("rt.ws") || "1");
+showWs((location.hash.match(/ws=([1234])/) || [])[1] || store.get("rt.ws") || "1");
 sys("command center · /help for commands");
 ta.focus();
 </script>

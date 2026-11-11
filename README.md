@@ -27,7 +27,8 @@ sync.bat                   commit + push everything in one step
 command-center\
   server.py                HTTP server + model control + stats + chat proxy (adds the API key server-side)
   workspaces.py            2:code and 3:web
-  chats.py                 saved chats (one JSON per chat in command-center\chats\, never committed)
+  chats.py                 saved chats (one JSON per chat in <memory folder>\chats\, never committed)
+  memory.py                long-term memory shared by every model (recall + learning + the embedding server)
   tokens.py                token meter (llama.cpp /metrics counters; falls back to sampling /slots)
   index.html               the whole UI
   launch.pyw, taskbar.py   console-less launcher and its own taskbar identity
@@ -40,6 +41,23 @@ command-center\
 - `models\`: the GGUF files that `start-llm.bat` points at
 - per-machine state the app writes itself: `command-center\settings.json`, `tokens.json`, `tokens-log.jsonl`, `chats\`,
   `edge-profile\`, `vscode-laptop\`, `cline-laptop\`
+
+## Memory (4:mem)
+
+One long-term memory shared by every model (standard, uncensored, the laptop, any future model) and every device
+(this window, the phone). It lives in **one folder**, `memory\` by default (`settings.json` -> `memory_dir`):
+`memory.db` (SQLite: memories as plain sentences, chat snippets, FTS5 keyword index, embedding vectors) and `chats\`.
+
+- **recall**: before each chat request the newest message is matched against memories (meaning + keywords) and
+  against snippets of other chats; the best matches go into the prompt as a system message. The reply's stat line
+  shows what was recalled.
+- **learn**: after each reply is saved, the active model (when idle) extracts durable facts: add / update / delete.
+- **embedding model**: `models\Qwen3-Embedding-0.6B-GGUF\Qwen3-Embedding-0.6B-Q8_0.gguf` in its own llama-server on
+  127.0.0.1:8091, CPU only (no VRAM). Vectors are tagged with the model's name; switch models (`embed_model` in
+  settings.json) and the index rebuilds itself. Without it, recall falls back to keywords. numpy speeds up search.
+- **moving drives**: 4:mem -> location -> *move here* copies the folder, verifies it, switches; the old copy stays as a
+  backup. *use existing* points at a folder you copied yourself. A missing drive pauses memory instead of starting
+  an empty one elsewhere. Export/import as plain JSON for anything else.
 
 ## Tokens burned
 

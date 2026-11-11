@@ -12,6 +12,8 @@ import time
 DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chats")
 ID_RE = re.compile(r"^[a-z0-9-]{6,40}$")
 _lock = threading.Lock()
+ON_SAVE = None     # memory indexes every saved chat
+ON_DELETE = None
 
 
 def _path(cid):
@@ -59,12 +61,20 @@ def save_chat(data):
     title = str(data.get("title") or "untitled").strip()[:120]
     chat = {"id": data["id"], "title": title, "model": str(data.get("model") or "")[:80],
             "created": data.get("created") or int(time.time()), "updated": int(time.time()), "messages": msgs}
-    with _lock:
-        os.makedirs(DIR, exist_ok=True)
-        tmp = p + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(chat, f, ensure_ascii=False)
-        os.replace(tmp, p)  # atomic, so a crash mid-write never leaves a half chat
+    try:
+        with _lock:
+            os.makedirs(DIR, exist_ok=True)
+            tmp = p + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(chat, f, ensure_ascii=False)
+            os.replace(tmp, p)  # atomic, so a crash mid-write never leaves a half chat
+    except OSError:
+        return False, "couldn't write to %s (is the memory drive connected?)" % DIR
+    if ON_SAVE:
+        try:
+            ON_SAVE(chat)
+        except Exception:
+            pass
     return True, "saved"
 
 
@@ -76,6 +86,11 @@ def delete_chat(cid):
         os.remove(p)
     except OSError:
         return False, "not found"
+    if ON_DELETE:
+        try:
+            ON_DELETE(cid)
+        except Exception:
+            pass
     return True, "deleted"
 
 

@@ -23,6 +23,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import workspaces  # noqa: E402  (2:code and 3:web)
 import tokens  # noqa: E402  (tokens burned per machine)
 import chats  # noqa: E402  (saved chat history)
+import memory  # noqa: E402  (long-term memory shared by every model)
+import urllib.parse  # noqa: E402
 
 PORT = 8099
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -465,7 +467,7 @@ def laptop_action(action):
 
 
 _stats = {"t": 0, "v": None}
-_BUILD_FILES = ("index.html", "server.py", "workspaces.py", "tokens.py", "chats.py")
+_BUILD_FILES = ("index.html", "server.py", "workspaces.py", "tokens.py", "chats.py", "memory.py")
 
 
 def build_stamp():
@@ -560,7 +562,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     # From the phone: chat, saved chats, model on/off, run-on target and stats. Not VS Code, not the API key,
     # and not phone access itself (turning that off from the phone would lock the phone out).
-    REMOTE_BLOCKED = ("/api/code", "/api/cline", "/api/web/serve")
+    REMOTE_BLOCKED = ("/api/code", "/api/cline", "/api/web/serve", "/api/memory/location", "/api/memory/import")
 
     def remote_blocked(self, path):
         if self.remote and any(path == p or path.startswith(p + "/") for p in self.REMOTE_BLOCKED):
@@ -591,7 +593,32 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif path == "/api/ping":
             self.send_json(200, {"ok": True, "app": "command-center"})
         elif path == "/api/stats":
-            self.send_json(200, dict(stats(), remote=self.remote))
+            self.send_json(200, dict(stats(), remote=self.remote, memory=memory.M.brief()))
+        elif path == "/api/memory":
+            self.send_json(200, memory.M.status())
+        elif path == "/api/memory/list":
+            qs = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            one = lambda k, d="": (qs.get(k) or [d])[0]
+            if not memory.M.ok():
+                return self.send_json(200, {"memories": [], "error": memory.M.status().get("error")})
+            try:
+                lim, off = max(1, min(500, int(one("limit", "200")))), max(0, int(one("offset", "0")))
+            except ValueError:
+                lim, off = 200, 0
+            if one("ids"):
+                ids = [int(x) for x in one("ids").split(",")[:50] if x.strip().isdigit()]
+                return self.send_json(200, {"memories": [m for m in map(memory.M.store.get, ids) if m]})
+            self.send_json(200, {"memories": memory.M.store.list(one("q"), one("topic"), lim, off)})
+        elif path == "/api/memory/graph":
+            self.send_json(200, {"nodes": memory.M.graph()})
+        elif path == "/api/memory/export":
+            body = json.dumps(memory.M.export(), ensure_ascii=False, indent=1).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Disposition", 'attachment; filename="memories-%s.json"' % time.strftime("%Y-%m-%d"))
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif path == "/api/tokens/log":
             return self.send_json(200, {"log": token_watch.recent_log(30) if token_watch else []})
         elif path == "/api/chats":
@@ -638,6 +665,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if not isinstance(data, dict):
             return self.send_json(400, {"error": "expected a JSON object"})
+        if path.startswith("/api/memory/"):
+            return self.memory_post(path[len("/api/memory/"):], data)
         if path == "/api/chats/save":
             ok, msg = chats.save_chat(data)
             return self.send_json(200 if ok else 400, {"ok": ok, "msg": msg})
@@ -682,13 +711,28 @@ class Handler(http.server.BaseHTTPRequestHandler):
             _stats["t"] = 0
             return self.send_json(200 if ok else 500, {"ok": ok, "msg": msg})
         if path == "/v1/chat/completions":
+            # long-term memory: the same recalled memories go to whichever model answers
+            chat_id = data.pop("chat_id", None)
+            use_mem = not data.pop("no_memory", False)
+            mem_info = {}
+            if use_mem and isinstance(data.get("messages"), list) and data["messages"]:
+                try:
+                    sys_txt, mem_info = memory.M.recall(data["messages"], chat_id if isinstance(chat_id, str) else None)
+                except Exception:
+                    sys_txt = None
+                if sys_txt:
+                    first = data["messages"][0]
+                    if isinstance(first, dict) and first.get("role") == "system" and isinstance(first.get("content"), str):
+                        data["messages"] = [dict(first, content=sys_txt + "\n\n" + first["content"])] + data["messages"][1:]
+                    else:
+                        data["messages"] = [{"role": "system", "content": sys_txt}] + data["messages"]
             if target["v"] == "laptop":
                 mid = laptop_info()["id"]
                 if not mid:
                     return self.send_json(502, {"error": "no laptop model listed by PAIR. Is the laptop on?"})
                 data["model"] = mid  # the model id always comes from PAIR's listing, never the browser
-                return self.proxy_chat(json.dumps(data).encode(), PAIR, {})
-            return self.proxy_chat(body, LLAMA, {"Authorization": "Bearer " + api_key()})
+                return self.proxy_chat(json.dumps(data).encode(), PAIR, {}, mem_info)
+            return self.proxy_chat(json.dumps(data).encode(), LLAMA, {"Authorization": "Bearer " + api_key()}, mem_info)
         self.send_json(404, {"error": "not found"})
 
     def do_PUT(self):
@@ -696,7 +740,36 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     do_DELETE = do_PATCH = do_PUT
 
-    def proxy_chat(self, body, upstream, auth):
+    def memory_post(self, what, data):
+        M = memory.M
+        if what == "location":
+            ok, msg = M.move(data.get("path"), data.get("mode"))
+            return self.send_json(200 if ok else 400, {"ok": ok, "msg": msg})
+        if what == "settings":
+            M.set_flags(on=data.get("on"), learn=data.get("learn"))
+            return self.send_json(200, {"ok": True})
+        if not M.ok():
+            return self.send_json(409, {"ok": False, "msg": M.status().get("error") or "memory isn't available"})
+        mid = data.get("id")
+        if what == "add":
+            new = M.add_checked(data.get("text"), data.get("topic") or "other", "manual", bool(data.get("pinned")))
+            if new:
+                M.seq += 1
+                M.last_learned = [{"op": "add", "id": new, "text": " ".join(str(data.get("text")).split()),
+                                   "topic": data.get("topic") or "other", "seq": M.seq, "manual": True}]
+            return self.send_json(200 if new else 400, {"ok": bool(new), "id": new})
+        if what == "update":
+            ok = isinstance(mid, int) and M.store.update(mid, data.get("text"), data.get("topic"), data.get("pinned"))
+            return self.send_json(200 if ok else 404, {"ok": bool(ok)})
+        if what == "delete":
+            ok = isinstance(mid, int) and M.store.delete(mid)
+            return self.send_json(200 if ok else 404, {"ok": bool(ok)})
+        if what == "import":
+            n = M.import_(data)
+            return self.send_json(200, {"ok": True, "msg": "imported %d memories" % n})
+        return self.send_json(404, {"error": "not found"})
+
+    def proxy_chat(self, body, upstream, auth, mem_info=None):
         global active_streams
         up = http.client.HTTPConnection(*upstream, timeout=900)
         try:
@@ -732,6 +805,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Type", resp.getheader("Content-Type", "text/event-stream"))
             self.send_header("Cache-Control", "no-cache")
             self.send_header("X-Accel-Buffering", "no")
+            if mem_info:
+                self.send_header("X-Memory", json.dumps(mem_info))
             self.send_header("Transfer-Encoding", "chunked")
             self.end_headers()
             threading.Thread(target=watch_browser, daemon=True).start()
@@ -760,10 +835,56 @@ class Server(http.server.ThreadingHTTPServer):
         super().server_bind()
 
 
+def llm_json(messages, schema, max_tokens):
+    """One short, non-streaming request to whichever model "run on" points at, for memory housekeeping.
+    Returns the parsed JSON object, or None if no model is available (memory retries later)."""
+    req = {"messages": messages, "max_tokens": max_tokens, "temperature": 0.2, "stream": False,
+           "chat_template_kwargs": {"enable_thinking": False},
+           "response_format": {"type": "json_schema", "json_schema": {"name": "memories", "schema": schema}}}
+    if target["v"] == "laptop":
+        mid = laptop_info()["id"]
+        if not mid:
+            return None
+        req["model"], host, auth = mid, PAIR, {}
+    else:
+        if model_info(None)["state"] not in ("ON", "ASLEEP"):
+            return None
+        host, auth = LLAMA, {"Authorization": "Bearer " + api_key()}
+    for attempt in (0, 1):
+        c = http.client.HTTPConnection(*host, timeout=240)
+        try:
+            c.request("POST", "/v1/chat/completions", json.dumps(req), {"Content-Type": "application/json", **auth})
+            r = c.getresponse()
+            body = r.read()
+        except (OSError, http.client.HTTPException):
+            return None
+        finally:
+            c.close()
+        if r.status == 400 and attempt == 0:
+            req.pop("response_format", None)  # an engine without structured output: ask plainly and parse
+            continue
+        if r.status != 200:
+            return None
+        try:
+            text = json.loads(body)["choices"][0]["message"].get("content") or ""
+        except (ValueError, KeyError, IndexError):
+            return None
+        if "</think>" in text:
+            text = text.split("</think>", 1)[1]
+        a, b = text.find("{"), text.rfind("}")
+        try:
+            out = json.loads(text[a:b + 1]) if a >= 0 else None
+        except ValueError:
+            out = None
+        return out if isinstance(out, dict) else {"memories": []}
+    return None
+
+
 def idle_watch():
     while True:
         time.sleep(5)
         if active_streams == 0 and time.time() - last_request > IDLE_EXIT:
+            memory.M.shutdown()  # stops the embedding server too
             os._exit(0)
 
 
@@ -776,6 +897,9 @@ def main():
     threading.Thread(target=idle_watch, daemon=True).start()
     threading.Thread(target=laptop_watch, daemon=True).start()
     global token_watch
+    chats.ON_SAVE, chats.ON_DELETE = (lambda c: memory.M.note_chat(c)), (lambda cid: memory.M.forget_chat(cid))
+    memory.M.start(settings, save_settings, ROOT, os.path.join(ROOT, "llama.cpp", "llama-server.exe"),
+                   llm_json, lambda: active_streams > 0 or switching["on"], chats)
     token_watch = tokens.TokenWatch(LLAMA, PAIR, api_key)
     threading.Thread(target=token_watch.run, daemon=True).start()
     srv.serve_forever()
