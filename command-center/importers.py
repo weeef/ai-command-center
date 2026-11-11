@@ -10,12 +10,20 @@ Supported (detected automatically, from a .zip export or a bare .json):
 Everything returns plain dicts: {"id", "title", "created", "updated", "messages": [{"role", "content"}]}.
 Images, files, tool calls and hidden system messages are skipped; only the visible text of the user and the
 assistant is kept.
+
+conversations.json can be hundreds of MB (years of chats). It is a JSON array, so it is read one conversation at
+a time (iter_array) instead of being loaded whole, which would need several GB of RAM.
 """
 import datetime
 import hashlib
+import io
+import itertools
 import json
+import os
 import re
 import zipfile
+
+MAX_WHOLE = 512 * 1024 ** 2   # a file that isn't a plain array has to be loaded whole; refuse beyond this
 
 
 def _ts(v):
@@ -25,7 +33,7 @@ def _ts(v):
     if isinstance(v, str) and v:
         try:
             return datetime.datetime.fromisoformat(v.replace("Z", "+00:00")).timestamp()
-        except ValueError:
+        except (ValueError, OverflowError, OSError):
             pass
     return 0.0
 
@@ -66,7 +74,9 @@ def _gpt_text(content):
 
 def chatgpt(convs):
     for c in convs:
-        mapping = c.get("mapping") or {}
+        if not isinstance(c, dict) or not isinstance(c.get("mapping"), dict):
+            continue
+        mapping = c["mapping"]
         node = c.get("current_node")
         if node not in mapping:  # no pointer: take the newest leaf
             leaves = [k for k, v in mapping.items() if not (v or {}).get("children")]
@@ -105,8 +115,12 @@ def _claude_text(m):
 
 def claude(convs):
     for c in convs:
+        if not isinstance(c, dict):
+            continue
         msgs = []
         for m in c.get("chat_messages") or []:
+            if not isinstance(m, dict):
+                continue
             role = {"human": "user", "user": "user", "assistant": "assistant"}.get(m.get("sender"))
             if role:
                 msgs.append({"role": role, "content": _claude_text(m)})
@@ -130,11 +144,16 @@ def _memory_strings(data):
         if isinstance(x, str):
             out.append(x)
         elif isinstance(x, dict):
-            for k in ("content", "text", "memory", "value"):
+            for k in ("content", "text", "memory", "value", "conversations_memory"):
                 if isinstance(x.get(k), str):
                     out.append(x[k])
                     break
-    return [s.strip() for s in out if s and s.strip()]
+    # one long text holding many memories (a bulleted summary): one memory per line
+    lines = []
+    for s in out:
+        parts = [re.sub(r"^\s*(?:[-*\u2022\u00b7#]+|\d+[.)])\s*", "", l).strip() for l in s.splitlines()] if "\n" in s else [s.strip()]
+        lines += [p for p in parts if len(p) > 3]
+    return lines
 
 
 def detect(data, name=""):
@@ -155,31 +174,97 @@ def detect(data, name=""):
     return None, None
 
 
+def iter_array(f, chunk=1 << 20):
+    """Yield the elements of a top-level JSON array from a binary file, one at a time, holding only one element
+    (plus a read buffer) in memory. Yields nothing if the file doesn't start with an array."""
+    text = io.TextIOWrapper(f, encoding="utf-8-sig", errors="replace")
+    dec = json.JSONDecoder()
+    buf, pos, step = text.read(chunk), 0, chunk
+    start = len(buf) - len(buf.lstrip())
+    if buf[start:start + 1] != "[":
+        return
+    pos = start + 1
+    while True:
+        while pos < len(buf) and buf[pos] in " \t\r\n,":
+            pos += 1
+        if pos < len(buf) and buf[pos] == "]":
+            return
+        try:
+            if pos >= len(buf):
+                raise ValueError("need more")
+            obj, end = dec.raw_decode(buf, pos)
+            if end >= len(buf):
+                raise ValueError("may be cut off")   # e.g. the number 12 of 123: only sure once more text follows
+        except ValueError:
+            more = text.read(step)
+            if not more:
+                if pos < len(buf):   # the file ends inside an element: a truncated export
+                    obj, end = dec.raw_decode(buf, pos)   # raises with the real reason if it is broken
+                    yield obj
+                return
+            buf, pos = buf[pos:] + more, 0
+            step = min(step * 2, 64 << 20)   # one huge conversation: grow the reads so re-parsing stays linear
+            continue
+        yield obj
+        pos, step = end, chunk
+        if pos > chunk:   # drop what has been consumed
+            buf, pos = buf[pos:], 0
+
+
+def _peek(f):
+    """The first non-blank character of a binary file (and rewind)."""
+    head = f.read(4096)
+    f.seek(0)
+    return head.decode("utf-8-sig", "replace").lstrip()[:1]
+
+
+def _read(open_file, size, name):
+    """Yield (kind, payload, name) for one JSON file. open_file() returns a fresh binary file object."""
+    base = name.replace("\\", "/").rsplit("/", 1)[-1].lower()
+    with open_file() as f:
+        first = _peek(f) if f.seekable() else None
+        if first is None:   # a zip member on an old Python: look at the start through a second handle
+            with open_file() as g:
+                first = g.read(4096).decode("utf-8-sig", "replace").lstrip()[:1]
+        if first == "[":
+            stream = iter_array(f)
+            head = next(stream, None)
+            if isinstance(head, dict) and ("mapping" in head or "chat_messages" in head):
+                yield ("chatgpt" if "mapping" in head else "claude"), itertools.chain([head], stream), name
+                return
+            if "memor" in base and head is not None:
+                mem = _memory_strings(list(itertools.chain([head], stream)))
+                if mem:
+                    yield "memories", mem, name
+            return
+    if size > MAX_WHOLE:
+        raise ValueError("%s is %d MB and isn't a plain list of conversations; that is too large to read" % (base, size >> 20))
+    with open_file() as f:
+        data = json.loads(f.read().decode("utf-8-sig", "replace"))
+    kind, payload = detect(data, base)
+    if kind:
+        yield kind, payload, name
+
+
 def read_any(path):
-    """Yield (kind, payload, name) for everything importable in a .zip or .json file."""
+    """Yield (kind, payload, name) for everything importable in a .zip or .json file. For conversations the
+    payload is a lazy stream: finish reading it before asking for the next item."""
     if zipfile.is_zipfile(path):
         with zipfile.ZipFile(path) as z:
             for info in z.infolist():
                 n = info.filename
-                if not n.lower().endswith(".json") or info.file_size > 4 * 1024 ** 3:
-                    continue
                 base = n.rsplit("/", 1)[-1].lower()
-                if base not in ("conversations.json",) and "memor" not in base:
+                if not base.endswith(".json") or info.file_size > 16 * 1024 ** 3:
+                    continue
+                # conversations.json, or the numbered parts newer exports are split into (conversations-000.json)
+                if not re.fullmatch(r"conversations([-_]?\d+)?\.json", base) and "memor" not in base:
                     continue
                 try:
-                    with z.open(info) as f:
-                        data = json.load(f)
-                except (ValueError, UnicodeDecodeError):
-                    continue
-                kind, payload = detect(data, base)
-                if kind:
-                    yield kind, payload, n
+                    yield from _read(lambda info=info: z.open(info), info.file_size, n)
+                except (ValueError, UnicodeDecodeError, zipfile.BadZipFile):
+                    continue   # one unreadable file doesn't stop the rest of the export
         return
-    with open(path, "rb") as f:
-        data = json.loads(f.read().decode("utf-8-sig"))
-    kind, payload = detect(data, path)
-    if kind:
-        yield kind, payload, path
+    yield from _read(lambda: open(path, "rb"), os.path.getsize(path), path)
 
 
 def conversations(kind, payload):

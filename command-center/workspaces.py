@@ -13,6 +13,8 @@ import shutil
 import subprocess
 import time
 
+import fsutil
+
 NOWIN = 0x08000000
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LAPTOP_BAT = os.path.join(ROOT, "start-vscode-laptop.bat")
@@ -68,10 +70,7 @@ def _jload(path):
 
 
 def _jsave(path, data):
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=1)
-    os.replace(tmp, path)
+    fsutil.write_json(path, data, indent=1)
 
 
 def cline_points_to(data_dir, expect=None):
@@ -179,6 +178,15 @@ def code_info(settings, pc_model, laptop_model, key):
     }
 
 
+def _cmd_line(script, args):
+    """A cmd.exe command line that runs a .cmd/.bat with every argument in double quotes. A folder name may
+    legally contain & ^ ( ) and other characters cmd treats as syntax when they are not quoted, so a path is
+    never passed bare. (A double quote can't occur in a Windows path; one is refused anyway.)"""
+    if any('"' in a for a in args):
+        raise ValueError("a path can't contain a double quote")
+    return 'cmd /d /s /c ""%s"%s"' % (script, "".join(' "%s"' % a for a in args))
+
+
 def open_code(which, path, settings, save, laptop_model_id=None):
     """Start VS Code (main or the laptop setup), optionally on a folder. Returns (ok, message)."""
     if which not in ("pc", "laptop"):
@@ -186,19 +194,19 @@ def open_code(which, path, settings, save, laptop_model_id=None):
     args = []
     if path:
         path = os.path.abspath(os.path.expandvars(os.path.expanduser(str(path).strip().strip('"'))))
-        if not os.path.isdir(path):
+        if not os.path.isdir(path) or '"' in path:
             return False, "that folder doesn't exist: " + path
         args = [path]
     if which == "pc":
         if not os.path.exists(CODE_CMD):
             return False, "VS Code's `code` command wasn't found"
-        cmd = ["cmd", "/c", "call", CODE_CMD, *args]
+        cmd = _cmd_line(CODE_CMD, args)
     else:
         if not os.path.exists(LAPTOP_BAT):
             return False, "start-vscode-laptop.bat is missing"
         if not vscode_running()["laptop"]:
             pin_laptop_cline(laptop_model_id)   # every fresh launch starts on the laptop's model
-        cmd = ["cmd", "/c", "call", LAPTOP_BAT, *args]
+        cmd = _cmd_line(LAPTOP_BAT, args)
     subprocess.Popen(cmd, cwd=ROOT, creationflags=NOWIN)
     _code_cache["t"] = 0
     if path:
@@ -313,22 +321,27 @@ def web_info(key, pc_model):
     return info
 
 
-_dns_cache = {"t": 0, "v": ""}
+_dns_cache = {"t": 0, "v": ("", "")}
 
 
-def tailnet_dns():
-    """This PC's tailnet name (e.g. mypc.tailXXXX.ts.net), cached for a minute. "" if Tailscale isn't up."""
+def tailnet_identity():
+    """(this PC's tailnet name, e.g. mypc.tailXXXX.ts.net; the Tailscale login this PC is signed in with), cached
+    for a minute. ("", "") if Tailscale isn't up. The login is what `tailscale serve` puts in the
+    Tailscale-User-Login header for the owner's other devices."""
     if time.time() - _dns_cache["t"] < 60:
         return _dns_cache["v"]
-    dns = ""
+    dns = login = ""
     if os.path.exists(TAILSCALE):
         _, out, _ = run([TAILSCALE, "status", "--json"], timeout=5)
         try:
-            dns = ((json.loads(out).get("Self") or {}).get("DNSName") or "").rstrip(".").lower()
-        except ValueError:
+            st = json.loads(out)
+            me = st.get("Self") or {}
+            dns = (me.get("DNSName") or "").rstrip(".").lower()
+            login = ((st.get("User") or {}).get(str(me.get("UserID"))) or {}).get("LoginName") or ""
+        except (ValueError, AttributeError):
             pass
-    _dns_cache.update(t=time.time(), v=dns)
-    return dns
+    _dns_cache.update(t=time.time(), v=(dns, login.strip().lower()))
+    return _dns_cache["v"]
 
 
 def set_serve(on):

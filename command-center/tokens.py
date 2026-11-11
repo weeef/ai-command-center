@@ -16,7 +16,9 @@ import threading
 import time
 from urllib.parse import quote
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+import fsutil
+
+HERE = os.environ.get("CC_STATE_DIR") or os.path.dirname(os.path.abspath(__file__))
 STATE_FILE = os.path.join(HERE, "tokens.json")
 LOG_FILE = os.path.join(HERE, "tokens-log.jsonl")
 POLL = 1.0
@@ -227,11 +229,8 @@ class TokenWatch:
     def _save(self):
         out = {k: {f: m.s[f] for f in ("on", "since", "model", "in", "out", "exact", "raw", "life_in", "life_out")}
                for k, m in self.meters.items()}
-        tmp = STATE_FILE + ".tmp"
         try:
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(out, f, indent=1)
-            os.replace(tmp, STATE_FILE)
+            fsutil.write_json(STATE_FILE, out, indent=1)
         except OSError:
             pass
 

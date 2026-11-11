@@ -16,6 +16,8 @@
 !docs/*.md
 !bench/
 !bench/*.py
+!tests/
+!tests/*.py
 !command-center/
 command-center/*
 !command-center/server.py
@@ -25,6 +27,7 @@ command-center/*
 !command-center/memory.py
 !command-center/importers.py
 !command-center/cloud.py
+!command-center/fsutil.py
 !command-center/taskbar.py
 !command-center/launch.pyw
 !command-center/index.html
