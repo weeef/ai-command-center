@@ -467,7 +467,7 @@ def laptop_action(action):
 
 
 _stats = {"t": 0, "v": None}
-_BUILD_FILES = ("index.html", "server.py", "workspaces.py", "tokens.py", "chats.py", "memory.py")
+_BUILD_FILES = ("index.html", "server.py", "workspaces.py", "tokens.py", "chats.py", "memory.py", "importers.py")
 
 
 def build_stamp():
@@ -562,7 +562,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     # From the phone: chat, saved chats, model on/off, run-on target and stats. Not VS Code, not the API key,
     # and not phone access itself (turning that off from the phone would lock the phone out).
-    REMOTE_BLOCKED = ("/api/code", "/api/cline", "/api/web/serve", "/api/memory/location", "/api/memory/import")
+    REMOTE_BLOCKED = ("/api/code", "/api/cline", "/api/web/serve", "/api/memory/location", "/api/memory/import",
+                      "/api/memory/import-file")
 
     def remote_blocked(self, path):
         if self.remote and any(path == p or path.startswith(p + "/") for p in self.REMOTE_BLOCKED):
@@ -646,6 +647,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.guard():
             return
+        if self.path.split("?", 1)[0] == "/api/memory/import-file":
+            return self.import_upload()
         if not (self.headers.get("Content-Type", "").split(";")[0].strip().lower() == "application/json"):
             return self.send_json(415, {"error": "JSON only"})
         try:
@@ -740,6 +743,51 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     do_DELETE = do_PATCH = do_PUT
 
+    def import_upload(self):
+        """A ChatGPT/Claude export (.zip or .json, can be GBs) streamed to a temp file in the memory folder,
+        then imported in the background."""
+        global active_streams
+        if self.remote_blocked("/api/memory/import-file"):
+            return
+        M = memory.M
+        if not M.ok():
+            self.close_connection = True
+            return self.send_json(409, {"ok": False, "msg": "memory isn't available"})
+        try:
+            n = int(self.headers.get("Content-Length", ""))
+        except ValueError:
+            self.close_connection = True
+            return self.send_json(411, {"ok": False, "msg": "Content-Length required"})
+        if n <= 0 or n > 16 * 1024 ** 3:
+            self.close_connection = True
+            return self.send_json(413, {"ok": False, "msg": "file too large"})
+        qs = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        learn = (qs.get("learn") or ["1"])[0] != "0"
+        tmp = os.path.join(M.home, "import-%d.tmp" % int(time.time() * 1000))
+        with lock:
+            active_streams += 1
+        try:
+            with open(tmp, "wb") as f:
+                left = n
+                while left > 0:
+                    b = self.rfile.read(min(left, 1 << 20))
+                    if not b:
+                        raise OSError("upload cut short")
+                    f.write(b)
+                    left -= len(b)
+        except OSError as e:
+            self.close_connection = True
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            return self.send_json(500, {"ok": False, "msg": "upload failed: %s" % e})
+        finally:
+            with lock:
+                active_streams -= 1
+        ok, msg = M.import_file(tmp, learn, cleanup=True)
+        return self.send_json(200 if ok else 409, {"ok": ok, "msg": msg})
+
     def memory_post(self, what, data):
         M = memory.M
         if what == "location":
@@ -767,6 +815,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if what == "import":
             n = M.import_(data)
             return self.send_json(200, {"ok": True, "msg": "imported %d memories" % n})
+        if what == "paste":
+            n = M.paste_memories(data.get("text"))
+            M.seq += 1 if n else 0
+            return self.send_json(200, {"ok": bool(n), "msg": "added %d memories%s" % (n, ", tidying them up in the background" if n and M.learn_on else "")})
         return self.send_json(404, {"error": "not found"})
 
     def proxy_chat(self, body, upstream, auth, mem_info=None):

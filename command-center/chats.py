@@ -78,6 +78,20 @@ def save_chat(data):
     return True, "saved"
 
 
+def write_raw(chat):
+    """Store an imported chat as-is (keeps its own dates), without the save hooks."""
+    p = _path(chat.get("id"))
+    if not p:
+        return False
+    with _lock:
+        os.makedirs(DIR, exist_ok=True)
+        tmp = p + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(chat, f, ensure_ascii=False)
+        os.replace(tmp, p)
+    return True
+
+
 def delete_chat(cid):
     p = _path(cid)
     if not p:

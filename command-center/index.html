@@ -372,6 +372,12 @@ details.think .tbody{white-space:pre-wrap;max-height:260px;overflow-y:auto;font-
 .topiclegend span::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--c);margin-right:5px}
 .memloc{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
 .memloc input{flex:1 1 220px}
+#ws4 .col:first-child{overflow-y:auto}
+.memloc input[type=checkbox]{flex:none;margin:0}
+.memloc label{white-space:nowrap}
+body.remote #impFileBox{display:none}
+#impJob:not(:empty){margin-top:8px;color:var(--fg)}
+[data-theme="corpus"] #impPaste{border-radius:6px}
 .tog{min-width:44px}
 .tog.on{color:var(--ok);border-color:var(--ok)}
 .memhit{color:var(--accent2);cursor:pointer;margin-left:8px}
@@ -562,6 +568,18 @@ body.remote #tags span[data-ws="2"]{display:none}
   <div class="col">
     <section class="pane"><div class="title">memory <i>· shared by every model</i></div><div id="memStatus">loading…</div></section>
     <section class="pane"><div class="title">location <i>· one folder, any drive</i></div><div id="memLoc">loading…</div></section>
+    <section class="pane"><div class="title">import <i>· chatgpt, claude</i></div>
+      <div id="impFileBox">
+        <div class="hint" style="margin-top:0"><b>Old conversations.</b> ChatGPT: Settings → Data controls → Export data. Claude: Settings → Privacy → Export data. Each emails you a .zip; pick it here as-is.</div>
+        <div class="memloc"><input type="file" id="impFile" accept=".zip,.json,application/zip,application/json">
+          <label class="hint" style="display:flex;align-items:center;gap:5px;margin:0"><input type="checkbox" id="impLearn" checked>learn memories from them</label>
+          <button id="impBtn">import</button></div>
+        <div id="impJob" class="hint"></div>
+      </div>
+      <div class="hint" style="margin-top:12px"><b>Saved memories.</b> Copy them from ChatGPT (Settings → Personalization → Memory → Manage) or from Claude's memory settings, and paste them here, one per line.</div>
+      <div class="memloc"><textarea id="impPaste" rows="3" maxlength="200000" placeholder="paste memories here, one per line" style="flex:1;min-width:0;background:var(--bg2);color:var(--fg);border:1px solid var(--border);font:inherit;padding:5px 8px;resize:vertical"></textarea></div>
+      <div class="memloc"><button id="impPasteBtn">add these memories</button></div>
+    </section>
   </div>
   <div class="col">
     <section class="pane" id="memListPane"><div class="title">memories <i id="memCount"></i></div>
@@ -1370,6 +1388,10 @@ function memNotice(m){
 async function refreshMem(forceList){
   let st; try { st = await (await fetch("/api/memory", {cache:"no-store"})).json(); } catch(e) { return; }
   memStat = st; renderMemStatus(st);
+  const jb = st.job || {};
+  $("impJob").textContent = jb.msg ? (jb.running ? "⏳ " : jb.error ? "✗ " : "✓ ") + jb.msg + (jb.running && jb.chats ? `  (${jb.chats} chats so far)` : "") : "";
+  $("impJob").style.color = jb.error ? "var(--crit)" : "";
+  if (jb.running) { clearTimeout(wsTimer); wsTimer = setTimeout(refreshWs, 1500); }
   const key = [st.count, $("memQ").value, $("memTopic").value].join("|");
   if ((forceList || key !== memListKey) && !memEditing) { memListKey = key; renderMemList(); }
 }
@@ -1401,7 +1423,7 @@ function renderMemStatus(st){
         <span class="k">indexed</span><span class="v">${st.to_index ? `${st.indexed} · ${st.to_index} still indexing` : "all of it"}</span><span></span>
         <span class="k">size</span><span class="v">${fmtBytes(st.size)}</span><span></span>
       </div>
-      ${remote ? "" : `<div class="memloc"><button id="memExport">export as JSON</button><button id="memImportBtn">import JSON</button><input type="file" id="memImport" accept=".json,application/json" hidden></div>`}
+      ${remote ? "" : `<div class="memloc"><button id="memExport" title="every memory as plain JSON: a backup, or to take to another app or PC (import it under import)">export as JSON</button></div>`}
       <div class="hint" style="margin-top:10px">Every model reads this same memory: standard, uncensored, the laptop, and any model you add later, on the PC or the phone. Memories are plain sentences, so nothing is tied to one model.</div>`;
   }
   const loc = $("memLoc"), drive = (st.home || "").slice(0, 2);
@@ -1482,6 +1504,23 @@ $("ws4").addEventListener("click", async e => {
     sysToast(r.msg, !r.ok, 9000); refreshMem(true); loadGraph();
   }
 });
+$("impBtn").onclick = async () => {
+  const f = $("impFile").files[0]; if (!f) return sysToast("pick the .zip you downloaded from ChatGPT or Claude first", true);
+  const b = $("impBtn"); b.disabled = true; b.textContent = "uploading…";
+  $("impJob").textContent = `⏳ uploading ${f.name} (${fmtBytes(f.size)})…`;
+  try {
+    const r = await fetch("/api/memory/import-file?learn=" + ($("impLearn").checked ? 1 : 0), {method:"POST", headers:{"Content-Type":"application/octet-stream"}, body: f});
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) sysToast(j.msg || "import failed", true);
+  } catch(e) { sysToast("upload failed", true); }
+  b.disabled = false; b.textContent = "import"; $("impFile").value = ""; refreshMem(true);
+};
+$("impPasteBtn").onclick = async () => {
+  const t = $("impPaste").value.trim(); if (!t) return;
+  const r = await postJSON("/api/memory/paste", {text: t});
+  sysToast(r.msg || (r.ok ? "added" : "nothing added"), !r.ok, 6000);
+  if (r.ok) { $("impPaste").value = ""; refreshMem(true); }
+};
 $("ws4").addEventListener("change", async e => {
   if (e.target.id !== "memImport" || !e.target.files[0]) return;
   try {

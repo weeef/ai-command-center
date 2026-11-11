@@ -29,6 +29,8 @@ import subprocess
 import threading
 import time
 
+import importers
+
 try:
     import numpy as np
 except ImportError:  # still works, just slower on very large memories
@@ -436,7 +438,8 @@ Rules:
 - Skip small talk, greetings, one-off questions, general knowledge, and things the assistant claimed but the user didn't confirm.
 - Skip anything already covered by an EXISTING MEMORY. If the exchange changes or corrects one, return {"op":"update","id":<its id>,"text":<new sentence>}.
   If it proves one wrong or the user asks to forget it, return {"op":"delete","id":<its id>}.
-- If the user explicitly asks you to remember something, always save it.
+- If the user explicitly asks you to remember something, always save it. If an EXISTING MEMORY says the same thing in
+  rougher words (e.g. a raw line pasted from another assistant), return an update for it with the clean sentence and the right topic.
 - Most exchanges contain nothing worth remembering: then return {"memories": []}.
 Return JSON only: {"memories": [{"op":"add","text":"...","topic":"..."}]}"""
 
@@ -457,6 +460,7 @@ class Memory:
         self.moving = False
         self.chats_mod = None
         self.stop = threading.Event()
+        self.job = {}
 
     # ---- setup
     def start(self, settings, save_settings, root, llama_exe, llm, busy, chats_mod):
@@ -534,7 +538,7 @@ class Memory:
               "ok": self.ok(), "error": None, "moving": self.moving, "topics": list(TOPICS),
               "embed": {"model": self.embedder.name, "available": self.embedder.available(),
                         "running": self.embedder.ready(), "error": self.embedder.error},
-              "numpy": np is not None, "msg": self.status_msg}
+              "numpy": np is not None, "msg": self.status_msg, "job": self.job}
         if not self.ok():
             st["error"] = self.store.error if self.store else "not started"
             return st
@@ -664,7 +668,8 @@ class Memory:
             self.store.drop_other_vectors(model)
 
     def _learn_one(self):
-        r = self.store.q("SELECT chat_id, done FROM learned WHERE saved>done ORDER BY rowid LIMIT 1")
+        r = self.store.q("SELECT chat_id, done FROM learned WHERE saved>done "
+                         "ORDER BY (chat_id LIKE 'gpt-%' OR chat_id LIKE 'cl-%'), rowid LIMIT 1")
         if not r:
             return
         cid, done = r[0]
@@ -676,15 +681,24 @@ class Memory:
         if done >= len(ex):
             self.store.x("UPDATE learned SET done=? WHERE chat_id=?", (len(ex), cid))
             return
-        n, u, a = ex[done]
-        res = self.learn_exchange(u, a, source="chat:%s" % cid)
+        # live chats: one exchange at a time. Imported history: several per request, so years of chats finish sooner.
+        imported = cid.startswith(("gpt-", "cl-"))
+        batch, size = [], 0
+        for n, u, a in ex[done:]:
+            batch.append((u, a))
+            size += len(u) + len(a)
+            if not imported or len(batch) >= 8 or size > 7000:
+                break
+        res = self.learn_exchange(batch, source="chat:%s" % cid)
         if res is None:
             return  # model not available: try again later
-        self.store.x("UPDATE learned SET done=? WHERE chat_id=?", (done + 1, cid))
+        self.store.x("UPDATE learned SET done=? WHERE chat_id=?", (done + len(batch), cid))
 
-    def learn_exchange(self, user, assistant, source=""):
+    def learn_exchange(self, batch, source=""):
+        """batch: [(user_text, assistant_text), ...] from one conversation, oldest first."""
         if not self.llm:
             return None
+        user = "\n".join(u for u, _ in batch)
         related = []
         qv = self.embedder.embed([user[-2000:]], query=True, timeout=8)
         if qv:
@@ -692,9 +706,11 @@ class Memory:
         related += [mid for mid in self.store.keyword("m", user, 6) if mid not in related]
         existing = [self.store.get(i) for i in related[:12]]
         existing = "\n".join("#%d [%s] %s" % (m["id"], m["topic"], m["text"]) for m in existing if m) or "(none)"
-        msg = "TODAY: %s\n\nEXISTING MEMORIES:\n%s\n\nLATEST EXCHANGE:\nUser: %s\nAssistant: %s" % (
-            time.strftime("%A %Y-%m-%d"), existing, user[:4000], assistant[:3000])
-        out = self.llm([{"role": "system", "content": LEARN_PROMPT}, {"role": "user", "content": msg}], LEARN_SCHEMA, 700)
+        per = max(600, 7000 // len(batch))
+        convo = "\n\n".join("User: %s\nAssistant: %s" % (u[:per], a[:per]) for u, a in batch)
+        msg = "TODAY: %s\n\nEXISTING MEMORIES:\n%s\n\nLATEST EXCHANGE:\n%s" % (time.strftime("%A %Y-%m-%d"), existing, convo)
+        out = self.llm([{"role": "system", "content": LEARN_PROMPT}, {"role": "user", "content": msg}], LEARN_SCHEMA,
+                       700 if len(batch) == 1 else 1400)
         if out is None:
             return None
         new = []
@@ -789,6 +805,82 @@ class Memory:
                 self.chats_mod.DIR = os.path.join(dst, "chats")
             return True, ("switched to the memory in %s" % dst) if has_db else ("started a new, empty memory in %s" % dst)
         return False, "mode must be move or use"
+
+    # ---- importing other services' exports (ChatGPT, Claude) -----------------------------------------------
+    def import_file(self, path, learn=True, cleanup=False):
+        """Background job: read a .zip/.json export, store every conversation as a chat (searchable at once) and
+        queue it for learning. Progress is in self.job, which the 4:mem tab shows."""
+        if self.job.get("running"):
+            return False, "an import is already running"
+        self.job = {"running": True, "msg": "reading the export…", "chats": 0, "exchanges": 0, "memories": 0,
+                    "skipped": 0, "started": _now(), "learn": bool(learn)}
+        threading.Thread(target=self._import_run, args=(path, learn, cleanup), daemon=True).start()
+        return True, "importing…"
+
+    def _import_run(self, path, learn, cleanup):
+        j = self.job
+        try:
+            found = False
+            for kind, payload, name in importers.read_any(path):
+                found = True
+                if kind == "own":
+                    j["memories"] += self.import_(payload)
+                elif kind == "memories":
+                    j["msg"] = "adding saved memories…"
+                    for text in payload:
+                        if self.store.add(text, "other", "import"):
+                            j["memories"] += 1
+                    if learn:
+                        self._queue_tidy(payload)
+                else:
+                    label = "ChatGPT" if kind == "chatgpt" else "Claude"
+                    for chat in importers.conversations(kind, payload):
+                        j["msg"] = "%s: %s" % (label, chat["title"][len(label) + 3:][:60])
+                        if self.chats_mod.get_chat(chat["id"]):
+                            j["skipped"] += 1  # imported before: keep it, don't relearn
+                            continue
+                        self.chats_mod.write_raw(chat)
+                        self.note_chat(chat, learn=learn and self.learn_on)
+                        j["chats"] += 1
+                        j["exchanges"] += sum(1 for _ in _exchanges(chat["messages"]))
+            if not found:
+                j["msg"] = "nothing importable found (expected a ChatGPT or Claude export: a .zip with conversations.json)"
+                j["error"] = True
+            else:
+                j["msg"] = "done: %d chats (%d exchanges), %d memories%s%s" % (
+                    j["chats"], j["exchanges"], j["memories"], ", %d already imported" % j["skipped"] if j["skipped"] else "",
+                    ". Learning from them in the background while the model is idle" if j["chats"] and learn and self.learn_on else "")
+        except Exception as e:
+            j["msg"], j["error"] = "import failed: %s" % e, True
+        finally:
+            j["running"] = False
+            if cleanup:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+
+    def paste_memories(self, text):
+        """Memories copied from another service's memory page, one per line: each is saved right away, then
+        (when a model is available) a tidy-up pass rewrites them as proper memories with topics."""
+        lines = [re.sub(r"^\s*(?:[-*•·]|\d+[.)])\s*", "", l).strip() for l in str(text or "").splitlines()]
+        lines = [l for l in lines if len(l) > 3][:2000]
+        n = sum(1 for l in lines if self.store.add(l, "other", "import"))
+        self._queue_tidy(lines)
+        return n
+
+    def _queue_tidy(self, lines):
+        """Store pasted/imported memories as a small 'chat' so the learner files them under the right topics."""
+        if not (lines and self.learn_on and self.chats_mod):
+            return
+        for i in range(0, len(lines), 40):
+            part = lines[i:i + 40]
+            chat = {"id": "cl-memories%08x%04d" % (int(_now()) & 0xffffffff, i // 40), "title": "imported memories",
+                    "created": _now(), "updated": _now(),
+                    "messages": [{"role": "user", "content": "Remember these facts about me (from another assistant):\n" + "\n".join("- " + l for l in part)},
+                                 {"role": "assistant", "content": "Noted."}]}
+            self.chats_mod.write_raw(chat)
+            self.note_chat(chat, learn=True)
 
     # ---- export / import: plain JSON, readable by anything
     def export(self):

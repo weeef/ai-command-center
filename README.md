@@ -58,6 +58,10 @@ One long-term memory shared by every model (standard, uncensored, the laptop, an
 - **moving drives**: 4:mem -> location -> *move here* copies the folder, verifies it, switches; the old copy stays as a
   backup. *use existing* points at a folder you copied yourself. A missing drive pauses memory instead of starting
   an empty one elsewhere. Export/import as plain JSON for anything else.
+- **importing from ChatGPT / Claude**: 4:mem -> import takes their "Export data" .zip as-is (`importers.py` reads
+  `conversations.json`; ChatGPT's branch tree is walked along the shown branch, tool calls skipped). Each conversation
+  becomes a chat (ids `gpt-…` / `cl-…`, so re-imports skip duplicates), searchable immediately; learning from them runs
+  in the background, batched, after live chats. Saved memories can be pasted one per line.
 
 ## Tokens burned
 
