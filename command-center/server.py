@@ -625,6 +625,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_json(200, {"memories": memory.M.store.list(one("q"), one("topic"), lim, off)})
         elif path == "/api/memory/tree":
             self.send_json(200, memory.M.tree())
+        elif path == "/api/memory/synapses":
+            self.send_json(200, {"synapses": memory.M.synapses()})
         elif path == "/api/memory/related":
             qs = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
             try:

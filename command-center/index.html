@@ -397,6 +397,18 @@ details.think .tbody{white-space:pre-wrap;max-height:260px;overflow-y:auto;font-
 .tchip:disabled{opacity:.35}
 #treeWrap{flex:1;position:relative;min-height:0;overflow:hidden;cursor:grab;touch-action:none}
 #treeWrap.drag{cursor:grabbing}
+#neuroCv{position:absolute;inset:0;width:100%;height:100%;display:none}
+#treeWrap.brainv #neuroCv{display:block}
+#treeWrap.brainv #treeSvg{display:none}
+#neuroTip{position:absolute;max-width:320px;padding:6px 9px;background:var(--bg2);border:1px solid var(--border);font-size:12px;pointer-events:none;z-index:3;line-height:1.45}
+#neuroTip i{display:block;color:var(--dim);font-style:normal;font-size:11px;margin-top:2px}
+.tview{display:inline-flex}
+.tview button{font-size:11px;padding:1px 9px}
+.tview button+button{margin-left:-1px}
+.tview button.on{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+[data-theme="corpus"] #neuroTip{border-radius:8px;font-family:var(--sans)}
+[data-theme="corpus"] .tview button:first-child{border-radius:6px 0 0 6px}
+[data-theme="corpus"] .tview button:last-child{border-radius:0 6px 6px 0}
 #treeSvg{position:absolute;inset:0;width:100%;height:100%;user-select:none}
 #treeSvg .tl{fill:none;stroke-width:1;opacity:.42}
 #treeSvg .tl-root{opacity:.75;stroke-width:1.6}
@@ -680,10 +692,10 @@ body.remote #tags span[data-ws="2"]{display:none}
 <!-- 4:mem ─ the memory tree -->
 <main id="ws4" class="ws" hidden>
   <div class="col">
-    <section class="pane" id="treePane"><div class="title">memory tree <i id="treeInfo"></i></div>
-      <div class="treebar"><input id="treeQ" placeholder="search the tree"><div class="tchips" id="treeChips"></div><button id="treeReset" title="back to the whole tree (double-click the tree does the same)">reset view</button></div>
-      <div id="treeWrap"><svg id="treeSvg" aria-label="memory tree"></svg>
-        <div id="treeEmpty" hidden>No memories yet. Chat normally and they grow here, or add some in <b>6:set</b>.</div></div>
+    <section class="pane" id="treePane"><div class="title">memory <i id="treeInfo"></i></div>
+      <div class="treebar"><span class="tview"><button data-view="brain" title="memories as neurons in a brain, linked by meaning">brain</button><button data-view="tree" title="memories as a radial tree by topic">tree</button></span><input id="treeQ" placeholder="search memories"><div class="tchips" id="treeChips"></div><button id="treeReset" title="back to the whole tree (double-click the tree does the same)">reset view</button></div>
+      <div id="treeWrap"><canvas id="neuroCv" aria-label="memories as neurons in a brain"></canvas><svg id="treeSvg" aria-label="memory tree"></svg><div id="neuroTip" hidden></div>
+        <div id="treeEmpty" hidden>No memories yet. Chat normally and neurons grow here, or add some in <b>6:set</b>.</div></div>
     </section>
   </div>
   <div class="col">
@@ -1681,6 +1693,7 @@ async function loadGraph(){
   if (k !== memGraphKey) { memGraphKey = k; net.nodes = null; brain.dirty = true; }
 }
 function flashMemories(ids){
+  neuroFire(ids);
   if (!net.nodes) return;
   const set = new Set(ids);
   net.nodes.forEach(nd => { if (nd.mem != null && set.has(nd.mem)) nd.flash = 1.6; });
@@ -1762,13 +1775,15 @@ $("cloudBox").addEventListener("click", async e => {
    Leaf size = how often it's recalled, ring = pinned, glow = just learned or recalled for the last reply.
    Click a leaf for the full memory + what it's related to (dashed lines), click a topic to open that branch. */
 const SVGNS = "http://www.w3.org/2000/svg";
-const tree = {data: null, key: "", sel: null, focus: "", q: "", k: 1, x: 0, y: 0, related: []};
+const tree = {data: null, key: "", sel: null, focus: "", q: "", k: 1, x: 0, y: 0, related: [], syn: [], view: store.get("rt.memview") === "tree" ? "tree" : "brain"};
 function svgEl(tag, attrs, parent){ const e = document.createElementNS(SVGNS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
 async function refreshTree(force){
   let d; try { d = await (await fetch("/api/memory/tree", {cache:"no-store"})).json(); } catch(e) { return; }
   const key = JSON.stringify([d.memories.map(m => [m.id, m.updated, m.uses, m.pinned, m.topic]), d.recalled, d.learned]);
   if (!force && key === tree.key) return;
   tree.key = key; tree.data = d;
+  try { tree.syn = (await (await fetch("/api/memory/synapses", {cache:"no-store"})).json()).synapses || []; } catch(e) { tree.syn = []; }
+  neuro.layout = null;
   if (tree.sel && !d.memories.some(m => m.id === tree.sel)) tree.sel = null;
   renderTree(); renderTreeDetail(); renderTreeRecent();
 }
@@ -1778,6 +1793,9 @@ function renderTreeChips(){
     return `<button class="tchip ${tree.focus === t ? "on" : ""}" style="--c:${topicCol(t)}" data-topic="${t}" ${n ? "" : "disabled"} title="${TOPIC_NAME[t]}: ${n}">${TOPIC_NAME[t]}</button>`; }).join("");
 }
 function renderTree(){
+  $("treeWrap").classList.toggle("brainv", tree.view === "brain");
+  document.querySelectorAll(".tview button").forEach(b => b.classList.toggle("on", b.dataset.view === tree.view));
+  if (tree.view === "brain") { renderTreeChips(); neuroInfo(); neuro.dirty = true; neuroKick(); return; }
   const svg = $("treeSvg"), wrap = $("treeWrap");
   const W = wrap.clientWidth, H = wrap.clientHeight; if (!W || !H || !tree.data) return;
   renderTreeChips();
@@ -1847,7 +1865,7 @@ function renderTree(){
 // leaves are all about the user, so labels drop the "The user ..." opening: "prefers dark themes"
 function treeLabel(t){ return t.replace(/^(sample:\s*)?the user('s)?\s+/i, (_, s, p) => p ? "my " : "").replace(/\.$/, ""); }
 async function selectMemory(id){
-  tree.sel = id; tree.related = [];
+  tree.sel = id; tree.related = []; neuroFire([id]);
   renderTree(); renderTreeDetail();
   try { tree.related = (await (await fetch("/api/memory/related?id=" + id, {cache:"no-store"})).json()).related || []; } catch(e) {}
   if (tree.sel === id) { renderTree(); renderTreeDetail(); }
@@ -1856,7 +1874,9 @@ function memSource(m){ return (m.source || "").startsWith("chat:cline-") ? "a Cl
   (m.source || "").startsWith("chat:cl-") ? "imported from Claude" : (m.source || "").startsWith("chat:") ? "a chat" : m.source === "manual" ? "added by you" : m.source === "import" ? "imported" : (m.source || "–"); }
 function renderTreeDetail(){
   const box = $("treeDetail"), m = tree.data && tree.data.memories.find(x => x.id === tree.sel);
-  if (!m) { box.innerHTML = `<div class="hint" style="margin-top:0">Click a leaf to read a memory, edit it, and see what it connects to. Click a topic to open just that branch; click the centre to go back. Scroll to zoom, drag to move, double-click to reset.</div>`; return; }
+  if (!m) { box.innerHTML = tree.view === "brain"
+    ? `<div class="hint" style="margin-top:0">Every neuron is a memory, placed in its topic's region of the brain. Bigger = recalled more often; a ring = pinned. Lines are synapses between memories with related meaning; dots travelling along them are signals, and a neuron fires when the model recalls it. Click a neuron to read, edit or forget it; click a region to focus it. Scroll to zoom, drag to move, double-click to reset.</div>`
+    : `<div class="hint" style="margin-top:0">Click a leaf to read a memory, edit it, and see what it connects to. Click a topic to open just that branch; click the centre to go back. Scroll to zoom, drag to move, double-click to reset.</div>`; return; }
   box.innerHTML = `
     <div class="tdtopic"><span class="tdot" style="background:${topicCol(m.topic)}"></span>${esc(TOPIC_NAME[m.topic] || m.topic)}${m.pinned ? " · ★ pinned" : ""}</div>
     <div class="tdtext" id="tdText">${esc(m.text)}</div>
@@ -1896,21 +1916,27 @@ $("treeDetail").addEventListener("click", async e => {
 $("treeRecent").addEventListener("click", e => { const r = e.target.closest(".trrow"); if (r) selectMemory(+r.dataset.id); });
 $("treeChips").addEventListener("click", e => { const b = e.target.closest("[data-topic]"); if (!b) return; tree.focus = tree.focus === b.dataset.topic ? "" : b.dataset.topic; tree.x = tree.y = 0; tree.k = 1; renderTree(); });
 $("treeQ").addEventListener("input", e => { tree.q = e.target.value; renderTree(); });
+$("treeWrap").addEventListener("dblclick", () => { neuro.dustKey = ""; });
 function resetTree(){ tree.focus = ""; tree.x = tree.y = 0; tree.k = 1; renderTree(); }
+document.querySelector(".tview").addEventListener("click", e => {
+  const b = e.target.closest("[data-view]"); if (!b) return;
+  tree.view = b.dataset.view; store.set("rt.memview", tree.view); tree.x = tree.y = 0; tree.k = 1; renderTree(); renderTreeDetail();
+});
 $("treeReset").onclick = resetTree;
 { // zoom, pan, click
   const w = $("treeWrap"); let drag = null;
-  const apply = () => tree.g && tree.g.setAttribute("transform", `translate(${w.clientWidth/2 + tree.x},${w.clientHeight/2 + tree.y}) scale(${tree.k})`);
+  const apply = () => { if (tree.view === "brain") { neuro.dirty = true; neuroKick(); return; }
+    tree.g && tree.g.setAttribute("transform", `translate(${w.clientWidth/2 + tree.x},${w.clientHeight/2 + tree.y}) scale(${tree.k})`); };
   w.addEventListener("wheel", e => {
     e.preventDefault();
     const r = w.getBoundingClientRect(), px = (e.clientX - r.left) / uiScale - w.clientWidth / 2, py = (e.clientY - r.top) / uiScale - w.clientHeight / 2;
     const k2 = Math.max(0.4, Math.min(6, tree.k * Math.exp(-e.deltaY * 0.0015)));
     tree.x = px - (px - tree.x) * k2 / tree.k; tree.y = py - (py - tree.y) * k2 / tree.k;
-    const relabel = (tree.k < 1.7) !== (k2 < 1.7); tree.k = k2; relabel ? renderTree() : apply();
+    const relabel = tree.view === "tree" && (tree.k < 1.7) !== (k2 < 1.7); tree.k = k2; relabel ? renderTree() : apply();
   }, {passive: false});
   w.addEventListener("pointerdown", e => { drag = {x: e.clientX, y: e.clientY, ox: tree.x, oy: tree.y, moved: false}; });
   w.addEventListener("pointermove", e => {
-    if (!drag) return; const dx = (e.clientX - drag.x) / uiScale, dy = (e.clientY - drag.y) / uiScale;
+    if (!drag) return neuroHover(e); const dx = (e.clientX - drag.x) / uiScale, dy = (e.clientY - drag.y) / uiScale;
     if (!drag.moved && Math.hypot(dx, dy) < 4) return;
     if (!drag.moved) { drag.moved = true; w.setPointerCapture(e.pointerId); w.classList.add("drag"); }
     tree.x = drag.ox + dx; tree.y = drag.oy + dy; apply();
@@ -1918,6 +1944,12 @@ $("treeReset").onclick = resetTree;
   const end = e => {
     if (!drag) return; const moved = drag.moved; drag = null; w.classList.remove("drag");
     if (moved) return;
+    if (tree.view === "brain") {
+      const n = neuroHit(e);
+      if (n) selectMemory(n.id);
+      else { const r = neuroRegionHit(e); if (r && r !== tree.focus) { tree.focus = r; renderTree(); } else if (!r && tree.focus) resetTree(); }
+      return;
+    }
     const leaf = e.target.closest && e.target.closest(".leaf"), topic = e.target.closest && e.target.closest(".topic"), root = e.target.closest && e.target.closest(".root");
     if (leaf) selectMemory(+leaf.dataset.id);
     else if (topic) { tree.focus = topic.dataset.topic; tree.x = tree.y = 0; tree.k = 1; renderTree(); }
@@ -1938,6 +1970,184 @@ function renderThemePick(){
   b.innerHTML = THEMES.map(t => `<button class="tpk ${t === cur ? "on" : ""}" data-theme-pick="${t}">${t}</button>`).join("") + `<span class="hint" style="margin:0 0 0 6px">also the ◐ button, or /theme</span>`;
 }
 document.addEventListener("click", e => { const b = e.target.closest("[data-theme-pick]"); if (b) { setTheme(b.dataset.themePick); } });
+
+/* ---------------- 4:mem brain view ----------------
+   A side view of the same 3D brain as 1:llm. Each topic is a region (about you = frontal lobe, preferences =
+   prefrontal, how-tos = motor strip, projects = parietal, people + events = temporal, facts = occipital,
+   other = cerebellum); each memory is a neuron there (soma + dendrites, size = how often it's recalled, most used
+   nearest the region's centre); synapses join memories with related meaning (server: embedding similarity).
+   Signals drift along synapses; recalled memories fire. */
+const REGION = {preference:[0.80, 0.12], you:[0.48, 0.52], howto:[0.12, 0.66], project:[-0.32, 0.58],
+                fact:[-0.80, 0.18], people:[0.12, -0.16], event:[0.55, -0.22], other:[-0.52, -0.52]};
+const neuro = {layout: null, dirty: true, raf: 0, last: 0, pulses: [], fire: new Map(), hover: null, dust: null, dustKey: ""};
+function hashN(n, k){ let h = (n * 2654435761 + k * 40503) >>> 0; h ^= h >>> 15; h = Math.imul(h, 2246822519) >>> 0; h ^= h >>> 13; return (h >>> 0) / 4294967296; }
+function neuroLayout(){
+  if (!brain.pts) return null;
+  const P = brain.pts, n = P.length / 7, CEREBRUM = 8400;
+  // side view: u = front-back (z), v = up-down (y)
+  const pts = []; for (let i = 0; i < n; i++) pts.push([P[i*7+2], P[i*7+1] + 0.2, i >= CEREBRUM && i < CEREBRUM + 1500]);
+  const mems = (tree.data && tree.data.memories) || [];
+  const pos = new Map(), used = [];
+  for (const t of TOPICS) {
+    const items = mems.filter(m => m.topic === t).sort((a, b) => (b.pinned - a.pinned) || ((b.uses || 0) - (a.uses || 0)) || (a.id - b.id));
+    if (!items.length) continue;
+    const [cu, cv] = REGION[t], small = t === "other";
+    const pool = pts.filter(p => p[2] === small).map(p => [p[0], p[1], (p[0]-cu)**2 + (p[1]-cv)**2]).sort((a, b) => a[2] - b[2]).slice(0, Math.max(400, items.length * 10));
+    let minD = 0.07, got = [];
+    while (got.length < items.length && minD > 0.004) {
+      got = [];
+      for (const p of pool) {
+        if (got.length >= items.length) break;
+        if (got.every(q => (q[0]-p[0])**2 + (q[1]-p[1])**2 > minD*minD) && used.every(q => (q[0]-p[0])**2 + (q[1]-p[1])**2 > minD*minD*0.5)) got.push(p);
+      }
+      minD *= 0.75;
+    }
+    items.forEach((m, k) => { const p = got[k] || pool[k % pool.length]; pos.set(m.id, {u: p[0], v: p[1], m}); });
+    used.push(...got);
+  }
+  return {pts, pos};
+}
+function neuroXY(u, v, W, H){
+  const s0 = Math.min(W / 2.15, H / 1.95) * tree.k;
+  return [W/2 + tree.x + u * s0, H/2 + tree.y - (v + 0.12) * s0];
+}
+function neuroKick(){ if (!neuro.raf) neuro.raf = requestAnimationFrame(neuroLoop); }
+function neuroLoop(ts){
+  neuro.raf = 0;
+  if (ws !== "4" || tree.view !== "brain" || document.hidden) return;
+  const busy = S && uiState() === "THINKING";
+  if (ts - neuro.last >= (busy ? 33 : 50) || neuro.dirty) { neuro.last = ts; neuroDraw(busy); }
+  neuro.raf = requestAnimationFrame(neuroLoop);
+}
+function neuroDraw(busy){
+  const cv = $("neuroCv"), w = $("treeWrap"), W = w.clientWidth, H = w.clientHeight;
+  if (!W || !H) return;
+  const dpr = Math.min(2, devicePixelRatio || 1) * (typeof uiScale === "number" ? uiScale : 1);
+  if (cv.width !== Math.round(W*dpr) || cv.height !== Math.round(H*dpr)) { cv.width = Math.round(W*dpr); cv.height = Math.round(H*dpr); neuro.dustKey = ""; }
+  if (!neuro.layout) { neuro.layout = neuroLayout(); neuro.dustKey = ""; }
+  const L = neuro.layout; if (!L) return;
+  const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+  const cs = getComputedStyle(document.documentElement), col = TOPICS.map((_, i) => cs.getPropertyValue("--l" + i).trim() || "#fff");
+  const fg = cs.getPropertyValue("--fg").trim() || "#fff", dim = cs.getPropertyValue("--dim").trim() || "#888";
+  const tcol = t => col[Math.max(0, TOPICS.indexOf(t))];
+  // brain tissue (cached until the view changes)
+  const dk = [W, H, tree.k, tree.x, tree.y, document.documentElement.dataset.theme, tree.focus, tree.data.memories.length].join(",");
+  if (neuro.dustKey !== dk) {
+    const off = neuro.dust || (neuro.dust = document.createElement("canvas"));
+    off.width = cv.width; off.height = cv.height;
+    const o = off.getContext("2d"); o.setTransform(dpr, 0, 0, dpr, 0, 0); o.clearRect(0, 0, W, H);
+    // each region glows faintly in its colour, like a lobe lit from inside
+    const s0 = Math.min(W / 2.15, H / 1.95) * tree.k;
+    for (const t of TOPICS) {
+      if (!tree.data.memories.some(m => m.topic === t)) continue;
+      const [rx, ry] = neuroXY(REGION[t][0], REGION[t][1], W, H), rad = s0 * (t === "other" ? 0.26 : 0.34);
+      const gr = o.createRadialGradient(rx, ry, 0, rx, ry, rad); gr.addColorStop(0, tcol(t)); gr.addColorStop(1, "transparent");
+      o.globalAlpha = tree.focus && tree.focus !== t ? 0.03 : 0.13; o.fillStyle = gr; o.fillRect(rx - rad, ry - rad, rad * 2, rad * 2);
+    }
+    o.fillStyle = fg;
+    for (let i = 0; i < L.pts.length; i += 2) { const [x, y] = neuroXY(L.pts[i][0], L.pts[i][1], W, H); o.globalAlpha = 0.13; o.fillRect(x, y, 1.2, 1.2); }
+    o.globalAlpha = 1; o.font = "600 11px " + (cs.getPropertyValue("--sans").trim() || "sans-serif"); o.textAlign = "center";
+    for (const t of TOPICS) {
+      const n = tree.data.memories.filter(m => m.topic === t).length, [x, y] = neuroXY(REGION[t][0], REGION[t][1], W, H);
+      o.globalAlpha = tree.focus && tree.focus !== t ? 0.18 : 0.55; o.fillStyle = tcol(t);
+      o.fillText(`${TOPIC_NAME[t]}${n ? " · " + n : ""}`, x, y - 26 * Math.min(1.6, tree.k));
+    }
+    neuro.dustKey = dk;
+  }
+  g.drawImage(neuro.dust, 0, 0, W, H);
+  const q = tree.q.trim().toLowerCase(), match = m => !q || m.text.toLowerCase().includes(q);
+  const vis = m => (!tree.focus || m.topic === tree.focus) && match(m);
+  const scr = new Map(); for (const [id, p] of L.pos) scr.set(id, neuroXY(p.u, p.v, W, H));
+  const selRel = new Set(tree.related.map(r => r.id));
+  // synapses
+  g.lineWidth = 0.8;
+  for (const [a, b, sim] of tree.syn) {
+    const A = L.pos.get(a), B = L.pos.get(b); if (!A || !B) continue;
+    const [ax, ay] = scr.get(a), [bx, by] = scr.get(b), on = tree.sel === a || tree.sel === b;
+    const show = vis(A.m) && vis(B.m);
+    g.globalAlpha = on ? 0.85 : show ? 0.10 + (sim - 0.5) * 0.9 : 0.03;
+    g.strokeStyle = on ? fg : tcol(A.m.topic);
+    const mx = (ax + bx) / 2, my = (ay + by) / 2, side = hashN(a, b) < 0.5 ? -1 : 1;
+    g.beginPath(); g.moveTo(ax, ay); g.quadraticCurveTo(mx + (by - ay) * 0.18 * side, my - (bx - ax) * 0.18 * side, bx, by); g.stroke();
+  }
+  // signals travelling along synapses
+  if (tree.syn.length && Math.random() < (busy ? 0.9 : 0.25)) { const e = tree.syn[(Math.random() * tree.syn.length) | 0]; neuro.pulses.push({e, t: 0, v: 0.02 + Math.random() * 0.03, back: Math.random() < 0.5}); }
+  neuro.pulses = neuro.pulses.filter(p => p.t < 1).slice(-120);
+  for (const p of neuro.pulses) {
+    const [a, b] = p.back ? [p.e[1], p.e[0]] : [p.e[0], p.e[1]];
+    if (!scr.has(a) || !scr.has(b)) { p.t = 1; continue; }
+    p.t += p.v;
+    const [ax, ay] = scr.get(a), [bx, by] = scr.get(b), side = hashN(p.e[0], p.e[1]) < 0.5 ? -1 : 1;
+    const cx = (ax + bx) / 2 + (by - ay) * 0.18 * side * (p.back ? -1 : 1), cy = (ay + by) / 2 - (bx - ax) * 0.18 * side * (p.back ? -1 : 1), t = p.t;
+    const x = (1-t)*(1-t)*ax + 2*(1-t)*t*cx + t*t*bx, y = (1-t)*(1-t)*ay + 2*(1-t)*t*cy + t*t*by;
+    g.globalAlpha = 0.9; g.fillStyle = fg; g.beginPath(); g.arc(x, y, 1.5, 0, 7); g.fill();
+    if (p.t >= 1) neuro.fire.set(b, Math.max(neuro.fire.get(b) || 0, 0.5));
+  }
+  // neurons: soma + dendrites
+  const recalled = new Set(tree.data.recalled || []), learned = new Set(tree.data.learned || []);
+  const zk = Math.min(2.2, Math.max(0.7, tree.k));
+  for (const [id, p] of L.pos) {
+    const m = p.m, [x, y] = scr.get(id), c = tcol(m.topic), on = vis(m);
+    const fire = neuro.fire.get(id) || 0, r = (3.6 + Math.min(5, Math.log2(1 + (m.uses || 0)) * 1.3)) * zk;
+    g.globalAlpha = on ? 0.55 : 0.08; g.strokeStyle = c; g.lineWidth = 0.9;
+    const nd = 3 + ((hashN(id, 1) * 3) | 0);
+    for (let k = 0; k < nd; k++) {
+      const a = hashN(id, k + 2) * 6.283, len = (8 + hashN(id, k + 9) * 12) * zk;
+      const ex = x + Math.cos(a) * (r + len), ey = y + Math.sin(a) * (r + len);
+      g.beginPath(); g.moveTo(x + Math.cos(a) * r, y + Math.sin(a) * r); g.lineTo(ex, ey);
+      const fa = a + (hashN(id, k + 20) - 0.5) * 1.4; g.moveTo(x + Math.cos(a) * (r + len * 0.55), y + Math.sin(a) * (r + len * 0.55));
+      g.lineTo(x + Math.cos(a) * (r + len * 0.55) + Math.cos(fa) * len * 0.5, y + Math.sin(a) * (r + len * 0.55) + Math.sin(fa) * len * 0.5); g.stroke();
+    }
+    const glow = fire > 0.05 || recalled.has(id) || learned.has(id) || tree.sel === id || neuro.hover === id;
+    g.globalAlpha = on ? 1 : 0.12; g.fillStyle = c; g.shadowColor = c; g.shadowBlur = glow ? 10 + fire * 18 : 0;
+    g.beginPath(); g.arc(x, y, r * (1 + fire * 0.8), 0, 7); g.fill(); g.shadowBlur = 0;
+    if (m.pinned) { g.strokeStyle = fg; g.lineWidth = 1.4; g.beginPath(); g.arc(x, y, r + 2.5, 0, 7); g.stroke(); }
+    if (tree.sel === id || selRel.has(id)) { g.strokeStyle = fg; g.lineWidth = tree.sel === id ? 2.2 : 1; g.globalAlpha = 1; g.beginPath(); g.arc(x, y, r + (tree.sel === id ? 5 : 3.5), 0, 7); g.stroke(); }
+    if (fire) neuro.fire.set(id, fire > 0.04 ? fire * 0.9 : 0);
+  }
+  // selected memory: lines to the related memories the server found
+  if (tree.sel && scr.has(tree.sel)) {
+    const [sx, sy] = scr.get(tree.sel); g.setLineDash([3, 4]); g.strokeStyle = fg; g.globalAlpha = 0.75; g.lineWidth = 1.1;
+    for (const r of tree.related) if (scr.has(r.id)) { const [ex, ey] = scr.get(r.id); g.beginPath(); g.moveTo(sx, sy); g.lineTo(ex, ey); g.stroke(); }
+    g.setLineDash([]);
+  }
+  g.globalAlpha = 1; neuro.dirty = false; neuro.scr = scr;
+}
+function neuroFire(ids){
+  for (const id of ids) {
+    neuro.fire.set(id, 1);
+    for (const e of tree.syn) if (e[0] === id || e[1] === id) neuro.pulses.push({e, t: 0, v: 0.03 + Math.random() * 0.02, back: e[1] === id});
+  }
+  neuro.dirty = true;
+}
+function neuroLocal(e){ const r = $("treeWrap").getBoundingClientRect(); return [(e.clientX - r.left) / uiScale, (e.clientY - r.top) / uiScale]; }
+function neuroHit(e){
+  if (!neuro.scr || !neuro.layout) return null;
+  const [x, y] = neuroLocal(e); let best = null, bd = 12 * 12;
+  for (const [id, [nx, ny]] of neuro.scr) { const d = (nx - x) ** 2 + (ny - y) ** 2; if (d < bd) { bd = d; best = id; } }
+  return best == null ? null : neuro.layout.pos.get(best).m;
+}
+function neuroRegionHit(e){
+  const w = $("treeWrap"), [x, y] = neuroLocal(e); let best = null, bd = 1e9;
+  for (const t of TOPICS) { const [rx, ry] = neuroXY(REGION[t][0], REGION[t][1], w.clientWidth, w.clientHeight), d = (rx - x) ** 2 + (ry - y) ** 2; if (d < bd) { bd = d; best = t; } }
+  const lim = Math.min(w.clientWidth, w.clientHeight) * 0.16 * tree.k;
+  return bd < lim * lim && tree.data.memories.some(m => m.topic === best) ? best : null;
+}
+function neuroHover(e){
+  if (tree.view !== "brain") return;
+  const m = neuroHit(e), tip = $("neuroTip");
+  neuro.hover = m ? m.id : null; neuro.dirty = true;
+  if (!m) { tip.hidden = true; $("treeWrap").style.cursor = ""; return; }
+  const [x, y] = neuroLocal(e), W = $("treeWrap").clientWidth;
+  tip.innerHTML = `${esc(m.text)}<i>${esc(TOPIC_NAME[m.topic] || m.topic)}${m.uses ? " · recalled " + m.uses + "×" : ""}${m.pinned ? " · pinned" : ""}</i>`;
+  tip.style.left = Math.min(x + 14, W - 330) + "px"; tip.style.top = (y + 14) + "px"; tip.hidden = false; $("treeWrap").style.cursor = "pointer";
+}
+function neuroInfo(){
+  const all = (tree.data && tree.data.memories) || [], q = tree.q.trim().toLowerCase();
+  $("treeEmpty").hidden = !!all.length;
+  $("treeInfo").textContent = !all.length ? "" : `· ${all.length} neurons · ${tree.syn.length} synapses` + (q ? ` · ${all.filter(m => m.text.toLowerCase().includes(q)).length} match` : "") + (tree.focus ? " · " + TOPIC_NAME[tree.focus] : "");
+}
+$("treeWrap").addEventListener("pointerleave", () => { $("neuroTip").hidden = true; neuro.hover = null; });
 
 /* ---------------- 5:cline ----------------
    Cline sends its requests to the command center (http://127.0.0.1:8099/cline/<pc|laptop>/v1), which adds the
@@ -2062,6 +2272,7 @@ function showWs(n){
   document.querySelectorAll("#tags span").forEach(t => { const on = t.dataset.ws === n; t.classList.toggle("on", on); t.setAttribute("aria-selected", on); });
   for (const k of ["1","2","3","4","5","6"]) $("ws" + k).hidden = k !== (n === "s" ? "1" : n);
   if (n === "4") requestAnimationFrame(renderTree);
+  if (n === "4" && !brain.pts) buildBrain();
   clearTimeout(wsTimer);
   if (n === "1") { measureBrain(); brain.dirty = true; if (!phone.matches) ta.focus(); }
   else if (n !== "s") refreshWs();

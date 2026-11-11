@@ -563,6 +563,39 @@ class Memory:
         return {"memories": [self.store.row(r) for r in rows], "recalled": list(self.last_recall),
                 "learned": [e["id"] for e in self.last_learned if e.get("op") != "delete"]}
 
+    def synapses(self, per=3, floor=0.5, limit=4000):
+        """Links between memories with related meaning, for the brain view: each memory to its `per` nearest
+        neighbours above `floor` cosine similarity. -> [[id_a, id_b, similarity], ...]"""
+        if not self.ok():
+            return []
+        ids, mat = self.store.matrix("m", self.embedder.name)
+        n = len(ids)
+        if n < 2:
+            return []
+        out = {}
+        if np is not None:
+            if n > limit:
+                ids, mat = ids[:limit], mat[:limit]
+                n = limit
+            S = mat @ mat.T
+            np.fill_diagonal(S, -1.0)
+            k = min(per, n - 1)
+            idx = np.argpartition(-S, k - 1, axis=1)[:, :k]
+            for i in range(n):
+                for j in idx[i]:
+                    s = float(S[i, j])
+                    if s >= floor:
+                        a, b = sorted((ids[i], ids[int(j)]))
+                        out[(a, b)] = round(s, 3)
+        elif n <= 400:  # without numpy, only small memories (it's O(n^2) in pure Python)
+            for i in range(n):
+                sims = sorted(((sum(x * y for x, y in zip(mat[i], mat[j])), j) for j in range(n) if j != i), reverse=True)[:per]
+                for s, j in sims:
+                    if s >= floor:
+                        a, b = sorted((ids[i], ids[j]))
+                        out[(a, b)] = round(s, 3)
+        return [[a, b, s] for (a, b), s in out.items()]
+
     def related(self, mid, k=6):
         """The memories closest in meaning to one memory (keyword match if it isn't indexed yet)."""
         if not self.ok() or not self.store.get(mid):
