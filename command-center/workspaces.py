@@ -288,17 +288,6 @@ def tailnet_dns():
     return dns
 
 
-def serving_here():
-    """True when `tailscale serve` is pointing the phone at this command center (so it must stay running)."""
-    _, out, _ = run([TAILSCALE, "serve", "status", "--json"], timeout=5) if os.path.exists(TAILSCALE) else (1, "", "")
-    try:
-        sv = json.loads(out or "{}")
-    except ValueError:
-        return False
-    return any(((c or {}).get("Handlers") or {}).get("/", {}).get("Proxy", "").rstrip("/") == SERVE_TARGET
-               for c in (sv.get("Web") or {}).values())
-
-
 def set_serve(on):
     if not os.path.exists(TAILSCALE):
         return False, "Tailscale isn't installed"

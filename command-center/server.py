@@ -554,7 +554,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if origin is not None and origin not in ALLOWED_ORIGINS and not (self.remote and origin.lower() == "https://" + host.split(":")[0]):
             self.send_json(403, {"error": "bad origin"})
             return False
-        touch()
+        if not self.remote:
+            touch()  # only the PC window keeps the app alive; the phone works while it's open
         return True
 
     # From the phone: chat, saved chats, model on/off, run-on target and stats. Not VS Code, not the API key,
@@ -763,9 +764,6 @@ def idle_watch():
     while True:
         time.sleep(5)
         if active_streams == 0 and time.time() - last_request > IDLE_EXIT:
-            if workspaces.serving_here():
-                touch()  # the phone reaches the app through us: stay up while phone access is on
-                continue
             os._exit(0)
 
 

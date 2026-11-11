@@ -435,6 +435,7 @@ body.remote #tags span[data-ws="2"]{display:none}
     <section class="pane" id="phonePane"><div class="title">phone access <i>· tailscale serve</i></div><div id="phone">loading…</div></section>
     <section class="pane" id="iphonePane"><div class="title">on your iphone</div>
       <ol class="steps">
+        <li>Make sure the <b>command center is open</b> on the PC (the phone can't reach it otherwise).</li>
         <li>Open the <b>Tailscale</b> app and make sure the VPN is <b>on</b>.</li>
         <li>In Safari, go to the <b>address</b> above. You get this command center, laid out for the phone.</li>
         <li><b>1:llm</b> is the chat (saved chats under <b>history</b>), <b>2:sys</b> turns the model on/off.</li>
@@ -1303,7 +1304,7 @@ function renderWeb(d){
     </div>
     ${on && !up && S && S.target !== "laptop" ? `<div class="note">The model is off: turn it on in <b>${phone.matches ? "2:sys" : "1:llm"}</b> before chatting.</div>` : ""}
     ${!on && d.running ? `<div class="note">Your phone can't reach the model right now. <b>Turn on</b> shares it with your tailnet only.</div>` : ""}
-    <div class="hint" style="margin-top:8px">${d.remote ? "Turning phone access on/off, VS Code and the API key are only available on the PC." : "The phone gets this command center and chats with whatever \"run on\" picks (this PC or the laptop). Phone access keeps the command center running in the background."}</div>`;
+    <div class="hint" style="margin-top:8px">${d.remote ? "Turning phone access on/off, VS Code and the API key are only available on the PC." : "The phone gets this command center and chats with whatever \"run on\" picks (this PC or the laptop). It works while the command center is open on the PC."}</div>`;
   $("tailnetName").textContent = d.self ? "· " + d.self.dns.split(".").slice(1).join(".") : "";
   const rows = [d.self ? {...d.self, me: true} : null, ...d.peers].filter(Boolean);
   $("tailnet").innerHTML = `<table class="devs">${rows.map(r => `<tr class="${r.online ? "" : "off"} ${r.me ? "me" : ""}">
