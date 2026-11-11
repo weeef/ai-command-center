@@ -65,16 +65,27 @@ $llama = Join-Path $Root "llama.cpp\llama-server.exe"
 if (Test-Path $llama) {
     Ok "already installed"
 } else {
-    $rel = Invoke-RestMethod "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest" -Headers @{ "User-Agent" = "command-center-setup" }
     $flavor = if ($vramGB -eq 0) { "cpu" } elseif ($driver -ge 580) { "cuda-13" } else { "cuda-12" }
+    # The repo's "latest" tag isn't always a build with Windows binaries: take the newest release that has them.
+    $rels = Invoke-RestMethod "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=15" -Headers @{ "User-Agent" = "command-center-setup" }
+    $rel = $rels | Where-Object { $_.assets | Where-Object { $_.name -like "llama-*-bin-win-$flavor*-x64.zip" } } | Select-Object -First 1
+    if (-not $rel) { throw "couldn't find a Windows $flavor build in the recent llama.cpp releases" }
     $main = $rel.assets | Where-Object { $_.name -like "llama-*-bin-win-$flavor*-x64.zip" } | Select-Object -First 1
-    if (-not $main) { throw "couldn't find a Windows $flavor build in llama.cpp release $($rel.tag_name)" }
     $tmp = Join-Path $env:TEMP "cc-llama"; New-Item -ItemType Directory -Force $tmp | Out-Null
+    # each download is checked against the sha256 GitHub publishes for it before anything is unpacked
+    function Verify($asset, $file) {
+        if (-not $asset.digest) { Note "no published checksum for $($asset.name); skipping the check"; return }
+        $want = ($asset.digest -replace "^sha256:", "").ToLower()
+        $got = (Get-FileHash -Algorithm SHA256 $file).Hash.ToLower()
+        if ($got -ne $want) { Remove-Item -Force $file; throw "checksum mismatch for $($asset.name); download deleted, run setup again" }
+        Ok "checksum ok: $($asset.name)"
+    }
     Fetch $main.browser_download_url (Join-Path $tmp $main.name)
+    Verify $main (Join-Path $tmp $main.name)
     Expand-Archive -Force (Join-Path $tmp $main.name) (Join-Path $Root "llama.cpp")
     if ($flavor -ne "cpu") {
         $rt = $rel.assets | Where-Object { $_.name -like "cudart-llama-bin-win-$flavor*-x64.zip" } | Select-Object -First 1
-        if ($rt) { Fetch $rt.browser_download_url (Join-Path $tmp $rt.name); Expand-Archive -Force (Join-Path $tmp $rt.name) (Join-Path $Root "llama.cpp") }
+        if ($rt) { Fetch $rt.browser_download_url (Join-Path $tmp $rt.name); Verify $rt (Join-Path $tmp $rt.name); Expand-Archive -Force (Join-Path $tmp $rt.name) (Join-Path $Root "llama.cpp") }
     }
     # some releases put the files in a subfolder
     $found = Get-ChildItem (Join-Path $Root "llama.cpp") -Recurse -Filter llama-server.exe | Select-Object -First 1

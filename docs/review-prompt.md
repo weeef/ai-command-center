@@ -63,8 +63,8 @@ Work through these in order. For each: find the problems, fix the important ones
    for code edits, newer llama.cpp builds, KV cache type, context size trade-offs. Keep vision available somewhere.
    Already measured (README "Speed" table): `-ub 2048` = 2.3x prompt speed, `ngram-mod` = 2.5x on code rewrites,
    threads don't matter, MTP (`models/*-MTP-GGUF`, draft-mtp + ngram-mod, n-max 2) = +15% chat writing speed but
-   no vision and ~15.7 GB peak VRAM at `--n-cpu-moe 23`, so it's not the default yet; a newer llama.cpp build has
-   not been compared (the owner's build is 11798).
+   no vision and ~15.7 GB peak VRAM at `--n-cpu-moe 23`, so it's not the default yet; llama.cpp was updated to b12290
+   (2026-11-11; ~2% faster than b11798; old build kept in `llama.cpp-b11798\`).
    Record results in the README with the exact flags.
 2. **Memory quality.** Build a small offline evaluation (a fixed set of memories + questions with expected recalls)
    and tune: thresholds, hybrid scoring, chunking of old chats, dedupe/consolidation of near-duplicate memories,

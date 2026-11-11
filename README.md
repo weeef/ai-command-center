@@ -85,7 +85,7 @@ How it works: `command-center\memory.py`. SQLite with full-text search plus embe
 If a model fails to start with an out-of-memory error, raise `MOE_*` by 2. If VRAM has room to spare (watch **usage**
 in 1:llm while chatting), lower it by 1-2.
 
-**Measured on the reference PC** (RTX 5080 16 GB, Ryzen 9 9950X3D, 64 GB DDR5-6000, 12k-token prompt):
+**Measured on the reference PC** (RTX 5080 16 GB, Ryzen 9 9950X3D, 64 GB DDR5-6000, 12k-token prompt; llama.cpp b12290, which was ~2% faster than b11798 on the same settings):
 
 | model | settings | reading a prompt | writing | rewriting code (Cline) | peak VRAM |
 |---|---|---|---|---|---|
