@@ -12,7 +12,7 @@ Standard-library Python only, no dependencies. It serves a terminal-styled page 
 |---|---|
 | **1:llm** | turn the local model on/off and pick a model, chat with it, live VRAM/RAM/GPU/CPU usage for this PC and the PAIR laptop, and **tokens burned** since each model was turned on (plus lifetime and a session log) |
 | **2:code** | two VS Code + Cline setups: the main VS Code → this PC's model (`:8090`), a separate "laptop" VS Code → the laptop via PAIR (`:8080`). Open projects in either, or **open · both**: the PC window on the repo and the laptop window on its own git worktree (`<repo>-laptop`, branch `cline-laptop`) so two agents can work at once without touching the same files |
-| **3:web** | phone access over Tailscale (`tailscale serve` → `:8090`) with an on/off toggle and the tailnet's devices |
+| **3:web** | phone access over Tailscale (`tailscale serve` → this command center on `:8099`) with an on/off toggle and the tailnet's devices. On a phone the same UI stacks into tabs: **1:llm** (brain + chat), **2:sys** (model on/off, run on, usage), **3:web**. From the phone, VS Code, the API key and the phone-access toggle are blocked; requests must carry Tailscale's `Tailscale-User-Login` header. While phone access is on, the command center stays running instead of exiting when its window closes |
 
 ## Layout
 

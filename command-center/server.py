@@ -539,20 +539,40 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def guard(self):
-        if self.headers.get("Host", "") not in ALLOWED_HOSTS:
-            self.send_json(403, {"error": "bad host"})
-            return False
+        """Local window: Host is 127.0.0.1/localhost. Phone: Host is this PC's tailnet name, which only reaches us
+        through `tailscale serve` (it binds nothing public); serve stamps Tailscale-User-Login on requests from
+        the owner's signed-in devices, so anything without it is refused."""
+        host = self.headers.get("Host", "").lower()
+        self.remote = False
+        if host not in ALLOWED_HOSTS:
+            dns = workspaces.tailnet_dns()
+            if not dns or host.split(":")[0] != dns or not self.headers.get("Tailscale-User-Login"):
+                self.send_json(403, {"error": "bad host"})
+                return False
+            self.remote = True
         origin = self.headers.get("Origin")
-        if origin is not None and origin not in ALLOWED_ORIGINS:
+        if origin is not None and origin not in ALLOWED_ORIGINS and not (self.remote and origin.lower() == "https://" + host.split(":")[0]):
             self.send_json(403, {"error": "bad origin"})
             return False
         touch()
         return True
 
+    # From the phone: chat, saved chats, model on/off, run-on target and stats. Not VS Code, not the API key,
+    # and not phone access itself (turning that off from the phone would lock the phone out).
+    REMOTE_BLOCKED = ("/api/code", "/api/cline", "/api/web/serve")
+
+    def remote_blocked(self, path):
+        if self.remote and any(path == p or path.startswith(p + "/") for p in self.REMOTE_BLOCKED):
+            self.send_json(403, {"error": "only available on the PC"})
+            return True
+        return False
+
     def do_GET(self):
         if not self.guard():
             return
         path = self.path.split("?", 1)[0]
+        if self.remote_blocked(path):
+            return
         if path in ("/", "/index.html"):
             with open(os.path.join(HERE, "index.html"), "rb") as f:
                 body = f.read()
@@ -570,7 +590,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif path == "/api/ping":
             self.send_json(200, {"ok": True, "app": "command-center"})
         elif path == "/api/stats":
-            self.send_json(200, stats())
+            self.send_json(200, dict(stats(), remote=self.remote))
         elif path == "/api/tokens/log":
             return self.send_json(200, {"log": token_watch.recent_log(30) if token_watch else []})
         elif path == "/api/chats":
@@ -581,7 +601,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif path == "/api/code":
             self.send_json(200, workspaces.code_info(settings, model_info(None), laptop_info(), api_key()))
         elif path == "/api/web":
-            self.send_json(200, workspaces.web_info(api_key(), model_info(None)))
+            w = dict(workspaces.web_info(api_key(), model_info(None)))
+            if self.remote:
+                w["api_key"] = ""
+            self.send_json(200, dict(w, remote=self.remote))
         elif path == "/api/cline":
             if target["v"] == "laptop":
                 self.send_json(200, {"provider": "OpenAI Compatible", "target": "laptop",
@@ -610,6 +633,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except ValueError:
             return self.send_json(400, {"error": "invalid JSON"})
         path = self.path.split("?", 1)[0]
+        if self.remote_blocked(path):
+            return
         if not isinstance(data, dict):
             return self.send_json(400, {"error": "expected a JSON object"})
         if path == "/api/chats/save":
@@ -738,6 +763,9 @@ def idle_watch():
     while True:
         time.sleep(5)
         if active_streams == 0 and time.time() - last_request > IDLE_EXIT:
+            if workspaces.serving_here():
+                touch()  # the phone reaches the app through us: stay up while phone access is on
+                continue
             os._exit(0)
 
 

@@ -2,7 +2,8 @@
 
 code: the two VS Code setups (main VS Code -> this PC's model on 8090; the separate "laptop" VS Code from
       start-vscode-laptop.bat -> the laptop via PAIR on 8080), whether each is running, and opening folders in them.
-web:  phone access through Tailscale (`tailscale serve` -> 127.0.0.1:8090), the tailnet's devices, and serve on/off.
+web:  phone access through Tailscale (`tailscale serve` -> the command center on 127.0.0.1:8099, which forwards
+      chat to whichever model "run on" picks), the tailnet's devices, and serve on/off.
 Everything that launches a program uses a fixed command; the browser only picks "pc" / "laptop" / "on" / "off",
 plus a folder path that must be an existing directory.
 """
@@ -24,7 +25,7 @@ CODE_CMD = shutil.which("code") or os.path.expandvars(r"%LOCALAPPDATA%\Programs\
 GIT = shutil.which("git") or r"C:\Program Files\Git\cmd\git.exe"
 LAPTOP_BRANCH = "cline-laptop"
 TAILSCALE = shutil.which("tailscale") or r"C:\Program Files\Tailscale\tailscale.exe"
-SERVE_TARGET = "http://127.0.0.1:8090"
+SERVE_TARGET = "http://127.0.0.1:8099"
 MAX_RECENT = 8
 
 
@@ -267,6 +268,35 @@ def web_info(key, pc_model):
         info["serve"]["url"] = "https://" + dns  # what it will be once turned on
     _web_cache.update(t=time.time(), v=info)
     return info
+
+
+_dns_cache = {"t": 0, "v": ""}
+
+
+def tailnet_dns():
+    """This PC's tailnet name (e.g. mypc.tailXXXX.ts.net), cached for a minute. "" if Tailscale isn't up."""
+    if time.time() - _dns_cache["t"] < 60:
+        return _dns_cache["v"]
+    dns = ""
+    if os.path.exists(TAILSCALE):
+        _, out, _ = run([TAILSCALE, "status", "--json"], timeout=5)
+        try:
+            dns = ((json.loads(out).get("Self") or {}).get("DNSName") or "").rstrip(".").lower()
+        except ValueError:
+            pass
+    _dns_cache.update(t=time.time(), v=dns)
+    return dns
+
+
+def serving_here():
+    """True when `tailscale serve` is pointing the phone at this command center (so it must stay running)."""
+    _, out, _ = run([TAILSCALE, "serve", "status", "--json"], timeout=5) if os.path.exists(TAILSCALE) else (1, "", "")
+    try:
+        sv = json.loads(out or "{}")
+    except ValueError:
+        return False
+    return any(((c or {}).get("Handlers") or {}).get("/", {}).get("Proxy", "").rstrip("/") == SERVE_TARGET
+               for c in (sv.get("Web") or {}).values())
 
 
 def set_serve(on):

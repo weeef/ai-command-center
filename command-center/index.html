@@ -2,7 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="command center">
+<meta name="theme-color" content="#16161e">
 <title>command center</title>
 <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAvUlEQVR42mNgQAJVi74HA/EmIH4LxP+pjN9CzQ5mwAaAEouQNUhJq1EVozlmEVbLqW0pAccsQg52ulmO5ohgBmi8DJQDNjHAEtwAOeAtw0BYjuyIweuA3bO+w/GAO4BWDiHZAdR2BME0QGtHEJUIaekIonMBrRxBUjakhSNILgeo7Yih5YABjYIBTYQDmg1JsXzeuSycmC5FMV0cgC84aeqAkdkgoacDBrxROuDN8oHtmAx412xQdE4HsnsOAN3q9zr1wm/GAAAAAElFTkSuQmCC">
 <style>
@@ -266,6 +271,46 @@ details.think .tbody{white-space:pre-wrap;max-height:260px;overflow-y:auto;font-
 #hist .hrow button:hover{opacity:1;color:var(--crit);border-color:var(--crit)}
 #hist .hempty{padding:14px 10px;color:var(--dim)}
 @media (prefers-reduced-motion:reduce){.cursor::after{animation:none}#brain{transition:none}#brainWrap::after{animation:none}}
+
+/* ---------------- phone: same panes, stacked ----------------
+   1:llm = brain strip + chat, 2:sys = fetch (model on/off, run on) + usage, 3:web = phone access + tailnet.
+   2:code (VS Code) is PC-only, so on a phone its tab is replaced by 2:sys. */
+#tags .ph{display:none}
+@media (max-width:760px){
+  html,body{height:100%;height:100dvh}
+  body{padding:env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left)}
+  #bar{height:40px;overflow-x:auto;scrollbar-width:none}
+  #bar::-webkit-scrollbar{display:none}
+  #bar>*{padding:0 8px}
+  #tags span{padding:0 11px;font-size:14px}
+  #tags .ph{display:flex}
+  #tags span[data-ws="2"]{display:none}
+  #tps,#host,#clock,#bar .sep{display:none!important}
+  #state{cursor:pointer}
+  main{display:flex;flex-direction:column;gap:12px;height:calc(100% - 40px);padding:4px 8px 0}
+  #side{flex:0 0 auto;gap:12px;overflow:visible}
+  #brainPane{flex:0 0 132px}
+  #fetchPane,#usagePane,#clinePane{display:none}
+  #chatPane{flex:1 1 auto;margin-top:0;min-height:0}
+  #composer{padding:8px 8px max(10px,env(safe-area-inset-bottom))}
+  #prompt{font-size:16px}  /* under 16px iOS zooms the page on focus */
+  #sendBtn,#fileBtn{height:38px}
+  #chatBtns button{font-size:12px;padding:2px 8px}
+  #hist{left:8px;right:8px;width:auto}
+  #hist .hrow{padding:10px}
+  #hist .hrow button{font-size:13px;padding:2px 8px;opacity:.8}
+  .imgs img{max-width:45vw}
+  body.sysview #brainPane,body.sysview #chatPane{display:none}
+  body.sysview #side{flex:1 1 auto;overflow-y:auto;padding-bottom:max(12px,env(safe-area-inset-bottom))}
+  body.sysview #fetchPane,body.sysview #usagePane{display:block;flex:0 0 auto}
+  main.ws{display:flex;flex-direction:column;overflow-y:auto;padding-bottom:max(12px,env(safe-area-inset-bottom))}
+  .ws .col{overflow:visible;flex:0 0 auto}
+  .kvt{grid-template-columns:72px 1fr auto}
+  .urlbox{font-size:15px}
+  .devs td.ip{display:none}
+  .routes{font-size:11px}
+}
+body.remote #tags span[data-ws="2"]{display:none}
 </style>
 </head>
 <body>
@@ -273,6 +318,7 @@ details.think .tbody{white-space:pre-wrap;max-height:260px;overflow-y:auto;font-
   <div id="tags" role="tablist">
     <span class="on" data-ws="1" role="tab" tabindex="0" title="models and chat (Alt+1)">1:llm</span>
     <span data-ws="2" role="tab" tabindex="0" title="VS Code and Cline (Alt+2)">2:code</span>
+    <span class="ph" data-ws="s" role="tab" tabindex="0" title="model on/off and usage">2:sys</span>
     <span data-ws="3" role="tab" tabindex="0" title="phone access over Tailscale (Alt+3)">3:web</span>
   </div>
   <div id="state" class="st-OFF">OFF</div>
@@ -390,9 +436,9 @@ details.think .tbody{white-space:pre-wrap;max-height:260px;overflow-y:auto;font-
     <section class="pane" id="iphonePane"><div class="title">on your iphone</div>
       <ol class="steps">
         <li>Open the <b>Tailscale</b> app and make sure the VPN is <b>on</b>.</li>
-        <li>In Safari, go to the <b>address</b> above.</li>
-        <li>When it asks for an <b>API key</b> (or under its settings), paste the key above.</li>
-        <li>Chat, or attach a photo. Tip: Share → <b>Add to Home Screen</b> makes it feel like an app.</li>
+        <li>In Safari, go to the <b>address</b> above. You get this command center, laid out for the phone.</li>
+        <li><b>1:llm</b> is the chat (saved chats under <b>history</b>), <b>2:sys</b> turns the model on/off.</li>
+        <li>Tip: Share → <b>Add to Home Screen</b> makes it open like an app.</li>
       </ol>
       <div class="hint">Only devices signed in to your Tailscale account can reach it. It is not on the public internet.</div>
     </section>
@@ -701,6 +747,7 @@ async function poll(){
   try {
     const r = await fetch("/api/stats", {cache:"no-store"});
     S = await r.json();
+    setRemote(!!S.remote);
     // the app's files changed since this page loaded: reload so the window always shows the current version
     if (S.build) { if (!window.__build) window.__build = S.build; else if (S.build !== window.__build && !chatBusy) {
       if (!$("prompt").value.trim() && !pending.length) return location.reload();  // the chat is saved and comes back
@@ -1100,7 +1147,9 @@ ta.addEventListener("blur", () => cp.classList.remove("focus"));
    The layout is designed at 1400x920. Bigger windows (fullscreen, 1440p, 4K) zoom everything up evenly;
    the panes still stretch to fill any leftover width, so nothing is letterboxed. Ctrl +/- still works on top. */
 let uiScale = 1;
+const phone = matchMedia("(max-width:760px)");
 function fitScale(){
+  if (phone.matches) { uiScale = 1; document.documentElement.style.zoom = 1; return; }
   const s = Math.min(innerWidth / 1400, innerHeight / 920);
   uiScale = Math.max(0.75, Math.min(3, s));
   document.documentElement.style.zoom = uiScale;
@@ -1110,15 +1159,23 @@ fitScale();
 
 /* ---------------- workspaces: 1:llm 2:code 3:web ---------------- */
 let ws = "1", wsTimer = 0;
+let remote = false;
 function showWs(n){
-  n = String(n); if (!["1","2","3"].includes(n)) n = "1";
+  n = String(n); if (!["1","2","3","s"].includes(n)) n = "1";
+  if (phone.matches || remote) { if (n === "2") n = phone.matches ? "s" : "1"; }  // VS Code lives on the PC
+  if (!phone.matches && n === "s") n = "1";
   ws = n; store.set("rt.ws", n);
+  document.body.classList.toggle("sysview", n === "s");
   document.querySelectorAll("#tags span").forEach(t => { const on = t.dataset.ws === n; t.classList.toggle("on", on); t.setAttribute("aria-selected", on); });
-  for (const k of ["1","2","3"]) $("ws" + k).hidden = k !== n;
+  for (const k of ["1","2","3"]) $("ws" + k).hidden = k !== (n === "s" ? "1" : n);
   clearTimeout(wsTimer);
-  if (n === "1") { measureBrain(); brain.dirty = true; ta.focus(); }
-  else refreshWs();
+  if (n === "1") { measureBrain(); brain.dirty = true; if (!phone.matches) ta.focus(); }
+  else if (n !== "s") refreshWs();
 }
+function phonePlaceholder(){ ta.placeholder = phone.matches ? "message · /help" : "message · Enter sends · Shift+Enter newline · paste/drop images · /help"; }
+phone.addEventListener("change", () => { fitScale(); showWs(ws); phonePlaceholder(); });
+phonePlaceholder();
+$("state").addEventListener("click", () => { if (phone.matches) showWs("s"); });
 async function refreshWs(){
   clearTimeout(wsTimer);
   try {
@@ -1132,6 +1189,7 @@ document.querySelectorAll("#tags span").forEach(t => {
   t.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showWs(t.dataset.ws); } };
 });
 addEventListener("keydown", e => { if (e.altKey && !e.ctrlKey && ["1","2","3"].includes(e.key)) { e.preventDefault(); showWs(e.key); } });
+function setRemote(r){ if (r === remote) return; remote = r; document.body.classList.toggle("remote", r); if (r && ws === "2") showWs("1"); }
 
 async function postJSON(url, obj){
   const r = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(obj)});
@@ -1193,7 +1251,7 @@ function renderRoutes(){
   const lines = [
     `<span class="n">VS Code</span>          ─ cline ─▶ <span class="d">127.0.0.1:8090</span> ─▶ <span class="${c(pcM.state)}">llama-server · ${esc((pcM.key || "off"))}</span>`,
     `<span class="n">VS Code (laptop)</span> ─ cline ─▶ <span class="d">127.0.0.1:8080</span> ─▶ PAIR ─▶ <span class="${S.laptop_online ? c(lapM.state || "OFF") : "bad"}">${esc(S.laptop_name || "laptop")}${S.laptop_online ? "" : " (offline)"}</span>`,
-    `<span class="n">iPhone</span>           ─ tailscale ─▶ <span class="d">${esc(w && w.self ? w.self.dns.split(".")[0] + ".ts.net" : "your-pc.ts.net")}</span> ─▶ <span class="${w && !w.serve.on ? "bad" : c(pcM.state)}">8090</span>`,
+    `<span class="n">iPhone</span>           ─ tailscale ─▶ <span class="d">${esc(w && w.self ? w.self.dns.split(".")[0] + ".ts.net" : "your-pc.ts.net")}</span> ─▶ <span class="${w && !w.serve.on ? "bad" : "ok"}">command center 8099</span> <span class="d">─▶ same as this window</span>`,
     `<span class="n">this window</span>      ─ chat ─▶ <span class="d">${S.target === "laptop" ? "PAIR 8080" : "8090"}</span> <span class="d">(1:llm "run on")</span>`,
   ];
   $("routes").innerHTML = lines.join("\n") + `\n\n<span class="d">green = up · amber = asleep/loading · red = off</span>`;
@@ -1233,19 +1291,19 @@ function renderWeb(d){
     <div class="shead"><span class="dot ${!d.running ? "crit" : on ? (up ? "on" : "warn") : ""}"></span>
       <span class="big">${!d.running ? "tailscale is off" : on ? (up ? "phone access is on" : "on, but the model is off") : "phone access is off"}</span>
       <span class="grow"></span>
-      <button class="btn-main ${on ? "stop" : "go"}" id="serveBtn" ${d.running && !serveBusy ? "" : "disabled"}>${serveBusy ? "…" : on ? "turn off" : "turn on"}</button></div>
+      ${d.remote ? "" : `<button class="btn-main ${on ? "stop" : "go"}" id="serveBtn" ${d.running && !serveBusy ? "" : "disabled"}>${serveBusy ? "…" : on ? "turn off" : "turn on"}</button>`}</div>
     <div class="hint">address</div>
     <div class="urlbox">${esc(d.serve.url || "–")}</div>
     <div class="kvt">
       ${copyRow("address", d.serve.url || "")}
-      ${copyRow("api key", d.api_key || "", masked)}
-      <span class="k">serves</span><span class="v">${esc(d.serve.target || "127.0.0.1:8090")} · this pc's model</span><span></span>
+      ${d.remote ? "" : copyRow("api key", d.api_key || "", masked)}
+      <span class="k">serves</span><span class="v">${esc(d.serve.target || "127.0.0.1:8099")} · ${String(d.serve.target || "").endsWith(":8099") || !d.serve.on ? "this command center" : "llama-server only (turn off and on to switch)"}</span><span></span>
       <span class="k">model</span><span class="v"><span class="dot ${stateDot(m.state || "OFF")}"></span>${esc(m.name || "off")}</span><span></span>
       <span class="k">this pc</span><span class="v">${esc(d.self ? d.self.ip + " · " + d.self.dns : "–")}</span><span></span>
     </div>
-    ${on && !up ? `<div class="note">The phone will get errors until the PC model is on. Turn it on in <b>1:llm</b> (run on: this pc).</div>` : ""}
+    ${on && !up && S && S.target !== "laptop" ? `<div class="note">The model is off: turn it on in <b>${phone.matches ? "2:sys" : "1:llm"}</b> before chatting.</div>` : ""}
     ${!on && d.running ? `<div class="note">Your phone can't reach the model right now. <b>Turn on</b> shares it with your tailnet only.</div>` : ""}
-    <div class="hint" style="margin-top:8px">The phone always uses this PC's model (port 8090), not the laptop.</div>`;
+    <div class="hint" style="margin-top:8px">${d.remote ? "Turning phone access on/off, VS Code and the API key are only available on the PC." : "The phone gets this command center and chats with whatever \"run on\" picks (this PC or the laptop). Phone access keeps the command center running in the background."}</div>`;
   $("tailnetName").textContent = d.self ? "· " + d.self.dns.split(".").slice(1).join(".") : "";
   const rows = [d.self ? {...d.self, me: true} : null, ...d.peers].filter(Boolean);
   $("tailnet").innerHTML = `<table class="devs">${rows.map(r => `<tr class="${r.online ? "" : "off"} ${r.me ? "me" : ""}">
