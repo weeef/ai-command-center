@@ -94,6 +94,8 @@ in 1:llm while chatting), lower it by 1-2.
 | uncensored Q5 | old: `MOE 26, UB 512` | 1,460 tok/s | 69 tok/s | 71 tok/s | 12.9 GB |
 | uncensored Q5 | **new default: `MOE 25, UB 2048, ngram-mod`** | **~3,600 tok/s** | ~70 tok/s | **~165 tok/s** | ~14 GB |
 
+**Fast text-only mode** (`start-llm.bat` options 4/5): MTP versions of the models draft 2 tokens ahead. Measured: +15% writing speed at `MOE 23` (but ~15.7 GB peak VRAM) and ~+4% at the safer default `MOE_MTP=25` (14.1 GB). No image input (llama.cpp can't combine MTP with vision yet). Needs the MTP model files (links in `start-llm.bat`).
+
 Also measured: CPU threads (8/12/16) make no difference; every expert layer moved to the GPU adds ~2.5% writing
 speed; `UB 2048` costs ~1.5 GB VRAM. Writing speed is limited by system-RAM bandwidth for the experts kept in RAM.
 

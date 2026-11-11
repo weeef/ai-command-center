@@ -14,6 +14,8 @@ rem ---- defaults (16 GB reference card); llm-config.bat overrides any of them
 set "MOE_STD=23"
 set "MOE_UNC=25"
 set "MOE_BIG=26"
+set "MOE_MTP=25"
+set "MOE_MTP_UNC=27"
 set "UB=2048"
 set "SPEC=--spec-type ngram-mod"
 set "NGL=99"
@@ -27,14 +29,18 @@ echo.
 echo   1. Qwen3.6-35B standard Q4_K_M    (faster)
 echo   2. Qwen3.6-35B uncensored Q5_K_M  (abliterated, slower)
 echo   3. Qwen3.6-35B standard Q4_K_M, 256K context  (for huge jobs, slower)
+echo   4. standard, FAST text-only  (MTP: ~15%% faster replies, no images)
+echo   5. uncensored, FAST text-only (MTP: ~15%% faster replies, no images)
 echo.
-choice /c 123 /n /m "Which model? [1/2/3] "
+choice /c 12345 /n /m "Which model? [1-5] "
 set "PICK=%errorlevel%"
 :picked
 set "CTX=131072"
 if "%PICK%"=="1" goto q4
 if "%PICK%"=="2" goto q5
 if "%PICK%"=="3" goto big
+if "%PICK%"=="4" goto mtp
+if "%PICK%"=="5" goto mtpu
 echo Unknown choice: %PICK%
 pause
 exit /b 1
@@ -57,12 +63,30 @@ set "MOE=%MOE_BIG%"
 set "CTX=262144"
 goto run
 
+rem MTP models carry extra "multi-token prediction" heads: the model drafts 2 tokens ahead and checks them in one
+rem pass (+15%% measured on chat). llama.cpp can't combine MTP with --mmproj yet, so these modes have no image input.
+rem Download: setup.bat, or huggingface.co/unsloth/Qwen3.6-35B-A3B-MTP-GGUF (UD-Q4_K_M) and
+rem huggingface.co/llmfan46/Qwen3.6-35B-A3B-uncensored-heretic-Native-MTP-Preserved-GGUF (Q5_K_M)
+:mtp
+set "MODEL=%~dp0models\Qwen3.6-35B-A3B-MTP-GGUF\Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"
+set "MOE=%MOE_MTP%"
+set "NOVISION=1"
+set "SPEC=--spec-type draft-mtp,ngram-mod --spec-draft-n-max 2"
+goto run
+
+:mtpu
+set "MODEL=%~dp0models\Qwen3.6-35B-A3B-uncensored-heretic-MTP-GGUF\Qwen3.6-35B-A3B-uncensored-heretic-Native-MTP-Preserved-Q5_K_M.gguf"
+set "MOE=%MOE_MTP_UNC%"
+set "NOVISION=1"
+set "SPEC=--spec-type draft-mtp,ngram-mod --spec-draft-n-max 2"
+goto run
+
 :run
 if not exist "%LLAMA%" ( echo llama-server not found: %LLAMA%   - run setup.bat & pause & exit /b 1 )
 if not exist "%MODEL%" ( echo Model not found: %MODEL%   - run setup.bat to download it & pause & exit /b 1 )
 if not exist "%KEYFILE%" ( echo API key file not found: %KEYFILE%   - run setup.bat & pause & exit /b 1 )
 set "VISION="
-if exist "%MMPROJ%" ( set VISION=--mmproj "%MMPROJ%" --no-mmproj-offload ) else ( echo Vision model not found, starting without image support. )
+if defined NOVISION ( echo Fast MTP mode: text only, no image input. ) else if exist "%MMPROJ%" ( set VISION=--mmproj "%MMPROJ%" --no-mmproj-offload ) else ( echo Vision model not found, starting without image support. )
 
 rem Port 8080 belongs to NVIDIA PAIR. --load-mode none copies CPU weights into RAM; much faster prompts than mmap.
 rem --no-mmproj-offload : vision runs on the CPU; a few seconds slower per image, but leaves VRAM for text speed
