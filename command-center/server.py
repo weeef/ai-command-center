@@ -25,6 +25,7 @@ import tokens  # noqa: E402  (tokens burned per machine)
 import chats  # noqa: E402  (saved chat history)
 import memory  # noqa: E402  (long-term memory shared by every model)
 import cloud  # noqa: E402  (optional web search / stronger cloud model as tools)
+import updater  # noqa: E402  (new versions from GitHub, installed when you say so)
 import urllib.parse  # noqa: E402
 import collections  # noqa: E402
 import re  # noqa: E402
@@ -470,7 +471,30 @@ def laptop_action(action):
 
 
 _stats = {"t": 0, "v": None}
-_BUILD_FILES = ("index.html", "server.py", "workspaces.py", "tokens.py", "chats.py", "memory.py", "importers.py", "cloud.py")
+_BUILD_FILES = ("index.html", "server.py", "workspaces.py", "tokens.py", "chats.py", "memory.py", "importers.py", "cloud.py", "updater.py")
+UP = None  # updater.Updater, made in main()
+STARTED = time.time()
+
+
+def update_brief():
+    if not UP:
+        return None
+    s = UP.state
+    skip = UP.prefs().get("skip")
+    return {"available": s["available"], "behind": s["behind"], "latest": s["latest"],
+            "skipped": bool(skip and skip == s["latest"]), "busy": s["busy"]}
+
+
+def restart_server():
+    """Starts a fresh copy of server.py (it waits for this one to let go of the port) and exits this one."""
+    time.sleep(0.8)  # let the reply reach the page
+    try:
+        memory.M.shutdown()
+    except Exception:
+        pass
+    subprocess.Popen([sys.executable, os.path.join(HERE, "server.py")], cwd=HERE,
+                     env=dict(os.environ, CC_RESTART="1"), creationflags=NOWIN | 0x00000008, close_fds=True)
+    os._exit(0)
 
 
 def build_stamp():
@@ -515,7 +539,7 @@ def stats():
          "laptop_name": (laptop_cache["machine"] or {}).get("name") or laptop_address()[1],
          "tokens": token_watch.view() if token_watch else None,
          "ui_streams": active_streams, "models": {k: v["name"] for k, v in MODELS.items()},
-         "build": build_stamp(), "time": time.time()}
+         "build": build_stamp(), "update": update_brief(), "time": time.time()}
     with lock:
         _stats.update(t=time.time(), v=v)
     return v
@@ -566,7 +590,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     # From the phone: chat, saved chats, model on/off, run-on target and stats. Not VS Code, not the API key,
     # and not phone access itself (turning that off from the phone would lock the phone out).
     REMOTE_BLOCKED = ("/api/code", "/api/cline", "/api/web/serve", "/api/memory/location", "/api/memory/import",
-                      "/api/memory/import-file", "/api/clinecc", "/cline", "/api/cloud")
+                      "/api/memory/import-file", "/api/clinecc", "/cline", "/api/cloud", "/api/update")
 
     def remote_blocked(self, path):
         if self.remote and any(path == p or path.startswith(p + "/") for p in self.REMOTE_BLOCKED):
@@ -608,11 +632,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
         elif path == "/api/ping":
-            self.send_json(200, {"ok": True, "app": "command-center"})
+            self.send_json(200, {"ok": True, "app": "command-center", "started": STARTED})
         elif path == "/api/stats":
             self.send_json(200, dict(stats(), remote=self.remote, memory=memory.M.brief()))
         elif path == "/api/memory":
             self.send_json(200, memory.M.status())
+        elif path == "/api/update":
+            self.send_json(200, UP.public())
         elif path == "/api/cloud":
             self.send_json(200, cloud.status(settings))
         elif path == "/api/clinecc":
@@ -712,6 +738,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.memory_post(path[len("/api/memory/"):], data)
         if path.startswith("/cline/") and path.endswith("/v1/chat/completions"):
             return self.cline_chat(path.split("/")[2], data)
+        if path == "/api/update/check":
+            return self.send_json(200, UP.check())
+        if path == "/api/update/settings":
+            if "auto_check" in data:
+                UP.set_prefs(auto_check=bool(data["auto_check"]))
+            if "skip" in data:
+                UP.set_prefs(skip=str(data["skip"])[:40] if data["skip"] else None)
+            return self.send_json(200, UP.public())
+        if path == "/api/update/apply":
+            if active_streams > 0 or switching["on"]:
+                return self.send_json(409, {"ok": False, "msg": "wait for the current reply or model switch to finish"})
+            ok, msg = UP.apply()
+            if ok:
+                threading.Thread(target=restart_server, daemon=True).start()
+            return self.send_json(200 if ok else 409, {"ok": ok, "msg": msg, "restarting": ok})
         if path == "/api/cloud/key":
             ok = cloud.set_key(data.get("provider"), data.get("key"))
             return self.send_json(200 if ok else 400, {"ok": ok, "msg": "saved" if ok else "unknown provider"})
@@ -1246,10 +1287,19 @@ def idle_watch():
 
 
 def main():
-    try:
-        srv = Server(("127.0.0.1", PORT), Handler)
-    except OSError:
-        sys.exit(0)  # already running
+    # after an update the old copy is still exiting: wait for the port instead of assuming another copy is running
+    tries = 60 if os.environ.pop("CC_RESTART", None) else 1
+    for i in range(tries):
+        try:
+            srv = Server(("127.0.0.1", PORT), Handler)
+            break
+        except OSError:
+            if i == tries - 1:
+                sys.exit(0)  # already running
+            time.sleep(0.25)
+    global UP
+    UP = updater.Updater(ROOT, settings, save_settings)
+    threading.Thread(target=UP.watch, daemon=True).start()
     cpu_percent()
     threading.Thread(target=idle_watch, daemon=True).start()
     threading.Thread(target=laptop_watch, daemon=True).start()

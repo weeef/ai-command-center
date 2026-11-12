@@ -146,6 +146,19 @@ If a second PC runs NVIDIA's Personal AI Router (PAIR), the command center can u
 1:llm. `start-vscode-laptop.bat` opens a separate VS Code whose Cline uses the laptop, and **2:code → open · both**
 puts the two agents on separate git worktrees of the same repo so they can work side by side.
 
+## Updates
+
+The command center checks this GitHub repo in the background (shortly after it starts, then every 6 hours). When
+there's a newer version, an **↑ update** button appears in the top bar: it lists what changed, and **update now**
+installs it and restarts the server (a few seconds; the window reloads itself, your chat comes back, a loaded model
+keeps running). **Later** hides it for now, and **skip this version** until something newer is out. **6:set → updates**
+has *check now* and an auto-check switch. Nothing installs without you clicking.
+
+- **git clone**: a fast-forward `git pull`. If you've changed files or have commits that aren't on GitHub, it refuses
+  and changes nothing.
+- **ZIP download**: only the files that differ from GitHub are replaced; the old copies are kept as `*.bak`. Your
+  settings, keys, chats, memory and models are never touched (they aren't in the repo).
+
 ---
 
 ## Using other models
@@ -168,6 +181,7 @@ command-center\
   memory.py      long-term memory (recall, learning, embedding server, moving, import/export)
   importers.py   ChatGPT / Claude export readers
   cloud.py       optional web search / stronger-model tools (Claude, ChatGPT, Gemini)
+  updater.py     update check and install (from this GitHub repo)
   chats.py       saved chats
   workspaces.py  VS Code / Cline / Tailscale helpers
   tokens.py      tokens-used meter

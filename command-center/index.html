@@ -128,6 +128,29 @@ main.ws{grid-template-columns:1fr 1fr;gap:14px}
 .ut.down:not(.sel){text-decoration:line-through}
 #usagePane{cursor:default}
 #clock{color:var(--accent);font-weight:bold}
+/* updates */
+#updBtn{border:1px solid var(--accent);background:none;color:var(--accent);height:18px;align-self:center;padding:0 8px;font-size:11px;animation:updPulse 2.4s ease-in-out infinite}
+#updBtn:hover{background:var(--accent);color:var(--bg)}
+@keyframes updPulse{50%{box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 22%,transparent)}}
+#updDlg{background:var(--bg);color:var(--fg);border:1px solid var(--border);padding:16px 18px;width:min(560px,calc(100vw - 32px));max-height:min(620px,calc(100vh - 48px))}
+#updDlg::backdrop{background:rgba(0,0,0,.6);backdrop-filter:blur(2px)}
+#updDlg .title{font-weight:bold;margin-bottom:8px;color:var(--accent)}
+#updDlg ul{list-style:none;margin:8px 0;padding:0;max-height:300px;overflow:auto;border-top:1px solid var(--border)}
+#updDlg li{display:flex;gap:10px;padding:5px 0;border-bottom:1px solid var(--border);font-size:12.5px;line-height:1.4}
+#updDlg li code{color:var(--dim);flex:0 0 auto;font-family:var(--font);font-size:11px;padding-top:1px}
+#updDlg li span{flex:1}
+#updDlg li i{color:var(--dim);font-style:normal;font-size:11px;flex:0 0 auto}
+.updWarn{color:var(--warn,#ffb454);font-size:12px;margin:6px 0}
+.updAct{display:flex;gap:8px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap}
+.updAct button{padding:3px 12px}
+button.primary{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+button.primary:hover{color:var(--bg);filter:brightness(1.1)}
+[data-theme="corpus"] #updBtn{border-radius:999px;font-family:var(--font);color:#fff;border-color:#fff}
+[data-theme="corpus"] #updBtn:hover{background:#fff;color:#000}
+[data-theme="corpus"] #updDlg{border-radius:12px;font-family:var(--sans)}
+[data-theme="corpus"] #updDlg .title{font:500 11px/1.4 var(--font);text-transform:uppercase;letter-spacing:.1em;color:#fff}
+[data-theme="corpus"] .updAct button{border-radius:6px}
+[data-theme="corpus"] button.primary{background:#fff;color:#000;border-color:#fff}
 #themeBtn{border:none;background:none;height:100%;color:var(--accent2)}
 
 main{display:grid;grid-template-columns:432px 1fr;gap:14px;padding:6px 12px 12px;height:calc(100% - 28px)}
@@ -557,6 +580,8 @@ body.remote #tags span[data-ws="2"]{display:none}
     <span class="tl">tg</span><span class="tv na" id="tgT">--</span><span class="tu">tok/s</span>
   </div>
   <div class="grow"></div>
+  <button id="updBtn" hidden title="a new version of the command center is on GitHub: see what changed">↑ update</button>
+  <div id="updSep" class="sep" hidden>│</div>
   <div id="host">user@host</div>
   <div class="sep">│</div>
   <button id="themeBtn" title="cycle theme">◐ tokyo</button>
@@ -724,6 +749,7 @@ body.remote #tags span[data-ws="2"]{display:none}
   </div>
   <div class="col">
     <section class="pane"><div class="title">appearance</div><div id="themePick" class="memloc" style="margin-top:0"></div></section>
+    <section class="pane"><div class="title">updates <i>· from github</i></div><div id="updBox">loading…</div></section>
     <section class="pane"><div class="title">cloud &amp; web search <i>· optional</i></div><div id="cloudBox">loading…</div></section>
     <section class="pane" id="memListPane"><div class="title">memories <i id="memCount"></i></div>
       <div class="memadd"><input id="memNew" maxlength="1000" placeholder="teach it something: e.g. I prefer metric units"><select id="memNewTopic"></select><button id="memAddBtn">remember</button></div>
@@ -732,6 +758,11 @@ body.remote #tags span[data-ws="2"]{display:none}
     </section>
   </div>
 </main>
+<dialog id="updDlg" aria-labelledby="updTitle">
+  <div class="title" id="updTitle">new version available</div>
+  <div id="updBody"></div>
+  <div class="updAct"><button id="updNow" class="primary">update now</button><button id="updLater">later</button><button id="updSkip" title="don't remind me until there's something newer than this">skip this version</button></div>
+</dialog>
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
@@ -1136,6 +1167,7 @@ async function poll(){
     S = await r.json();
     setRemote(!!S.remote);
     memNotice(S.memory);
+    updBadge(S.update);
     // the app's files changed since this page loaded: reload so the window always shows the current version
     if (S.build) { if (!window.__build) window.__build = S.build; else if (S.build !== window.__build && !chatBusy) {
       if (!$("prompt").value.trim() && !pending.length) return location.reload();  // the chat is saved and comes back
@@ -1972,27 +2004,96 @@ function renderThemePick(){
 document.addEventListener("click", e => { const b = e.target.closest("[data-theme-pick]"); if (b) { setTheme(b.dataset.themePick); } });
 
 /* ---------------- 4:mem brain view ----------------
-   A side view of the same 3D brain as 1:llm. Each topic is a region (about you = frontal lobe, preferences =
-   prefrontal, how-tos = motor strip, projects = parietal, people + events = temporal, facts = occipital,
-   other = cerebellum); each memory is a neuron there (soma + dendrites, size = how often it's recalled, most used
-   nearest the region's centre); synapses join memories with related meaning (server: embedding similarity).
-   Signals drift along synapses; recalled memories fire. */
-const REGION = {preference:[0.80, 0.12], you:[0.48, 0.52], howto:[0.12, 0.66], project:[-0.32, 0.58],
-                fact:[-0.80, 0.18], people:[0.12, -0.16], event:[0.55, -0.22], other:[-0.52, -0.52]};
-const neuro = {layout: null, dirty: true, raf: 0, last: 0, pulses: [], fire: new Map(), hover: null, dust: null, dustKey: ""};
+   A drawn side view of a brain, facing right: cerebrum with folded gyri (contours of a warped noise field, so the
+   folds look organic but never change), the lateral and central sulci, cerebellum with its folia, brainstem.
+   Each topic is a region (preferences = prefrontal, about you = frontal, how-tos = motor strip, projects = parietal,
+   facts = occipital, people + events = temporal, other = cerebellum); each memory is a neuron there (soma +
+   dendrites, size = how often it's recalled, most used nearest the region's centre); synapses join memories with
+   related meaning (server: embedding similarity). Signals drift along synapses; recalled memories fire; while the
+   model is thinking a slow wave sweeps the cortex. */
+const REGION = {preference:[0.78, 0.16], you:[0.48, 0.55], howto:[0.10, 0.68], project:[-0.40, 0.56],
+                fact:[-0.78, 0.14], people:[0.00, -0.24], event:[0.38, -0.27], other:[-0.62, -0.56]};
+const neuro = {layout: null, dirty: true, raf: 0, last: 0, pulses: [], fire: new Map(), hover: null, dust: null, dustKey: "", paths: null};
 function hashN(n, k){ let h = (n * 2654435761 + k * 40503) >>> 0; h ^= h >>> 15; h = Math.imul(h, 2246822519) >>> 0; h ^= h >>> 13; return (h >>> 0) / 4294967296; }
+function spline(P, per){
+  // closed Catmull-Rom through the control points, as a dense polyline
+  const out = [], n = P.length;
+  for (let i = 0; i < n; i++) {
+    const p0 = P[(i-1+n)%n], p1 = P[i], p2 = P[(i+1)%n], p3 = P[(i+2)%n];
+    for (let s = 0; s < per; s++) {
+      const t = s/per, t2 = t*t, t3 = t2*t;
+      out.push([0, 1].map(k => 0.5*((2*p1[k]) + (-p0[k]+p2[k])*t + (2*p0[k]-5*p1[k]+4*p2[k]-p3[k])*t2 + (-p0[k]+3*p1[k]-3*p2[k]+p3[k])*t3)));
+    }
+  }
+  return out;
+}
+function openSpline(P, per){ const Q = [P[0], ...P, P[P.length-1]], out = [];
+  for (let i = 1; i < Q.length - 2; i++) for (let s = 0; s <= per; s++) { const t = s/per, t2 = t*t, t3 = t2*t, p0 = Q[i-1], p1 = Q[i], p2 = Q[i+1], p3 = Q[i+2];
+    out.push([0, 1].map(k => 0.5*((2*p1[k]) + (-p0[k]+p2[k])*t + (2*p0[k]-5*p1[k]+4*p2[k]-p3[k])*t2 + (-p0[k]+3*p1[k]-3*p2[k]+p3[k])*t3))); }
+  return out; }
+function inPoly(poly, x, y){
+  let c = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c;
+  }
+  return c;
+}
+function vnoise(x, y){
+  const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi, s = t => t*t*(3 - 2*t);
+  const h = (i, j) => { let k = (Math.imul(i, 374761393) + Math.imul(j, 668265263)) | 0; k = Math.imul(k ^ (k >>> 13), 1274126177); return ((k ^ (k >>> 16)) >>> 0) / 2147483648 - 1; };
+  const a = h(xi, yi), b = h(xi+1, yi), c = h(xi, yi+1), d = h(xi+1, yi+1), u = s(xf), v = s(yf);
+  return a + (b - a)*u + (c - a)*v + (a - b - c + d)*u*v;
+}
+let BRAIN2D = null;
+function brain2d(){
+  if (BRAIN2D) return BRAIN2D;
+  const cerebrum = spline([[0.97,0.08],[0.94,0.34],[0.80,0.58],[0.55,0.77],[0.22,0.88],[-0.12,0.89],[-0.45,0.80],[-0.72,0.60],
+    [-0.91,0.34],[-1.0,0.06],[-0.97,-0.16],[-0.84,-0.28],[-0.60,-0.33],[-0.34,-0.38],[-0.08,-0.46],[0.20,-0.48],[0.42,-0.43],
+    [0.55,-0.31],[0.585,-0.18],[0.66,-0.12],[0.84,-0.13],[0.94,-0.05]], 14);
+  const cerebellum = spline([[-0.34,-0.32],[-0.58,-0.26],[-0.84,-0.27],[-0.95,-0.38],[-0.92,-0.53],[-0.78,-0.65],[-0.57,-0.69],
+    [-0.40,-0.62],[-0.30,-0.47]], 14);
+  const stem = spline([[-0.08,-0.40],[-0.28,-0.42],[-0.35,-0.56],[-0.38,-0.70],[-0.41,-0.86],[-0.30,-0.88],[-0.25,-0.72],
+    [-0.15,-0.60],[-0.06,-0.50]], 10);
+  // landmarks: lateral (Sylvian) fissure, central sulcus, parieto-occipital, superior temporal sulcus
+  const marks = [openSpline([[0.585,-0.15],[0.40,-0.08],[0.15,-0.01],[-0.10,0.06],[-0.26,0.14],[-0.34,0.24]], 10),
+                 openSpline([[-0.02,0.885],[0.04,0.70],[0.10,0.52],[0.13,0.34],[0.20,0.16],[0.24,0.03]], 10),
+                 openSpline([[-0.60,0.71],[-0.66,0.56],[-0.70,0.40]], 10),
+                 openSpline([[0.50,-0.27],[0.28,-0.21],[0.02,-0.15],[-0.24,-0.06],[-0.46,0.04]], 10)];
+  // gyri: a height map of rounded ridges with narrow grooves (|sin| of a domain-warped noise field), lit from the
+  // upper front and baked once into a white-on-transparent texture; the drawing clips it to the cerebrum
+  const f = (u, v) => { const wu = 0.35*vnoise(u*1.8 + 11, v*1.8 + 3), wv = 0.35*vnoise(u*1.8 - 7, v*1.8 + 19);
+    return Math.abs(Math.sin(12 * (vnoise((u + wu)*2.4, (v + wv)*2.8) + 0.45*vnoise(u*5.5 + 40, v*5.5 - 9) + 0.12*vnoise(u*13 - 5, v*13 + 2)))); };
+  const TU0 = -1.02, TV1 = 0.93, TPX = 380, TW = Math.ceil(2.04*TPX), TH = Math.ceil(1.48*TPX), hgt = new Float32Array(TW*TH);
+  for (let j = 0; j < TH; j++) for (let i = 0; i < TW; i++) hgt[j*TW+i] = f(TU0 + i/TPX, TV1 - j/TPX);
+  const tex = document.createElement("canvas"); tex.width = TW; tex.height = TH;
+  const tc = tex.getContext("2d"), img = tc.createImageData(TW, TH), px = img.data, A = 0.022;
+  const [lx, ly, lz] = norm(-0.45, 0.6, 0.66);
+  for (let j = 1; j < TH - 1; j++) for (let i = 1; i < TW - 1; i++) {
+    const k = j*TW + i, h = hgt[k];
+    const dx = (hgt[k+1] - hgt[k-1]) * TPX * 0.5 * A, dy = (hgt[k-TW] - hgt[k+TW]) * TPX * 0.5 * A;
+    const [nx, ny, nz] = norm(-dx, -dy, 1), lam = Math.max(0, nx*lx + ny*ly + nz*lz);
+    const a = (0.03 + 0.19 * lam * lam * lam) * (0.15 + 0.85 * Math.sqrt(h));
+    px[k*4] = px[k*4+1] = px[k*4+2] = 255; px[k*4+3] = Math.min(255, a * 255);
+  }
+  tc.putImageData(img, 0, 0);
+  // candidate neuron sites: a jittered grid inside each part, away from the edges
+  const sites = shape => { const out = [], m = 0.04;
+    for (let u = -1; u <= 1; u += 0.02) for (let v = -0.98; v <= 0.9; v += 0.02) {
+      const x = u + (hashN((u*997)|0, (v*991)|0) - 0.5)*0.012, y = v + (hashN((v*977)|0, (u*983)|0) - 0.5)*0.012;
+      if (inPoly(shape, x, y) && inPoly(shape, x+m, y) && inPoly(shape, x-m, y) && inPoly(shape, x, y+m) && inPoly(shape, x, y-m)) out.push([x, y]);
+    }
+    return out; };
+  return BRAIN2D = {cerebrum, cerebellum, stem, marks, tex, tu0: TU0, tv1: TV1, tpx: TPX, siteBig: sites(cerebrum), siteSmall: sites(cerebellum)};
+}
 function neuroLayout(){
-  if (!brain.pts) return null;
-  const P = brain.pts, n = P.length / 7, CEREBRUM = 8400;
-  // side view: u = front-back (z), v = up-down (y)
-  const pts = []; for (let i = 0; i < n; i++) pts.push([P[i*7+2], P[i*7+1] + 0.2, i >= CEREBRUM && i < CEREBRUM + 1500]);
-  const mems = (tree.data && tree.data.memories) || [];
+  const B = brain2d(), mems = (tree.data && tree.data.memories) || [];
   const pos = new Map(), used = [];
   for (const t of TOPICS) {
     const items = mems.filter(m => m.topic === t).sort((a, b) => (b.pinned - a.pinned) || ((b.uses || 0) - (a.uses || 0)) || (a.id - b.id));
     if (!items.length) continue;
-    const [cu, cv] = REGION[t], small = t === "other";
-    const pool = pts.filter(p => p[2] === small).map(p => [p[0], p[1], (p[0]-cu)**2 + (p[1]-cv)**2]).sort((a, b) => a[2] - b[2]).slice(0, Math.max(400, items.length * 10));
+    const [cu, cv] = REGION[t];
+    const pool = (t === "other" ? B.siteSmall : B.siteBig).map(p => [p[0], p[1], (p[0]-cu)**2 + (p[1]-cv)**2]).sort((a, b) => a[2] - b[2]).slice(0, Math.max(400, items.length * 10));
     let minD = 0.07, got = [];
     while (got.length < items.length && minD > 0.004) {
       got = [];
@@ -2005,11 +2106,18 @@ function neuroLayout(){
     items.forEach((m, k) => { const p = got[k] || pool[k % pool.length]; pos.set(m.id, {u: p[0], v: p[1], m}); });
     used.push(...got);
   }
-  return {pts, pos};
+  return {pos};
 }
 function neuroXY(u, v, W, H){
-  const s0 = Math.min(W / 2.15, H / 1.95) * tree.k;
-  return [W/2 + tree.x + u * s0, H/2 + tree.y - (v + 0.12) * s0];
+  const s0 = Math.min(W / 2.2, H / 2.05) * tree.k;
+  return [W/2 + tree.x + u * s0, H/2 + tree.y - (v + 0.04) * s0];
+}
+function rgbaOf(c, a){
+  c = c.trim(); let r = 255, g = 255, b = 255;
+  if (/^#[0-9a-f]{3}$/i.test(c)) [r, g, b] = [1, 2, 3].map(i => parseInt(c[i] + c[i], 16));
+  else if (/^#[0-9a-f]{6}/i.test(c)) [r, g, b] = [1, 3, 5].map(i => parseInt(c.slice(i, i+2), 16));
+  else { const m = c.match(/\d+(\.\d+)?/g); if (m && m.length >= 3) [r, g, b] = m.map(Number); }
+  return `rgba(${r},${g},${b},${a})`;
 }
 function neuroKick(){ if (!neuro.raf) neuro.raf = requestAnimationFrame(neuroLoop); }
 function neuroLoop(ts){
@@ -2018,6 +2126,58 @@ function neuroLoop(ts){
   const busy = S && uiState() === "THINKING";
   if (ts - neuro.last >= (busy ? 33 : 50) || neuro.dirty) { neuro.last = ts; neuroDraw(busy); }
   neuro.raf = requestAnimationFrame(neuroLoop);
+}
+function neuroTissue(o, W, H, cs, tcol){
+  const B = brain2d(), fg = cs.getPropertyValue("--fg").trim() || "#fff", bg = cs.getPropertyValue("--bg").trim() || "#000";
+  const s0 = Math.min(W / 2.2, H / 2.05) * tree.k, zk = Math.min(2.4, Math.max(0.6, tree.k));
+  const toPath = (poly, close = true) => { const p = new Path2D(); poly.forEach(([u, v], i) => { const [x, y] = neuroXY(u, v, W, H); i ? p.lineTo(x, y) : p.moveTo(x, y); }); if (close) p.closePath(); return p; };
+  const cer = toPath(B.cerebrum), cbl = toPath(B.cerebellum), stem = toPath(B.stem);
+  const [cx, cy] = neuroXY(0.05, 0.25, W, H);
+  const fill = (path, a0, a1, r) => { const gr = o.createRadialGradient(cx, cy - s0*0.2, 0, cx, cy, s0 * r);
+    gr.addColorStop(0, rgbaOf(fg, a0)); gr.addColorStop(1, rgbaOf(fg, a1)); o.fillStyle = gr; o.fill(path); };
+  const has = t => tree.data.memories.some(m => m.topic === t);
+  // a soft halo around the whole brain
+  o.save(); o.shadowColor = rgbaOf(fg, 0.10); o.shadowBlur = 50 * zk; o.fillStyle = rgbaOf(fg, 0.02); o.fill(cer); o.restore();
+  // brainstem, then cerebellum, then the cerebrum over both
+  fill(stem, 0.05, 0.025, 1.4); o.lineWidth = 1; o.strokeStyle = rgbaOf(fg, 0.22); o.stroke(stem);
+  o.save(); o.clip(stem); o.strokeStyle = rgbaOf(fg, 0.07);
+  for (let k = 0; k < 5; k++) { const p = toPath(openSpline([[-0.26 + k*0.035, -0.45], [-0.31 + k*0.03, -0.68], [-0.38 + k*0.02, -0.88]], 8), false); o.stroke(p); }
+  o.restore();
+  fill(cbl, 0.10, 0.04, 1.3);
+  o.save(); o.clip(cbl);
+  const fol = (lw, col, dy) => { o.lineWidth = lw; o.strokeStyle = col;
+    for (let k = 0; k < 22; k++) { const p = new Path2D(), [ex, ey] = neuroXY(-0.60, -0.20, W, H);
+      p.ellipse(ex, ey + dy, s0 * (0.10 + k * 0.03), s0 * (0.04 + k * 0.021), -0.10, 0, Math.PI); o.stroke(p); } };
+  fol(1.8 * zk, rgbaOf(bg, 0.85), 0); fol(0.9, rgbaOf(fg, 0.2), -1.2 * zk);
+  o.restore();
+  o.lineWidth = 1.2; o.strokeStyle = rgbaOf(fg, 0.30); o.stroke(cbl);
+  // cerebrum: tissue, lobe tints, folds, landmarks, rim
+  o.save(); o.fillStyle = bg; o.fill(cer); o.restore();   // hides the cerebellum's top where they overlap
+  fill(cer, 0.13, 0.045, 1.25);
+  const both = new Path2D(); both.addPath(cer); both.addPath(cbl);
+  o.save(); o.clip(both);
+  for (const t of TOPICS) {
+    const [rx, ry] = neuroXY(REGION[t][0], REGION[t][1], W, H), rad = s0 * (t === "other" ? 0.32 : 0.42);
+    const gr = o.createRadialGradient(rx, ry, 0, rx, ry, rad); gr.addColorStop(0, tcol(t)); gr.addColorStop(1, "transparent");
+    o.globalAlpha = tree.focus ? (tree.focus === t ? 0.30 : 0.03) : has(t) ? 0.20 : 0.06; o.fillStyle = gr; o.fillRect(rx - rad, ry - rad, rad * 2, rad * 2);
+  }
+  o.globalAlpha = 1; o.restore();
+  o.save(); o.clip(cer);
+  if (!B.tint || B.tintCol !== fg) {   // the relief texture, in this theme's foreground colour
+    const t = B.tint || (B.tint = document.createElement("canvas")); t.width = B.tex.width; t.height = B.tex.height;
+    const tc = t.getContext("2d"); tc.drawImage(B.tex, 0, 0); tc.globalCompositeOperation = "source-in"; tc.fillStyle = fg; tc.fillRect(0, 0, t.width, t.height);
+    B.tintCol = fg;
+  }
+  { const [tx, ty] = neuroXY(B.tu0, B.tv1, W, H); o.imageSmoothingQuality = "high"; o.drawImage(B.tint, tx, ty, s0 * B.tex.width / B.tpx, s0 * B.tex.height / B.tpx); }
+  o.lineCap = "round"; o.lineJoin = "round";
+  const mk = B.marks.map(m => toPath(m, false));
+  o.lineWidth = 4.2 * zk; o.strokeStyle = rgbaOf(bg, 0.92); mk.forEach(p => o.stroke(p));
+  o.save(); o.translate(-1.1 * zk, -1.1 * zk); o.lineWidth = 1.1; o.strokeStyle = rgbaOf(fg, 0.24); mk.forEach(p => o.stroke(p)); o.restore();
+  // a darker rim inside the edge gives the cortex some volume
+  o.lineWidth = 14 * zk; o.strokeStyle = rgbaOf(bg, 0.35); o.stroke(cer);
+  o.restore();
+  o.save(); o.shadowColor = rgbaOf(fg, 0.35); o.shadowBlur = 10; o.lineWidth = 1.4; o.strokeStyle = rgbaOf(fg, 0.42); o.stroke(cer); o.restore();
+  neuro.paths = {cer, cbl};
 }
 function neuroDraw(busy){
   const cv = $("neuroCv"), w = $("treeWrap"), W = w.clientWidth, H = w.clientHeight;
@@ -2028,7 +2188,7 @@ function neuroDraw(busy){
   const L = neuro.layout; if (!L) return;
   const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
   const cs = getComputedStyle(document.documentElement), col = TOPICS.map((_, i) => cs.getPropertyValue("--l" + i).trim() || "#fff");
-  const fg = cs.getPropertyValue("--fg").trim() || "#fff", dim = cs.getPropertyValue("--dim").trim() || "#888";
+  const fg = cs.getPropertyValue("--fg").trim() || "#fff", dim = cs.getPropertyValue("--dim").trim() || "#888", bgc = cs.getPropertyValue("--bg").trim() || "#000";
   const tcol = t => col[Math.max(0, TOPICS.indexOf(t))];
   // brain tissue (cached until the view changes)
   const dk = [W, H, tree.k, tree.x, tree.y, document.documentElement.dataset.theme, tree.focus, tree.data.memories.length].join(",");
@@ -2036,25 +2196,17 @@ function neuroDraw(busy){
     const off = neuro.dust || (neuro.dust = document.createElement("canvas"));
     off.width = cv.width; off.height = cv.height;
     const o = off.getContext("2d"); o.setTransform(dpr, 0, 0, dpr, 0, 0); o.clearRect(0, 0, W, H);
-    // each region glows faintly in its colour, like a lobe lit from inside
-    const s0 = Math.min(W / 2.15, H / 1.95) * tree.k;
-    for (const t of TOPICS) {
-      if (!tree.data.memories.some(m => m.topic === t)) continue;
-      const [rx, ry] = neuroXY(REGION[t][0], REGION[t][1], W, H), rad = s0 * (t === "other" ? 0.26 : 0.34);
-      const gr = o.createRadialGradient(rx, ry, 0, rx, ry, rad); gr.addColorStop(0, tcol(t)); gr.addColorStop(1, "transparent");
-      o.globalAlpha = tree.focus && tree.focus !== t ? 0.03 : 0.13; o.fillStyle = gr; o.fillRect(rx - rad, ry - rad, rad * 2, rad * 2);
-    }
-    o.fillStyle = fg;
-    for (let i = 0; i < L.pts.length; i += 2) { const [x, y] = neuroXY(L.pts[i][0], L.pts[i][1], W, H); o.globalAlpha = 0.13; o.fillRect(x, y, 1.2, 1.2); }
-    o.globalAlpha = 1; o.font = "600 11px " + (cs.getPropertyValue("--sans").trim() || "sans-serif"); o.textAlign = "center";
-    for (const t of TOPICS) {
-      const n = tree.data.memories.filter(m => m.topic === t).length, [x, y] = neuroXY(REGION[t][0], REGION[t][1], W, H);
-      o.globalAlpha = tree.focus && tree.focus !== t ? 0.18 : 0.55; o.fillStyle = tcol(t);
-      o.fillText(`${TOPIC_NAME[t]}${n ? " · " + n : ""}`, x, y - 26 * Math.min(1.6, tree.k));
-    }
+    neuroTissue(o, W, H, cs, tcol);
     neuro.dustKey = dk;
   }
   g.drawImage(neuro.dust, 0, 0, W, H);
+  // thinking: a slow wave of activity sweeps front to back across the cortex
+  if (busy && neuro.paths) {
+    const s0 = Math.min(W / 2.2, H / 2.05) * tree.k, ph = (performance.now() / 2600) % 1;
+    const [wx] = neuroXY(1.2 - ph * 2.6, 0, W, H), gr = g.createLinearGradient(wx - s0 * 0.35, 0, wx + s0 * 0.35, 0);
+    gr.addColorStop(0, rgbaOf(fg, 0)); gr.addColorStop(0.5, rgbaOf(fg, 0.10)); gr.addColorStop(1, rgbaOf(fg, 0));
+    g.save(); g.clip(neuro.paths.cer); g.fillStyle = gr; g.fillRect(0, 0, W, H); g.restore();
+  }
   const q = tree.q.trim().toLowerCase(), match = m => !q || m.text.toLowerCase().includes(q);
   const vis = m => (!tree.focus || m.topic === tree.focus) && match(m);
   const scr = new Map(); for (const [id, p] of L.pos) scr.set(id, neuroXY(p.u, p.v, W, H));
@@ -2101,6 +2253,7 @@ function neuroDraw(busy){
     const glow = fire > 0.05 || recalled.has(id) || learned.has(id) || tree.sel === id || neuro.hover === id;
     g.globalAlpha = on ? 1 : 0.12; g.fillStyle = c; g.shadowColor = c; g.shadowBlur = glow ? 10 + fire * 18 : 0;
     g.beginPath(); g.arc(x, y, r * (1 + fire * 0.8), 0, 7); g.fill(); g.shadowBlur = 0;
+    g.fillStyle = fg; g.globalAlpha = on ? 0.55 + fire * 0.45 : 0.06; g.beginPath(); g.arc(x - r * 0.25, y - r * 0.25, r * 0.38, 0, 7); g.fill();
     if (m.pinned) { g.strokeStyle = fg; g.lineWidth = 1.4; g.beginPath(); g.arc(x, y, r + 2.5, 0, 7); g.stroke(); }
     if (tree.sel === id || selRel.has(id)) { g.strokeStyle = fg; g.lineWidth = tree.sel === id ? 2.2 : 1; g.globalAlpha = 1; g.beginPath(); g.arc(x, y, r + (tree.sel === id ? 5 : 3.5), 0, 7); g.stroke(); }
     if (fire) neuro.fire.set(id, fire > 0.04 ? fire * 0.9 : 0);
@@ -2110,6 +2263,21 @@ function neuroDraw(busy){
     const [sx, sy] = scr.get(tree.sel); g.setLineDash([3, 4]); g.strokeStyle = fg; g.globalAlpha = 0.75; g.lineWidth = 1.1;
     for (const r of tree.related) if (scr.has(r.id)) { const [ex, ey] = scr.get(r.id); g.beginPath(); g.moveTo(sx, sy); g.lineTo(ex, ey); g.stroke(); }
     g.setLineDash([]);
+  }
+  // region labels: above each cluster (never on top of its neurons), dimmer for regions with no memories yet
+  g.font = "600 10.5px " + (cs.getPropertyValue("--font").trim() || "monospace"); g.textAlign = "center"; g.textBaseline = "alphabetic";
+  g.lineJoin = "round";
+  for (const t of TOPICS) {
+    let n = 0, sx = 0, top = Infinity;
+    for (const [id, p] of L.pos) if (p.m.topic === t) { const [x, y] = scr.get(id); n++; sx += x; top = Math.min(top, y); }
+    const [rx, ry] = neuroXY(REGION[t][0], REGION[t][1], W, H);
+    const x = n ? sx / n : rx, y = n ? top - 18 * Math.min(1.6, Math.max(0.8, tree.k)) - 6 : ry + 4;
+    const txt = (TOPIC_NAME[t] || t).toUpperCase() + (n ? "  " + n : "");
+    g.globalAlpha = tree.focus && tree.focus !== t ? 0.15 : n ? 0.95 : 0.32;
+    const tw = g.measureText(txt).width + 14, pill = new Path2D(); pill.roundRect(x - tw/2, y - 11, tw, 16, 8);
+    g.fillStyle = rgbaOf(bgc, n ? 0.78 : 0.55); g.fill(pill);
+    if (n) { g.strokeStyle = rgbaOf(tcol(t), 0.45); g.lineWidth = 1; g.stroke(pill); }
+    g.fillStyle = n ? tcol(t) : dim; g.fillText(txt, x, y + 1);
   }
   g.globalAlpha = 1; neuro.dirty = false; neuro.scr = scr;
 }
@@ -2148,6 +2316,82 @@ function neuroInfo(){
   $("treeInfo").textContent = !all.length ? "" : `· ${all.length} neurons · ${tree.syn.length} synapses` + (q ? ` · ${all.filter(m => m.text.toLowerCase().includes(q)).length} match` : "") + (tree.focus ? " · " + TOPIC_NAME[tree.focus] : "");
 }
 $("treeWrap").addEventListener("pointerleave", () => { $("neuroTip").hidden = true; neuro.hover = null; });
+
+/* ---------------- updates ----------------
+   The server checks GitHub in the background (every 6 h) and /api/stats carries a short summary. Nothing installs
+   by itself: "↑ update" opens a dialog with what changed, and "update now" installs it and restarts the server. */
+let updSt = null;
+function updAgo(t){ if (!t) return "never"; const s = Date.now()/1000 - t; return s < 90 ? "just now" : s < 5400 ? Math.round(s/60) + " min ago" : s < 129600 ? Math.round(s/3600) + " h ago" : Math.round(s/86400) + " d ago"; }
+function updBadge(u){
+  const show = !!(u && u.available && !u.skipped && !remote);
+  $("updBtn").hidden = $("updSep").hidden = !show;
+  if (show) $("updBtn").textContent = `↑ update${u.behind > 1 ? " · " + u.behind : ""}`;
+}
+async function refreshUpd(){
+  try { updSt = await (await fetch("/api/update", {cache: "no-store"})).json(); } catch(e) { return; }
+  renderUpd();
+}
+function updWarn(u){
+  if (u.mode === "git" && u.dirty) return "This copy has uncommitted changes to its files, so updating is blocked until you commit or stash them. Nothing will be overwritten.";
+  if (u.mode === "git" && u.ahead) return `This copy has ${u.ahead} commit(s) that aren't on GitHub yet. Push them first, then update.`;
+  if (u.mode === "zip") return "Changed files are replaced; the old copies are kept next to them as .bak. Your settings, chats, memory and models aren't touched.";
+  return "";
+}
+function renderUpd(){
+  const u = updSt, box = $("updBox"); if (!u) return;
+  const how = u.mode === "git" ? "git checkout" : "zip install";
+  let line;
+  if (u.busy) line = "checking…";
+  else if (u.error) line = `<span class="updWarn">couldn't check: ${esc(u.error)}</span>`;
+  else if (u.available) line = `<b>${u.behind} update${u.behind === 1 ? "" : "s"} available</b> · ${esc(u.current || "?")} → ${esc(u.latest || "?")}${u.skipped ? " · skipped" : ""}`;
+  else if (u.checked) line = `up to date · ${esc(u.current || u.latest || "")}`;
+  else line = "not checked yet";
+  box.innerHTML = `<div>${line}</div>
+    <div class="hint">${how} · checked ${updAgo(u.checked)}${u.mode === "git" && u.branch ? " · branch " + esc(u.branch) : ""}</div>
+    <div class="memloc"><button id="updCheck">check now</button>${u.available ? `<button id="updOpen" class="primary">see what's new</button>` : ""}
+      <label class="hint" style="display:flex;align-items:center;gap:5px;margin:0"><input type="checkbox" id="updAuto" ${u.auto_check ? "checked" : ""}>check automatically</label></div>`;
+  $("updCheck").onclick = async () => { $("updCheck").disabled = true; $("updCheck").textContent = "checking…";
+    try { updSt = await (await fetch("/api/update/check", {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"})).json(); } catch(e) {}
+    renderUpd(); updBadge(updSt); };
+  if ($("updOpen")) $("updOpen").onclick = openUpd;
+  $("updAuto").onchange = e => fetch("/api/update/settings", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({auto_check: e.target.checked})});
+}
+async function openUpd(){
+  await refreshUpd(); const u = updSt; if (!u) return;
+  const w = updWarn(u), blocked = u.mode === "git" && (u.dirty || u.ahead);
+  $("updTitle").textContent = u.available ? `new version · ${u.current || "?"} → ${u.latest}` : "up to date";
+  $("updBody").innerHTML = (u.commits.length ? `<div class="hint" style="margin:0">what changed:</div><ul>${u.commits.map(c =>
+      `<li><code>${esc(c.sha)}</code><span>${esc(c.msg)}</span><i>${esc((c.date || "").slice(0, 10))}</i></li>`).join("")}</ul>` : "")
+    + (u.files.length ? `<div class="hint">${u.files.length} file${u.files.length === 1 ? "" : "s"}: ${u.files.slice(0, 8).map(esc).join(", ")}${u.files.length > 8 ? ", …" : ""}</div>` : "")
+    + (w ? `<div class="updWarn">${esc(w)}</div>` : "")
+    + `<div class="hint" style="margin-top:8px">The server restarts after updating (a few seconds); this window reloads by itself and your chat comes back. A loaded model keeps running.</div>`;
+  $("updNow").disabled = !u.available || blocked; $("updNow").textContent = "update now";
+  $("updSkip").hidden = !u.available;
+  if (!$("updDlg").open) $("updDlg").showModal();
+}
+async function applyUpd(){
+  const b = $("updNow"); b.disabled = true; b.textContent = "updating…";
+  let r;
+  try { r = await (await fetch("/api/update/apply", {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"})).json(); }
+  catch(e) { r = {ok: false, msg: "the server didn't answer"}; }
+  if (!r.ok) { b.textContent = "update now"; b.disabled = false; $("updBody").insertAdjacentHTML("beforeend", `<div class="updWarn">${esc(r.msg || "update failed")}</div>`); return; }
+  b.textContent = "restarting…";
+  $("updBody").insertAdjacentHTML("beforeend", `<div class="hint">${esc(r.msg)}. restarting the server…</div>`);
+  let was = null; try { was = (await (await fetch("/api/ping", {cache: "no-store"})).json()).started; } catch(e) {}
+  const t0 = Date.now();
+  while (Date.now() - t0 < 45000) {
+    await new Promise(res => setTimeout(res, 700));
+    try { const p = await (await fetch("/api/ping", {cache: "no-store"})).json(); if (p.started && p.started !== was) return location.reload(); } catch(e) {}
+  }
+  $("updBody").insertAdjacentHTML("beforeend", `<div class="updWarn">The server hasn't come back. Close this window and open the command center again.</div>`);
+}
+$("updBtn").onclick = openUpd;
+$("updNow").onclick = applyUpd;
+$("updLater").onclick = () => $("updDlg").close();
+$("updSkip").onclick = async () => {
+  if (updSt && updSt.latest) await fetch("/api/update/settings", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({skip: updSt.latest})});
+  $("updDlg").close(); $("updBtn").hidden = $("updSep").hidden = true; refreshUpd();
+};
 
 /* ---------------- 5:cline ----------------
    Cline sends its requests to the command center (http://127.0.0.1:8099/cline/<pc|laptop>/v1), which adds the
@@ -2286,7 +2530,7 @@ async function refreshWs(){
   try {
     if (ws === "2") renderCode(await (await fetch("/api/code", {cache:"no-store"})).json());
     if (ws === "3") renderWeb(await (await fetch("/api/web", {cache:"no-store"})).json());
-    if (ws === "6") { await refreshMem(); if (!cloudSt) refreshCloud(); }
+    if (ws === "6") { await refreshMem(); if (!cloudSt) refreshCloud(); refreshUpd(); }
     if (ws === "4") await refreshTree();
     if (ws === "5") renderCline(await (await fetch("/api/clinecc", {cache:"no-store"})).json());
   } catch (e) {}
