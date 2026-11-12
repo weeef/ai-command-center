@@ -433,26 +433,55 @@ details.think .tbody{white-space:pre-wrap;max-height:260px;overflow-y:auto;font-
 [data-theme="corpus"] .tview button:first-child{border-radius:6px 0 0 6px}
 [data-theme="corpus"] .tview button:last-child{border-radius:0 6px 6px 0}
 #treeSvg{position:absolute;inset:0;width:100%;height:100%;user-select:none}
-#treeSvg .tl{fill:none;stroke-width:1;opacity:.42}
-#treeSvg .tl-root{opacity:.75;stroke-width:1.6}
-#treeSvg .tl.dim{opacity:.06}
-#treeSvg .tl.on{opacity:1;stroke-width:2.2}
+#treeSvg .rlbl{font:600 8.5px var(--pz-font);fill:var(--pz-txt);text-transform:uppercase;letter-spacing:.22em;opacity:.8}
+#treeSvg .rcnt{font:700 19px var(--pz-font);fill:var(--pz-g1)}
+#treeSvg .rel{fill:none;stroke:var(--fg);stroke-dasharray:3 4;opacity:.75;stroke-width:1.2}
+/* tree view: drawn like an ARPG passive skill tree. gold = memories you have, dark stone = empty sockets */
+#treeSvg{--pz-g1:#f7e4a8;--pz-g2:#caa250;--pz-g3:#6e501c;--pz-lit:#d9b25c;--pz-off:#2c2820;--pz-txt:#e8d39b;
+  --pz-font:"Cinzel","Trajan Pro","Palatino Linotype",Palatino,Georgia,serif}
+[data-theme="matrix"] #treeSvg{--pz-g1:#d6ffd6;--pz-g2:#00e65c;--pz-g3:#005a22;--pz-lit:#00e65c;--pz-off:#123019;--pz-txt:#9cff9c}
+#treeSvg .pz-dust{fill:var(--pz-txt);opacity:.22}
+#treeSvg .pz-ring{fill:none;stroke:var(--pz-g2);stroke-width:1;stroke-dasharray:1 7;opacity:.25}
+#treeSvg .pz-cl{fill:#000;fill-opacity:.35;stroke:var(--pz-g2);stroke-opacity:.12;stroke-width:1}
+#treeSvg .pz-under{fill:none;stroke:#000;stroke-width:7;stroke-linecap:round;opacity:.85}
+#treeSvg .pz-off{fill:none;stroke:var(--pz-off);stroke-width:2.4;stroke-linecap:round}
+#treeSvg .pz-litg{filter:url(#pzBloom)}
+#treeSvg .pz-litg.q{opacity:.35}
+#treeSvg .pz-lit{fill:none;stroke:var(--pz-lit);stroke-width:3.4;stroke-linecap:round}
+#treeSvg .pz-inlay{fill:none;stroke-width:1.1;stroke-linecap:round;opacity:.9}
+#treeSvg .pz-flow{fill:none;stroke:var(--pz-g1);stroke-width:1.6;stroke-linecap:round;stroke-dasharray:1.5 22;animation:pzflow 2.4s linear infinite;opacity:.9}
+@keyframes pzflow{to{stroke-dashoffset:-23.5}}
+#treeSvg .pz-way{fill:var(--pz-off);stroke:#000;stroke-width:1.5}
+#treeSvg .pz-way.on{fill:url(#pzGold)}
+#treeSvg .pz-sock circle{fill:url(#pzDark);stroke:var(--pz-off);stroke-width:2}
+#treeSvg .pz-sock .pin{fill:var(--pz-off);stroke:none}
+#treeSvg .pz-fr{fill:url(#pzDark);stroke:url(#pzGold);stroke-width:2.2}
+#treeSvg .pz-fr2{fill:#000;stroke:url(#pzGold);stroke-width:1.6}
+#treeSvg .pz-spike{fill:url(#pzGold);stroke:#000;stroke-width:.6}
+#treeSvg .pz-shine{fill:url(#pzShine);pointer-events:none}
+#treeSvg .pz-star{fill:#0a0806;stroke:url(#pzGold);stroke-width:2;stroke-linejoin:round}
+#treeSvg .pz-hub{cursor:pointer}
+#treeSvg .pz-hub:hover .pz-star{stroke-width:3}
+#treeSvg .pz-hub.empty .pz-star,#treeSvg .pz-hub.empty .pz-fr{stroke:var(--pz-off)}
+#treeSvg .pz-hub.empty .dot{opacity:.25}
+#treeSvg .pz-root .pz-rim{stroke-width:3}
+#treeSvg .pz-ticks{stroke:var(--pz-g2);stroke-width:1.2;opacity:.8}
+#treeSvg .pz-core{fill:url(#pzDark);stroke:var(--pz-g3);stroke-width:1.2}
+#treeSvg .pz-root:hover .pz-rim{stroke-width:4}
+#treeSvg .pz-tl{font-family:var(--pz-font);font-weight:600;fill:var(--pz-txt);letter-spacing:.08em;text-transform:uppercase;paint-order:stroke;stroke:#000;stroke-width:4px;stroke-linejoin:round;pointer-events:none}
+#treeSvg .pz-tn{fill:var(--pz-g2);font-weight:400}
+#treeSvg .pz-ml{font-family:var(--pz-font);fill:var(--pz-txt);text-anchor:middle;paint-order:stroke;stroke:#000;stroke-width:3px;stroke-linejoin:round;pointer-events:none;opacity:.85}
 #treeSvg .leaf{cursor:pointer}
-#treeSvg .leaf.dim{opacity:.13}
-#treeSvg .leaf .dot.pinned{stroke:var(--fg);stroke-width:1.6}
-#treeSvg .leaf.sel .dot{stroke:var(--fg);stroke-width:2.6}
-#treeSvg .leaf .halo{opacity:.28;animation:halo 2.2s ease-in-out infinite}
-@keyframes halo{50%{opacity:.04}}
-#treeSvg .lbl{font-size:11px;fill:var(--fg);opacity:.72;pointer-events:none}
-#treeSvg .leaf:hover .lbl,#treeSvg .leaf.sel .lbl{opacity:1;font-weight:600}
-#treeSvg .tlbl{font-size:11.5px;fill:var(--fg);font-weight:600;pointer-events:none;paint-order:stroke;stroke:var(--bg);stroke-width:4px;stroke-linejoin:round}
-#treeSvg .topic{cursor:pointer}
-#treeSvg .topic:hover circle:first-child{stroke-width:3}
-#treeSvg .root{cursor:pointer}
-#treeSvg .root circle{fill:var(--bg2);stroke:var(--fg);stroke-width:1.4}
-#treeSvg .rlbl{font-size:9.5px;fill:var(--dim);text-transform:uppercase;letter-spacing:.1em}
-#treeSvg .rcnt{font-size:16px;font-weight:700;fill:var(--fg)}
-#treeSvg .rel{fill:none;stroke:var(--fg);stroke-dasharray:3 4;opacity:.7;stroke-width:1.2}
+#treeSvg .leaf.dim{opacity:.15}
+#treeSvg .leaf:hover .pz-fr{stroke-width:3.2}
+#treeSvg .leaf.sel .pz-fr{stroke:#fff;stroke-width:3}
+#treeSvg .leaf.sel .pz-ml{opacity:1;fill:#fff}
+#treeSvg .leaf .halo{opacity:.3;animation:halo 2.2s ease-in-out infinite}
+@keyframes halo{50%{opacity:.05}}
+#neuroTip.pz{padding:0;background:linear-gradient(#18130b,#090705);border:1px solid #6b5426;box-shadow:0 0 0 1px #000,0 8px 28px #000c;font-family:"Palatino Linotype",Palatino,Georgia,serif;border-radius:2px;color:#cfc8b8}
+#neuroTip.pz .pzh{display:block;padding:5px 12px;text-align:center;color:#f0d896;font-variant:small-caps;letter-spacing:.08em;border-bottom:1px solid #4a3a1a;background:linear-gradient(#2a2011,#120d07)}
+#neuroTip.pz .pzb{display:block;padding:8px 12px 4px;font-size:12.5px}
+#neuroTip.pz i{padding:0 12px 7px;color:#8f8470;font-style:italic}
 #treeEmpty{position:absolute;left:50%;top:calc(50% + 46px);transform:translateX(-50%);color:var(--dim);text-align:center;width:300px;max-width:90%;font-size:12px;pointer-events:none}
 .tdtopic{display:flex;align-items:center;gap:8px;color:var(--dim);font-size:12px}
 .tdtext{font-size:15px;line-height:1.5;margin-top:8px;overflow-wrap:anywhere}
@@ -467,8 +496,8 @@ details.think .tbody{white-space:pre-wrap;max-height:260px;overflow-y:auto;font-
 #treeRecent{flex:1;overflow-y:auto;min-height:0}
 [data-theme="corpus"] .treebar input,[data-theme="corpus"] #treeDetail textarea{border-radius:6px}
 [data-theme="corpus"] .tdtext{font-size:16px;letter-spacing:-.01em}
-[data-theme="corpus"] #treeSvg .rlbl,[data-theme="corpus"] .trrow i,[data-theme="corpus"] .tdtopic{font-family:var(--font)}
-@media (prefers-reduced-motion:reduce){#treeSvg .leaf .halo{animation:none}}
+[data-theme="corpus"] .trrow i,[data-theme="corpus"] .tdtopic{font-family:var(--font)}
+@media (prefers-reduced-motion:reduce){#treeSvg .leaf .halo,#treeSvg .pz-flow{animation:none}}
 @media (max-width:760px){#ws4{display:flex}#treePane{flex:0 0 auto;height:66vh}#treeRecentPane{flex:0 0 auto;max-height:50vh}}
 /* 4:mem */
 #memListPane{flex:1 1 auto;display:flex;flex-direction:column;min-height:0}
@@ -1807,7 +1836,7 @@ $("cloudBox").addEventListener("click", async e => {
    Leaf size = how often it's recalled, ring = pinned, glow = just learned or recalled for the last reply.
    Click a leaf for the full memory + what it's related to (dashed lines), click a topic to open that branch. */
 const SVGNS = "http://www.w3.org/2000/svg";
-const tree = {data: null, key: "", sel: null, focus: "", q: "", k: 1, x: 0, y: 0, related: [], syn: [], view: store.get("rt.memview") === "tree" ? "tree" : "brain"};
+const tree = {data: null, key: "", sel: null, focus: "", q: "", k: 1, x: 0, y: 0, related: [], syn: [], view: (location.hash.match(/mem=(tree|brain)/) || [])[1] || (store.get("rt.memview") === "tree" ? "tree" : "brain")};
 function svgEl(tag, attrs, parent){ const e = document.createElementNS(SVGNS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
 async function refreshTree(force){
   let d; try { d = await (await fetch("/api/memory/tree", {cache:"no-store"})).json(); } catch(e) { return; }
@@ -1831,59 +1860,123 @@ function renderTree(){
   const svg = $("treeSvg"), wrap = $("treeWrap");
   const W = wrap.clientWidth, H = wrap.clientHeight; if (!W || !H || !tree.data) return;
   renderTreeChips();
-  svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.innerHTML = "";
-  const g = svgEl("g", {transform: `translate(${W/2 + tree.x},${H/2 + tree.y}) scale(${tree.k})`}, svg); tree.g = g;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.innerHTML = PZ_DEFS;
   const all = tree.data.memories || [];
   const mems = tree.focus ? all.filter(m => m.topic === tree.focus) : all;
   const q = tree.q.trim().toLowerCase(), match = m => !q || m.text.toLowerCase().includes(q) || m.topic.includes(q);
   const recalled = new Set(tree.data.recalled || []), learned = new Set(tree.data.learned || []);
-  const groups = TOPICS.map(t => ({t, items: mems.filter(m => m.topic === t)})).filter(x => tree.focus ? x.t === tree.focus : true);
-  const n = mems.length, R = Math.min(W, H) / 2, labels = n <= 150 || tree.k >= 1.7;
-  const Rl = Math.max(R * 0.42, R - (labels ? 168 : 36)), Rt = Math.min(Rl * 0.42, 130);
-  const weights = groups.map(x => Math.max(x.items.length, n ? 1.4 : 1)), tot = weights.reduce((a, b) => a + b, 0);
-  const gap = groups.length > 1 ? 0.05 : 0;
-  const links = svgEl("g", {}, g), rels = svgEl("g", {}, g), nodes = svgEl("g", {}, g);
-  const P = (a, r) => [Math.cos(a) * r, Math.sin(a) * r], pos = new Map();
-  let a0 = -Math.PI / 2;
-  groups.forEach((x, i) => {
-    const span = (2 * Math.PI - gap * groups.length) * weights[i] / tot, am = a0 + span / 2, col = topicCol(x.t);
-    const [tx, ty] = groups.length === 1 ? [0, 0] : P(am, Rt);
-    if (groups.length > 1) svgEl("path", {d: `M0,0 L${tx},${ty}`, stroke: col, class: "tl tl-root"}, links);
-    const items = x.items.slice().sort((a, b) => (b.pinned - a.pinned) || ((b.uses || 0) - (a.uses || 0)) || (b.updated - a.updated));
-    const step = items.length ? span / items.length : 0, rings = step * Rl < 7 ? 3 : step * Rl < 12 ? 2 : 1;
-    items.forEach((m, j) => {
-      const a = a0 + step * (j + 0.5), r = Rl + (j % rings) * 24, [lx, ly] = P(a, r);
-      const rm = (Math.hypot(tx, ty) + r) / 2, [c1x, c1y] = groups.length === 1 ? [0, 0] : P(am, rm), [c2x, c2y] = P(a, rm);
-      const hit = match(m);
-      svgEl("path", {d: `M${tx},${ty} C${c1x},${c1y} ${c2x},${c2y} ${lx},${ly}`, stroke: col, class: "tl" + (hit ? "" : " dim") + (tree.sel === m.id ? " on" : "")}, links);
-      pos.set(m.id, [lx, ly]);
-      const leaf = svgEl("g", {class: "leaf" + (hit ? "" : " dim") + (tree.sel === m.id ? " sel" : ""), transform: `translate(${lx},${ly})`, tabindex: 0, "data-id": m.id, role: "button"}, nodes);
-      const rr = 3.4 + Math.min(5, Math.log2(1 + (m.uses || 0)) * 1.3);
-      if (recalled.has(m.id) || learned.has(m.id)) svgEl("circle", {r: rr + 6, class: "halo", fill: col}, leaf);
-      svgEl("circle", {r: rr, fill: col, class: "dot" + (m.pinned ? " pinned" : "")}, leaf);
-      if (labels) {
-        const deg = a * 180 / Math.PI, flip = Math.cos(a) < 0;
-        const t = svgEl("text", {class: "lbl", transform: `rotate(${flip ? deg + 180 : deg})`, x: flip ? -(rr + 6) : rr + 6, dy: "0.32em", "text-anchor": flip ? "end" : "start"}, leaf);
-        const short = treeLabel(m.text);
-        t.textContent = short.length > 30 ? short.slice(0, 29).replace(/\s+\S*$/, "") + "…" : short;
-      }
-      svgEl("title", {}, leaf).textContent = `${m.text}\n${TOPIC_NAME[m.topic]}${m.uses ? " · recalled " + m.uses + "×" : ""}${m.pinned ? " · pinned" : ""}`;
-    });
-    if (groups.length > 1) {
-      const tn = svgEl("g", {class: "topic", transform: `translate(${tx},${ty})`, "data-topic": x.t, tabindex: 0, role: "button"}, nodes);
-      svgEl("circle", {r: 10, fill: "var(--bg)", stroke: col, "stroke-width": 2}, tn);
-      svgEl("circle", {r: 4.5, fill: col}, tn);
-      const [ox, oy] = P(am, 20), c = Math.cos(am);
-      svgEl("text", {class: "tlbl", x: ox, y: oy, dy: "0.32em", "text-anchor": Math.abs(c) < 0.35 ? "middle" : c > 0 ? "start" : "end"}, tn).textContent = `${TOPIC_NAME[x.t]} ${x.items.length}`;
-      svgEl("title", {}, tn).textContent = `open the ${TOPIC_NAME[x.t]} branch`;
-    }
-    a0 += span + gap;
+  const n = mems.length, TAU = Math.PI * 2, P = (a, r, x = 0, y = 0) => [x + Math.cos(a) * r, y + Math.sin(a) * r];
+  // each topic is a cluster: a keystone hub with memories on orbits around it (8 sockets, then 16, 24 ...).
+  // memories fill sockets in order of importance; leftover sockets stay empty and dark, like unallocated passives.
+  const ORB = k => 44 + 30 * k, CAP = k => 8 * (k + 1);
+  const cl = (tree.focus ? [tree.focus] : TOPICS).map(t => {
+    const items = mems.filter(m => m.topic === t).sort((a, b) => (b.pinned - a.pinned) || ((b.uses || 0) - (a.uses || 0)) || (b.updated - a.updated));
+    let K = 1; while (4 * K * (K + 1) < items.length) K++;
+    return {t, items, K, R: ORB(K - 1) + 16, col: topicCol(t)};
   });
-  const root = svgEl("g", {class: "root", tabindex: 0, role: "button"}, nodes);
-  svgEl("circle", {r: 28}, root);
-  svgEl("text", {"text-anchor": "middle", dy: "-0.25em", class: "rlbl"}, root).textContent = tree.focus ? TOPIC_NAME[tree.focus] : "memory";
-  svgEl("text", {"text-anchor": "middle", dy: "1.05em", class: "rcnt"}, root).textContent = n;
-  svgEl("title", {}, root).textContent = tree.focus ? "back to the whole tree" : "all memories";
+  let Rc = 0;
+  if (tree.focus) { cl[0].x = cl[0].y = 0; cl[0].a = -Math.PI / 2; }
+  else {
+    const w = cl.map(c => c.R + 30), tw = w.reduce((a, b) => a + b, 0);
+    let a = -Math.PI / 2 - Math.PI * w[0] / tw;
+    cl.forEach((c, i) => { const span = TAU * w[i] / tw; c.a = a + span / 2; a += span; });
+    cl.forEach((c, i) => { const d = cl[(i + 1) % cl.length]; let da = d.a - c.a; if (da <= 0) da += TAU;
+      Rc = Math.max(Rc, 112 + c.R, (c.R + d.R + 34) / (2 * Math.sin(Math.min(da, Math.PI) / 2))); });
+    cl.forEach(c => { [c.x, c.y] = P(c.a, Rc); });
+  }
+  const E = Math.max(...cl.map(c => Math.hypot(c.x, c.y) + c.R)) + (tree.focus ? 34 : 40);
+  tree.base = Math.min(1.8, Math.min(W, H) / 2 / E);
+  const eff = tree.base * tree.k, labels = eff >= 1.9;
+  const g = svgEl("g", {transform: `translate(${W/2 + tree.x},${H/2 + tree.y}) scale(${eff})`}, svg); tree.g = g;
+  const deco = svgEl("g", {class: "pz-deco"}, g), under = svgEl("path", {class: "pz-under"}, g), off = svgEl("path", {class: "pz-off"}, g);
+  const litG = svgEl("g", {class: "pz-litg" + (q ? " q" : "")}, g), flow = svgEl("g", {}, g), rels = svgEl("g", {}, g), nodes = svgEl("g", {}, g), lbls = svgEl("g", {}, g);
+  const lit = svgEl("path", {class: "pz-lit"}, litG);
+  let dU = "", dO = "", dL = ""; const dIn = {};
+  const link = (d, on, col) => { dU += d; if (on) { dL += d; dIn[col] = (dIn[col] || "") + d; } else dO += d; };
+  const line = (x1, y1, x2, y2) => `M${x1.toFixed(1)},${y1.toFixed(1)}L${x2.toFixed(1)},${y2.toFixed(1)}`;
+  const arc = (x1, y1, x2, y2, r) => `M${x1.toFixed(1)},${y1.toFixed(1)}A${r},${r} 0 0 1 ${x2.toFixed(1)},${y2.toFixed(1)}`;
+  // backdrop: faint glow, star dust, the great orbit the clusters sit on
+  svgEl("circle", {r: E * 1.05, fill: "url(#pzHalo)"}, deco);
+  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  let dust = ""; for (let i = 0; i < 220; i++) { const [x, y] = P(rnd() * TAU, Math.sqrt(rnd()) * E * 1.25), s = rnd() < .1 ? 1.1 : .55; dust += `M${x.toFixed(1)},${y.toFixed(1)}m-${s},0a${s},${s} 0 1 0 ${2*s},0a${s},${s} 0 1 0 -${2*s},0`; }
+  svgEl("path", {d: dust, class: "pz-dust"}, deco);
+  if (!tree.focus) { svgEl("circle", {r: Rc, class: "pz-ring"}, deco); svgEl("circle", {r: 74, class: "pz-ring"}, deco); }
+  const pos = new Map();
+  cl.forEach(c => {
+    const has = c.items.length > 0, inward = tree.focus ? -Math.PI / 2 : c.a + Math.PI;
+    svgEl("circle", {cx: c.x, cy: c.y, r: c.R + 6, class: "pz-cl"}, deco);
+    const orbits = []; let idx = 0;
+    for (let k = 0; k < c.K; k++) {
+      const cap = CAP(k), r = ORB(k), step = TAU / cap, o = inward + step / 2, s = [];
+      for (let j = 0; j < cap; j++) { const a = o + j * step, [x, y] = P(a, r, c.x, c.y); s.push({x, y, a, m: c.items[idx++]}); }
+      orbits.push({r, step, o, s});
+    }
+    // root -> hub road with waystones
+    if (!tree.focus) {
+      const gate = orbits[orbits.length - 1].s[0], [x0, y0] = P(c.a, 52), x1 = gate.x, y1 = gate.y; // the road enters at the cluster rim
+      link(line(x0, y0, x1, y1), has, c.col);
+      if (has) svgEl("path", {d: line(x0, y0, x1, y1), class: "pz-flow"}, flow);
+      const L = Math.hypot(x1 - x0, y1 - y0), cnt = Math.max(0, Math.min(3, Math.floor((L - 40) / 46)));
+      for (let i = 1; i <= cnt; i++) { const f = i / (cnt + 1), x = x0 + (x1 - x0) * f, y = y0 + (y1 - y0) * f;
+        svgEl("rect", {x: -3.6, y: -3.6, width: 7.2, height: 7.2, transform: `translate(${x.toFixed(1)},${y.toFixed(1)}) rotate(45)`, class: "pz-way" + (has ? " on" : "")}, nodes); }
+    }
+    // orbit rings and spokes
+    orbits.forEach((ob, k) => {
+      const s = ob.s;
+      s.forEach((p, j) => { const nx = s[(j + 1) % s.length]; link(arc(p.x, p.y, nx.x, nx.y, ob.r), !!(p.m && nx.m), c.col); });
+      const cap = s.length, picks = k === 0 ? [0, 2, 4, 6] : [0, cap / 4, cap / 2, 3 * cap / 4];
+      for (const j of picks) {
+        const p = s[j];
+        if (k === 0) { const [hx, hy] = P(p.a, 20, c.x, c.y); link(line(hx, hy, p.x, p.y), !!p.m, c.col); continue; }
+        const pv = orbits[k - 1], jj = ((Math.round((p.a - pv.o) / pv.step) % pv.s.length) + pv.s.length) % pv.s.length, ip = pv.s[jj];
+        link(line(ip.x, ip.y, p.x, p.y), !!(p.m && ip.m), c.col);
+      }
+      // sockets and memories
+      s.forEach(p => {
+        if (!p.m) { const e = svgEl("g", {class: "pz-sock", transform: `translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`}, nodes); svgEl("circle", {r: 5.4}, e); svgEl("circle", {r: 1.6, class: "pin"}, e); return; }
+        const m = p.m, hit = match(m), sel = tree.sel === m.id;
+        pos.set(m.id, [p.x, p.y]);
+        const leaf = svgEl("g", {class: "leaf" + (hit ? "" : " dim") + (sel ? " sel" : "") + (m.pinned ? " notable" : ""), transform: `translate(${p.x.toFixed(1)},${p.y.toFixed(1)})`, tabindex: 0, "data-id": m.id, role: "button"}, nodes);
+        const rr = 4.8 + Math.min(3.4, Math.log2(1 + (m.uses || 0)) * 1.2);
+        if (recalled.has(m.id) || learned.has(m.id)) svgEl("circle", {r: rr + 10, class: "halo", fill: c.col}, leaf);
+        if (m.pinned) {
+          svgEl("circle", {r: rr + 7.5, class: "pz-fr2"}, leaf);
+          const t = rr + 7.5; svgEl("path", {d: [0, 1, 2, 3].map(i => { const a = i * Math.PI / 2 + Math.PI / 4, [x, y] = P(a, t + 4), [lx, ly] = P(a - .22, t), [rx, ry] = P(a + .22, t); return `M${lx.toFixed(1)},${ly.toFixed(1)}L${x.toFixed(1)},${y.toFixed(1)}L${rx.toFixed(1)},${ry.toFixed(1)}Z`; }).join(""), class: "pz-spike"}, leaf);
+        }
+        svgEl("circle", {r: rr + 3, class: "pz-fr"}, leaf);
+        svgEl("circle", {r: rr, fill: c.col, class: "dot"}, leaf);
+        svgEl("circle", {r: rr, class: "pz-shine"}, leaf);
+        if (labels || sel) {
+          const short = treeLabel(m.text), t = svgEl("text", {class: "pz-ml", y: rr + (m.pinned ? 17 : 11), "font-size": Math.max(4, 10.5 / eff)}, leaf);
+          t.textContent = short.length > 28 ? short.slice(0, 27).replace(/\s+\S*$/, "") + "…" : short;
+        }
+      });
+    });
+    // keystone hub
+    const hub = svgEl("g", {class: (tree.focus ? "root" : "topic") + " pz-hub" + (has ? "" : " empty"), transform: `translate(${c.x.toFixed(1)},${c.y.toFixed(1)})`, "data-topic": c.t, tabindex: 0, role: "button"}, nodes);
+    let star = ""; for (let i = 0; i < 16; i++) { const [x, y] = P(i * TAU / 16 - Math.PI / 2, i % 2 ? 18 : 22.5); star += (i ? "L" : "M") + x.toFixed(1) + "," + y.toFixed(1); }
+    svgEl("path", {d: star + "Z", class: "pz-star"}, hub);
+    svgEl("circle", {r: 15, class: "pz-fr"}, hub);
+    svgEl("circle", {r: 11, fill: c.col, class: "dot"}, hub);
+    svgEl("circle", {r: 11, class: "pz-shine"}, hub);
+    svgEl("title", {}, hub).textContent = tree.focus ? "back to the whole tree" : `open the ${TOPIC_NAME[c.t]} branch`;
+    const [lx, ly] = tree.focus ? [0, -c.R - 14] : P(c.a, Rc + c.R + 12), cs = Math.cos(c.a);
+    const tl = svgEl("text", {class: "pz-tl", x: lx.toFixed(1), y: ly.toFixed(1), dy: "0.32em", "text-anchor": tree.focus || Math.abs(cs) < 0.35 ? "middle" : cs > 0 ? "start" : "end", "font-size": Math.max(9, 12.5 / eff)}, lbls);
+    tl.textContent = TOPIC_NAME[c.t]; svgEl("tspan", {class: "pz-tn", dx: "0.45em"}, tl).textContent = c.items.length;
+  });
+  // the start: a ringed medallion in the middle
+  if (!tree.focus) {
+    const root = svgEl("g", {class: "root pz-root", tabindex: 0, role: "button"}, nodes);
+    svgEl("circle", {r: 50, class: "pz-fr pz-rim"}, root);
+    let ticks = ""; for (let i = 0; i < 72; i++) { const a = i * TAU / 72, [x0, y0] = P(a, i % 6 ? 42.5 : 39.5), [x1, y1] = P(a, 46.5); ticks += line(x0, y0, x1, y1); }
+    svgEl("path", {d: ticks, class: "pz-ticks"}, root);
+    svgEl("circle", {r: 36, class: "pz-core"}, root);
+    svgEl("text", {"text-anchor": "middle", dy: "-0.55em", class: "rlbl"}, root).textContent = "memory";
+    svgEl("text", {"text-anchor": "middle", dy: "0.95em", class: "rcnt"}, root).textContent = n;
+    svgEl("title", {}, root).textContent = "all memories";
+  }
+  under.setAttribute("d", dU); off.setAttribute("d", dO); lit.setAttribute("d", dL);
+  for (const col in dIn) svgEl("path", {d: dIn[col], stroke: col, class: "pz-inlay"}, litG);
   if (tree.sel && pos.has(tree.sel)) {
     const [sx, sy] = pos.get(tree.sel);
     for (const r of tree.related) if (pos.has(r.id)) {
@@ -1894,6 +1987,13 @@ function renderTree(){
   $("treeEmpty").hidden = !!all.length;
   $("treeInfo").textContent = !all.length ? "" : q ? `· ${mems.filter(match).length} of ${n} match` : `· ${n}${tree.focus ? " in " + TOPIC_NAME[tree.focus] : ""}`;
 }
+const PZ_DEFS = `<defs>
+<radialGradient id="pzShine" cx="36%" cy="30%" r="72%"><stop offset="0" stop-color="#fff" stop-opacity=".8"/><stop offset=".32" stop-color="#fff" stop-opacity=".1"/><stop offset="1" stop-color="#000" stop-opacity=".55"/></radialGradient>
+<linearGradient id="pzGold" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--pz-g1)"/><stop offset=".5" style="stop-color:var(--pz-g2)"/><stop offset="1" style="stop-color:var(--pz-g3)"/></linearGradient>
+<radialGradient id="pzDark" r="60%"><stop offset="0" stop-color="#211b10"/><stop offset="1" stop-color="#040302"/></radialGradient>
+<radialGradient id="pzHalo"><stop offset="0" style="stop-color:var(--pz-g2);stop-opacity:.13"/><stop offset=".45" style="stop-color:var(--pz-g2);stop-opacity:.04"/><stop offset="1" style="stop-color:var(--pz-g2);stop-opacity:0"/></radialGradient>
+<filter id="pzBloom" x="-10%" y="-10%" width="120%" height="120%"><feGaussianBlur stdDeviation="2.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+</defs>`;
 // leaves are all about the user, so labels drop the "The user ..." opening: "prefers dark themes"
 function treeLabel(t){ return t.replace(/^(sample:\s*)?the user('s)?\s+/i, (_, s, p) => p ? "my " : "").replace(/\.$/, ""); }
 async function selectMemory(id){
@@ -1908,7 +2008,7 @@ function renderTreeDetail(){
   const box = $("treeDetail"), m = tree.data && tree.data.memories.find(x => x.id === tree.sel);
   if (!m) { box.innerHTML = tree.view === "brain"
     ? `<div class="hint" style="margin-top:0">Every neuron is a memory, placed in its topic's region of the brain. Bigger = recalled more often; a ring = pinned. Lines are synapses between memories with related meaning; dots travelling along them are signals, and a neuron fires when the model recalls it. Click a neuron to read, edit or forget it; click a region to focus it. Scroll to zoom, drag to move, double-click to reset.</div>`
-    : `<div class="hint" style="margin-top:0">Click a leaf to read a memory, edit it, and see what it connects to. Click a topic to open just that branch; click the centre to go back. Scroll to zoom, drag to move, double-click to reset.</div>`; return; }
+    : `<div class="hint" style="margin-top:0">Every lit node is a memory, set in its topic's cluster around a keystone; dark sockets are room still to grow. Bigger = recalled more often; a spiked frame = pinned (a notable). Hover to read, click to edit and see what it connects to. Click a keystone to open just that branch; click the centre to go back. Scroll to zoom, drag to move, double-click to reset.</div>`; return; }
   box.innerHTML = `
     <div class="tdtopic"><span class="tdot" style="background:${topicCol(m.topic)}"></span>${esc(TOPIC_NAME[m.topic] || m.topic)}${m.pinned ? " · ★ pinned" : ""}</div>
     <div class="tdtext" id="tdText">${esc(m.text)}</div>
@@ -1958,13 +2058,13 @@ $("treeReset").onclick = resetTree;
 { // zoom, pan, click
   const w = $("treeWrap"); let drag = null;
   const apply = () => { if (tree.view === "brain") { neuro.dirty = true; neuroKick(); return; }
-    tree.g && tree.g.setAttribute("transform", `translate(${w.clientWidth/2 + tree.x},${w.clientHeight/2 + tree.y}) scale(${tree.k})`); };
+    tree.g && tree.g.setAttribute("transform", `translate(${w.clientWidth/2 + tree.x},${w.clientHeight/2 + tree.y}) scale(${tree.k * (tree.base || 1)})`); };
   w.addEventListener("wheel", e => {
     e.preventDefault();
     const r = w.getBoundingClientRect(), px = (e.clientX - r.left) / uiScale - w.clientWidth / 2, py = (e.clientY - r.top) / uiScale - w.clientHeight / 2;
     const k2 = Math.max(0.4, Math.min(6, tree.k * Math.exp(-e.deltaY * 0.0015)));
     tree.x = px - (px - tree.x) * k2 / tree.k; tree.y = py - (py - tree.y) * k2 / tree.k;
-    const relabel = tree.view === "tree" && (tree.k < 1.7) !== (k2 < 1.7); tree.k = k2; relabel ? renderTree() : apply();
+    const b = tree.base || 1, relabel = tree.view === "tree" && (tree.k * b < 1.9) !== (k2 * b < 1.9); tree.k = k2; relabel ? renderTree() : apply();
   }, {passive: false});
   w.addEventListener("pointerdown", e => { drag = {x: e.clientX, y: e.clientY, ox: tree.x, oy: tree.y, moved: false}; });
   w.addEventListener("pointermove", e => {
@@ -2301,9 +2401,17 @@ function neuroRegionHit(e){
   const lim = Math.min(w.clientWidth, w.clientHeight) * 0.16 * tree.k;
   return bd < lim * lim && tree.data.memories.some(m => m.topic === best) ? best : null;
 }
+function treeHover(e){
+  const tip = $("neuroTip"), leaf = e.target.closest && e.target.closest("#treeSvg .leaf");
+  const m = leaf && tree.data && tree.data.memories.find(x => x.id === +leaf.dataset.id);
+  if (!m) { tip.hidden = true; return; }
+  const [x, y] = neuroLocal(e), W = $("treeWrap").clientWidth; tip.className = "pz";
+  tip.innerHTML = `<span class="pzh">${esc(TOPIC_NAME[m.topic] || m.topic)}</span><span class="pzb">${esc(m.text)}</span><i>${m.pinned ? "notable · pinned · " : ""}${m.uses ? "recalled " + m.uses + "×" : "not recalled yet"}</i>`;
+  tip.style.left = Math.max(4, Math.min(x + 16, W - 330)) + "px"; tip.style.top = (y + 16) + "px"; tip.hidden = false;
+}
 function neuroHover(e){
-  if (tree.view !== "brain") return;
-  const m = neuroHit(e), tip = $("neuroTip");
+  if (tree.view !== "brain") return treeHover(e);
+  const m = neuroHit(e), tip = $("neuroTip"); tip.className = "";
   neuro.hover = m ? m.id : null; neuro.dirty = true;
   if (!m) { tip.hidden = true; $("treeWrap").style.cursor = ""; return; }
   const [x, y] = neuroLocal(e), W = $("treeWrap").clientWidth;
