@@ -161,11 +161,33 @@ has *check now* and an auto-check switch. Nothing installs without you clicking.
 
 ---
 
-## Using other models
+## Picking and adding models
 
-Any GGUF model works. Put it under `models\` and point `start-llm.bat` at it (the `:q4` / `:q5` sections set
-`MODEL`), or add a new menu entry. Smaller models for smaller GPUs: e.g. Qwen3-8B or Gemma-3-12B GGUFs from
-Hugging Face (Q4_K_M), with `MOE_*` irrelevant (dense models: use `-ngl` only). Memory keeps working with any model.
+Click the model name next to the **on** button in **1:llm** (or type `/models`). The picker lists every model in
+`models\` and tells you, for **your** PC, how each one will run:
+
+- **fits on GPU**: the whole model and its context fit in VRAM. Fastest.
+- **GPU + RAM**: a Mixture-of-Experts model whose expert weights partly live in system RAM. Still fast, because
+  each token only touches a few experts.
+- **mostly RAM · slow**: a dense model too big for the GPU. It works, but pick a smaller quant if you can.
+- **too big**: needs more VRAM + RAM than this PC has.
+
+Click a card to use it (if a model is running it switches). Each card has a **context** menu: more context lets the
+model read longer chats and files, but costs VRAM; the default is the biggest (up to 128K) that still fits.
+
+**Adding a model:** paste a Hugging Face link into **add a model** (for example `huggingface.co/unsloth/Qwen3-8B-GGUF`).
+You get every size in that repo with a fit badge and **★ best for this PC** on the largest one that fits your GPU;
+press download. If the repo has a vision projector, tick "include image input" to get image support too.
+Or just copy any `.gguf` into `models\` (any subfolder) and press **rescan**. A `mmproj*.gguf` next to a model gives
+it image input; split files (`-00001-of-00003.gguf`) count as one model.
+
+**Tuned for your hardware, automatically:** the bundled Qwen3.6-35B files use the measured settings that setup wrote to
+`llm-config.bat` for your GPU. Every other model uses llama.cpp's `--fit`: at load time it measures the model and your
+free VRAM and puts as much on the GPU as fits, MoE experts spilling to RAM first. Threads, batch size and the KV cache
+format are set for you. If a model fails to start, the reason shows in **1:llm** and the full log is in
+`command-center\llama.log`.
+
+Memory keeps working with any model. `start-llm.bat` still works from a terminal for the bundled models.
 
 ## Files
 
@@ -178,6 +200,7 @@ start-vscode-laptop.bat    second VS Code for the laptop's Cline (optional)
 sync.bat                   commit + push in one step (for maintainers)
 command-center\
   server.py      HTTP server on 127.0.0.1:8099: UI, chat proxy (adds the API key), model control, stats, Cline proxy
+  models.py      model library: scans models\, reads GGUF metadata, sizes models for this PC, launches, downloads
   memory.py      long-term memory (recall, learning, embedding server, moving, import/export)
   importers.py   ChatGPT / Claude export readers
   cloud.py       optional web search / stronger-model tools (Claude, ChatGPT, Gemini)

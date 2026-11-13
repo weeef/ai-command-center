@@ -23,6 +23,7 @@ command-center/*
 !command-center/tokens.py
 !command-center/chats.py
 !command-center/memory.py
+!command-center/models.py
 !command-center/importers.py
 !command-center/cloud.py
 !command-center/updater.py

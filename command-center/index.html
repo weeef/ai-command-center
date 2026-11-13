@@ -284,6 +284,44 @@ main{display:grid;grid-template-columns:432px 1fr;gap:14px;padding:6px 12px 12px
 .chip.tg.sel{background:var(--accent2);border-color:var(--accent2)}
 .chip.tg.online:not(.sel){color:var(--ok)}
 .hide{display:none!important}
+#modelPick{display:inline-flex;align-items:center;gap:6px;max-width:260px;min-width:0}
+#modelPick span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fitdot{width:8px;height:8px;border-radius:50%;flex:0 0 auto;background:var(--dim);display:inline-block}
+.fit-gpu{--fc:var(--ok)}.fit-split{--fc:var(--cyan)}.fit-ram{--fc:var(--warn)}.fit-cpu{--fc:var(--warn)}.fit-too-big{--fc:var(--crit)}
+.fitdot[class*="fit-"]{background:var(--fc)}
+.fitb{font-size:10.5px;padding:1px 7px;border:1px solid var(--fc,var(--border));color:var(--fc,var(--dim));white-space:nowrap;border-radius:999px}
+#modelDlg{background:var(--bg);color:var(--fg);border:1px solid var(--border);padding:16px 18px;width:min(760px,calc(100vw - 32px));max-height:calc(100vh - 48px);overflow:auto}
+#modelDlg::backdrop{background:rgba(0,0,0,.6);backdrop-filter:blur(2px)}
+.mdhead{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+.mdhead .title{font-weight:bold;color:var(--accent)}
+#mdHw{color:var(--dim);font-size:11.5px;flex:1}
+#mdWarn{border:1px solid var(--crit);color:var(--crit);padding:6px 10px;margin-bottom:10px;font-size:12px}
+.mcard{display:grid;grid-template-columns:1fr auto;gap:4px 12px;padding:10px 12px;border:1px solid var(--border);margin-bottom:6px;cursor:pointer}
+.mcard:hover{border-color:var(--dim)}
+.mcard.sel{border-color:var(--accent)}
+.mcard .mn{font-weight:600;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.mcard .ms{color:var(--dim);font-size:11.5px}
+.mcard .mnote{color:var(--dim);font-size:11.5px;grid-column:1/-1}
+.mcard .mside{display:flex;flex-direction:column;align-items:flex-end;gap:6px;grid-row:1/3;grid-column:2}
+.mcard select{background:var(--bg2);color:var(--fg);border:1px solid var(--border);font:inherit;font-size:11.5px;padding:2px 4px}
+.mcard .tag{font-size:10.5px;color:var(--bg);background:var(--ok);padding:1px 6px;border-radius:999px}
+.mcard .tag.next{background:var(--accent)}
+.mdadd{display:flex;gap:6px}
+.mdadd input{flex:1;min-width:0;background:var(--bg2);color:var(--fg);border:1px solid var(--border);font:inherit;padding:5px 8px;outline:none}
+.mdadd input:focus{border-color:var(--accent)}
+#mdHf,#mdDl{margin-top:8px}
+.hfrow{display:flex;align-items:center;gap:10px;padding:5px 2px;border-bottom:1px solid var(--bg3);font-size:12.5px}
+.hfrow .hq{font-weight:600;min-width:80px}
+.hfrow .hs{color:var(--dim);min-width:60px;text-align:right}
+.hfrow .hn{flex:1;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hfrow .best{color:var(--ok);font-size:11px}
+.dlrow{display:flex;align-items:center;gap:10px;font-size:12px;padding:4px 0}
+.dlrow progress{flex:1;height:8px}
+#modelDlg .hint button{font-size:11px;margin-left:4px}
+[data-theme="corpus"] #modelDlg{border-radius:12px;font-family:var(--sans)}
+[data-theme="corpus"] .mcard{border-radius:10px}
+[data-theme="corpus"] .mdhead .title,[data-theme="corpus"] #modelDlg .sect{font:500 11px/1.4 var(--font);text-transform:uppercase;letter-spacing:.1em;color:#fff}
+[data-theme="corpus"] .mdadd input,[data-theme="corpus"] .mcard select{border-radius:6px}
 #ctlMsg{color:var(--dim);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;text-align:right}
 
 /* usage */
@@ -642,8 +680,7 @@ body.remote #tags span[data-ws="2"]{display:none}
       </div>
       <div id="ctl">
         <button id="powerBtn" title="turn the selected model on or off">⏻ on</button>
-        <button class="chip" data-m="standard" title="Qwen3.6-35B Q4_K_M, faster">standard</button>
-        <button class="chip unc" data-m="uncensored" title="Qwen3.6-35B uncensored Q5_K_M, slower">uncensored</button>
+        <button id="modelPick" title="choose a model, change its context, or add new ones"><i class="fitdot"></i><span>model</span> ▾</button>
         <span id="ctlMsg"></span>
       </div>
     </section>
@@ -780,6 +817,20 @@ body.remote #tags span[data-ws="2"]{display:none}
     </section>
   </div>
 </main>
+<dialog id="modelDlg" aria-labelledby="mdTitle">
+  <div class="mdhead"><div class="title" id="mdTitle">models</div><span id="mdHw"></span><button id="mdClose" title="close (Esc)">✕</button></div>
+  <div id="mdWarn" hidden></div>
+  <div id="mdList"></div>
+  <div class="sect">add a model</div>
+  <div class="mdadd">
+    <input id="mdUrl" placeholder="paste a Hugging Face link, e.g. huggingface.co/unsloth/Qwen3-8B-GGUF" spellcheck="false">
+    <button id="mdFind">find</button>
+  </div>
+  <div id="mdHf"></div>
+  <div id="mdDl"></div>
+  <div class="hint">Or copy any <b>.gguf</b> file into the models folder (any subfolder; a <b>mmproj*.gguf</b> next to it adds image input) and it appears here.
+    <button id="mdOpen">open models folder</button> <button id="mdRescan">rescan</button></div>
+</dialog>
 <dialog id="updDlg" aria-labelledby="updTitle">
   <div class="title" id="updTitle">new version available</div>
   <div id="updBody"></div>
@@ -795,7 +846,8 @@ const store = {
 };
 const reduced = matchMedia("(prefers-reduced-motion: reduce)");
 let S = null;               // last /api/stats
-let selected = store.get("rt.model") === "uncensored" ? "uncensored" : "standard";
+let selected = store.get("rt.model") || "standard";   // a model library id (or the old "standard"/"uncensored")
+let mlib = null;            // last /api/models
 let chatBusy = false, abortCtl = null;
 let history = [];           // {role, content}
 let pending = [];           // attached images (data URLs)
@@ -1093,7 +1145,7 @@ function render(){
   $("host").textContent = `${S.user}@${S.host}`;
   const laptop = S.target === "laptop";
   document.querySelectorAll(".chip.tg").forEach(c => { c.classList.toggle("sel", c.dataset.t === S.target); c.disabled = ctlBusy; });
-  document.querySelectorAll(".chip:not(.tg)").forEach(c => c.classList.toggle("hide", laptop));
+  $("modelPick").hidden = laptop;
   $("chatHost").textContent = laptop ? "· laptop via PAIR 127.0.0.1:8080" : "· 127.0.0.1:8090";
   const lc = document.querySelector('.chip.tg[data-t="laptop"]');
   lc.textContent = (S.laptop_online ? "● " : "○ ") + "laptop";
@@ -1101,7 +1153,7 @@ function render(){
   lc.title = S.laptop_online ? `${S.laptop_name || "laptop"} is on and reachable` : (S.laptop_note || `${S.laptop_name || "laptop"} is off or not reachable`);
   const key = m.key || (m.state === "OFF" ? null : selected);
   $("fModel").textContent = laptop ? (m.name || m.note || "–")
-    : m.state === "OFF" ? `off · next: ${selected}` : (m.name || key || "–");
+    : m.state === "OFF" ? `off · next: ${modelLabel(selected)}` : (m.name || key || "–");
   $("fModel").title = m.file || "";
   $("fState").innerHTML = `<span class="st-${st}">${st.toLowerCase()}</span>` + (m.note ? ` · ${esc(m.note)}` : "");
   $("fCtx").textContent = m.ctx ? m.ctx.toLocaleString() + " tok" : "–";
@@ -1115,13 +1167,13 @@ function render(){
   lastCtx = m.ctx || lastCtx;
   // controls
   const on = m.state === "ON" || m.state === "ASLEEP", loading = m.state === "LOADING";
-  if (!laptop && m.key && on) { selected = m.key; }
-  document.querySelectorAll(".chip:not(.tg)").forEach(c => c.classList.toggle("sel", c.dataset.m === selected));
+  if (!laptop && m.key && on && m.key !== selected) { selected = m.key; store.set("rt.model", selected); }
+  renderPick();
   const pb = $("powerBtn");
   pb.textContent = loading ? "… wait" : on ? "⏻ off" : "⏻ on";
   pb.classList.toggle("on", on);
   pb.disabled = loading || ctlBusy;
-  document.querySelectorAll(".chip:not(.tg)").forEach(c => c.disabled = loading || ctlBusy);
+  $("modelPick").disabled = ctlBusy;
   renderUsage();
   renderTokens();
   setBrainMode(loading ? "loading" : st === "THINKING" ? "busy" : on ? "on" : "off");
@@ -1212,7 +1264,7 @@ let ctlBusy = false;
 async function modelAction(action, model){
   if (ctlBusy) return;
   ctlBusy = true; render();
-  $("ctlMsg").textContent = action === "off" ? "stopping…" : `starting ${model}…`;
+  $("ctlMsg").textContent = action === "off" ? "stopping…" : `starting ${modelLabel(model || selected)}…`;
   try {
     const r = await fetch("/api/model", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({action, model: model || selected})});
     const j = await r.json();
@@ -1242,14 +1294,106 @@ document.querySelectorAll(".ut").forEach(t => {
 });
 // clicking anywhere else in the usage pane flips to the other machine
 $("usagePane").addEventListener("click", () => setUsage(usageKey() === "pc" ? "laptop" : "pc"));
-document.querySelectorAll(".chip:not(.tg)").forEach(c => c.onclick = () => {
-  const m = c.dataset.m;
-  if (m === selected && S && S.model.state !== "OFF") return;
-  selected = m; store.set("rt.model", m);
-  const on = S && (S.model.state === "ON" || S.model.state === "ASLEEP");
-  if (on) modelAction("on", m); // switch: stops the running one, starts this one
+/* ---------------- model picker ----------------
+   Every .gguf in models\ shows up (models.py on the server). Each card says how it will run on THIS PC:
+   fits on the GPU (fastest), GPU + RAM (MoE experts in RAM, still fast), mostly RAM (slow), or too big. */
+const FITS = {gpu: "fits on GPU", split: "GPU + RAM", ram: "mostly RAM · slow", cpu: "CPU only · slow", "too-big": "too big"};
+const kctx = n => n >= 1048576 ? (n / 1048576) + "M" : Math.round(n / 1024) + "K";
+function libFind(k){
+  if (!mlib || !k) return null;
+  return mlib.models.find(m => m.id === k || m.alias === k || m.file === k) || null;
+}
+function modelLabel(k){ const m = libFind(k); return m ? m.name : (k || "").split("/").pop(); }
+async function loadModels(){
+  try { mlib = await (await fetch("/api/models", {cache: "no-store"})).json(); } catch (e) { return; }
+  const cur = libFind(selected);
+  if (cur && cur.id !== selected) { selected = cur.id; store.set("rt.model", selected); }
+  if (!cur && mlib.models.length) { selected = mlib.models[0].id; store.set("rt.model", selected); }
+  renderPick(); if ($("modelDlg").open) renderModelDlg();
+}
+function renderPick(){
+  const b = $("modelPick"), m = libFind(selected);
+  b.querySelector("span").textContent = m ? m.name : (mlib && !mlib.models.length ? "no models: add one" : "model");
+  b.querySelector(".fitdot").className = "fitdot" + (m ? " fit-" + m.plan.fit : "");
+  b.title = m ? `${m.name} · ${m.quant} · ${m.size_gb} GB · ${kctx(m.ctx)} context\n${m.plan.note}\nclick to choose another model` : "choose a model";
+}
+function pickModel(id){
+  const was = selected; selected = id; store.set("rt.model", id); renderPick(); renderModelDlg();
+  const on = S && S.target !== "laptop" && (S.model.state === "ON" || S.model.state === "ASLEEP");
+  if (on && S.model.key !== id) modelAction("on", id);  // switch: stops the running one, starts this one
   render();
+}
+function renderModelDlg(){
+  if (!mlib) return;
+  const hw = mlib.hardware;
+  $("mdHw").textContent = (hw.gpu ? `${hw.gpu} · ${hw.vram_gb} GB VRAM` : "no NVIDIA GPU found") + ` · ${hw.ram_gb} GB RAM · ${hw.cores} cores`;
+  $("mdWarn").hidden = mlib.llama; $("mdWarn").textContent = "llama.cpp isn't installed yet: run setup.bat in the repo folder first.";
+  const running = S && S.target !== "laptop" && S.model.state !== "OFF" ? S.model.key : null;
+  $("mdList").innerHTML = mlib.models.length ? mlib.models.map(m => {
+    const bits = [m.quant, m.size_gb + " GB", m.params, m.experts ? `MoE ${m.experts_used}/${m.experts} experts` : "dense",
+      m.vision ? "images" : (m.mtp ? "fast text (MTP), no images" : "text only"), m.ctx_train ? kctx(m.ctx_train) + " max context" : ""].filter(Boolean);
+    return `<div class="mcard ${m.id === selected ? "sel" : ""}" data-id="${esc(m.id)}" tabindex="0" role="button">
+      <div class="mn">${esc(m.name)}${m.id === running ? `<span class="tag">running</span>` : m.id === selected ? `<span class="tag next">selected</span>` : ""}</div>
+      <div class="ms">${esc(bits.join(" · "))}</div>
+      <div class="mside"><span class="fitb fit-${m.plan.fit}" title="needs ~${m.plan.need_gb} GB (weights ${m.plan.weights_gb} + context ${m.plan.kv_gb}); GPU budget ${m.plan.budget_gb} GB">${FITS[m.plan.fit]}</span>
+        <label class="ms">context <select data-ctx="${esc(m.id)}">${m.ctx_choices.map(c => `<option value="${c}" ${c === m.ctx ? "selected" : ""}>${kctx(c)}</option>`).join("")}</select></label></div>
+      <div class="mnote">${esc(m.plan.note)} · ${esc(m.tuning)} · <span title="${esc(m.id)}">${esc(m.file)}</span></div>
+    </div>`; }).join("")
+    : `<div class="hint" style="margin:0 0 8px">No models yet. Paste a Hugging Face link below (the list shows which sizes fit this PC), or copy a .gguf into the models folder.</div>`;
+  const dls = Object.entries(mlib.downloads || {});
+  $("mdDl").innerHTML = dls.map(([id, d]) => `<div class="dlrow"><span>${esc(d.file)}</span>
+    ${d.state === "downloading" || d.state === "starting" ? `<progress max="${d.total || 1}" value="${d.done}"></progress><span class="ms">${(d.done / 1073741824).toFixed(1)} / ${(d.total / 1073741824).toFixed(1)} GB</span><button data-cancel="${id}">cancel</button>`
+      : d.state === "done" ? `<span style="color:var(--ok)">downloaded ✓, it's in the list above</span>` : `<span style="color:var(--crit)">${esc(d.error || d.state)}</span>`}</div>`).join("");
+}
+$("modelPick").onclick = () => { loadModels(); renderModelDlg(); $("modelDlg").showModal(); };
+$("mdClose").onclick = () => $("modelDlg").close();
+$("mdList").addEventListener("click", e => {
+  if (e.target.closest("select,label")) return;
+  const c = e.target.closest(".mcard"); if (c) pickModel(c.dataset.id);
 });
+$("mdList").addEventListener("keydown", e => { const c = e.target.closest(".mcard"); if (c && e.key === "Enter") pickModel(c.dataset.id); });
+$("mdList").addEventListener("change", async e => {
+  const sel = e.target.closest("select[data-ctx]"); if (!sel) return;
+  const r = await postJSON("/api/models/prefs", {id: sel.dataset.ctx, ctx: +sel.value});
+  if (!r.ok) return sys("couldn't change the context: " + r.msg, true);
+  await loadModels();
+  const on = S && S.model.key === sel.dataset.ctx && S.model.state !== "OFF";
+  if (on) sys(`context set to ${kctx(+sel.value)}; turn the model off and on to apply it.`);
+});
+let hfRepo = null;
+async function findHf(){
+  const url = $("mdUrl").value.trim(); if (!url) return;
+  $("mdHf").innerHTML = `<div class="hint">looking…</div>`;
+  try {
+    const r = await fetch("/api/models/hf", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({url})});
+    const j = await r.json(); if (!r.ok) throw new Error(j.error);
+    hfRepo = j;
+    $("mdHf").innerHTML = `<div class="ms" style="margin-bottom:4px">${esc(j.repo)} · ${j.free_gb} GB free on this drive${j.mmproj.length ? ` · <label><input type="checkbox" id="hfVision" checked> include image input (${esc(j.mmproj[0].split("/").pop())})</label>` : ""}</div>` +
+      j.files.map((f, i) => `<div class="hfrow"><span class="hq">${esc(f.quant || "–")}</span><span class="hs">${f.size_gb} GB</span>
+        <span class="fitb fit-${f.fit}">${FITS[f.fit]}</span>${f.best ? `<span class="best">★ best for this PC</span>` : ""}<span class="hn" title="${esc(f.files.join("\n"))}">${esc(f.name)}</span>
+        ${f.have ? `<span class="ms">have it</span>` : `<button data-hf="${i}" ${f.fit === "too-big" || f.size_gb > j.free_gb ? "disabled" : ""}>download</button>`}</div>`).join("");
+  } catch (e) { $("mdHf").innerHTML = `<div class="hint" style="color:var(--crit)">${esc(e.message)}</div>`; }
+}
+$("mdFind").onclick = findHf;
+$("mdUrl").addEventListener("keydown", e => { if (e.key === "Enter") findHf(); });
+$("mdHf").addEventListener("click", async e => {
+  const b = e.target.closest("[data-hf]"); if (!b || !hfRepo) return;
+  const f = hfRepo.files[+b.dataset.hf], vis = $("hfVision") && $("hfVision").checked ? hfRepo.mmproj : [];
+  b.disabled = true; b.textContent = "starting…";
+  const r = await postJSON("/api/models/download", {repo: hfRepo.repo, files: [...f.files, ...vis]});
+  if (!r.ok) { b.disabled = false; b.textContent = "download"; return sys("download failed: " + r.msg, true); }
+  b.textContent = "downloading…"; loadModels();
+});
+$("mdDl").addEventListener("click", async e => { const b = e.target.closest("[data-cancel]"); if (b) { await postJSON("/api/models/cancel", {id: b.dataset.cancel}); loadModels(); } });
+$("mdOpen").onclick = () => postJSON("/api/models/open", {});
+$("mdRescan").onclick = loadModels;
+setInterval(() => { if ($("modelDlg").open || (mlib && Object.values(mlib.downloads || {}).some(d => d.state === "downloading" || d.state === "starting"))) loadModels(); }, 1500);
+{ const want = /(^|[#&])models/.test(location.hash); loadModels().then(() => { if (want) $("modelPick").click(); }); }
+function resolveModel(a){
+  if (!mlib) return a;
+  const q = a.toLowerCase(), m = libFind(a) || mlib.models.filter(x => x.name.toLowerCase().includes(q) || x.id.toLowerCase().includes(q));
+  return Array.isArray(m) ? (m.length === 1 ? m[0].id : null) : m.id;
+}
 
 /* ---------------- cline pane ---------------- */
 let clineKey = "";
@@ -1305,9 +1449,10 @@ function addUser(text, imgs){
   log.appendChild(m); scroll(true);
 }
 const HELP = `commands
-  /on [standard|uncensored]  start a model (default: the selected one)
+  /on [name]                 start a model (default: the selected one)
   /off                       stop the model
-  /model standard|uncensored select (switches if one is running)
+  /model [name]              pick a model by (part of) its name, or open the model picker
+  /models                    open the model picker (add models, change context)
   /laptop  /local            run on the laptop (via PAIR) or this PC
   /theme [corpus|tokyo|mocha|gruvbox|matrix]
   /new                       start a new chat (the current one stays saved)
@@ -1335,11 +1480,15 @@ function command(t){
       if (!name) return sys("usage: /title <name>", true);
       if (!history.length) return sys("nothing to name yet: send a message first.", true);
       chatTitle = name.slice(0, 120); saveChat(); return sys(`renamed to "${chatTitle}".`); }
-    case "on": if (a && !["standard","uncensored"].includes(a)) return sys("usage: /on [standard|uncensored]", true);
-      if (a) { selected = a; store.set("rt.model", a); } return modelAction("on", selected);
+    case "on": { const name = t.slice(1).trim().replace(/^on\s*/, "");
+      if (name) { const id = resolveModel(name); if (!id) return sys(`no single model matches "${name}": try /models`, true); selected = id; store.set("rt.model", id); }
+      return modelAction("on", selected); }
     case "off": return modelAction("off", selected);
-    case "model": if (!["standard","uncensored"].includes(a)) return sys("usage: /model standard|uncensored", true);
-      document.querySelector(`.chip[data-m="${a}"]`).click(); return;
+    case "models": return $("modelPick").click();
+    case "model": { const name = t.slice(1).trim().replace(/^model\s*/, "");
+      if (!name) return $("modelPick").click();
+      const id = resolveModel(name); if (!id) return sys(`no single model matches "${name}": try /models`, true);
+      return pickModel(id); }
     case "theme": return a ? setTheme(a) : cycleTheme();
     case "laptop": return setTarget("laptop");
     case "local": return setTarget("local");
@@ -1364,7 +1513,7 @@ async function send(){
   const content = imgs.length ? [...(text ? [{type:"text", text}] : []), ...imgs.map(u => ({type:"image_url", image_url:{url:u}}))] : text;
   history.push({role:"user", content});
 
-  const m = el("div", "msg bot"); m.appendChild(el("div", "who", "◆ " + (S.target === "laptop" ? "laptop · " + (S.model.name || "model") : (S.model.key || "model"))));
+  const m = el("div", "msg bot"); m.appendChild(el("div", "who", "◆ " + (S.target === "laptop" ? "laptop · " + (S.model.name || "model") : (S.model.name || S.model.key || "model"))));
   const think = el("details", "think"); think.innerHTML = "<summary>thinking</summary>"; const tbody = el("div", "tbody"); think.appendChild(tbody); think.hidden = true;
   const body = el("div", "body cursor"); const stat = el("div", "stat");
   m.append(think, body, stat); log.appendChild(m); scroll(true);
@@ -1462,7 +1611,7 @@ function saveChat(){
   if (!chatId) { chatId = newId(); chatCreated = Math.floor(Date.now()/1000); }
   if (!chatTitle) chatTitle = autoTitle();
   store.set("rt.chat", chatId);
-  const payload = JSON.stringify({id: chatId, title: chatTitle, created: chatCreated, model: (S && (S.model.key || S.model.name)) || "", messages: history});
+  const payload = JSON.stringify({id: chatId, title: chatTitle, created: chatCreated, model: (S && (S.model.name || S.model.key)) || "", messages: history});
   saveQ = saveQ.then(() => fetch("/api/chats/save", {method:"POST", headers:{"Content-Type":"application/json"}, body: payload})
     .then(r => { if (!r.ok) throw 0; if (!$("hist").hidden) renderHist(); })
     .catch(() => sys("could not save this chat (is the command center still running?)", true)));

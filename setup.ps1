@@ -116,7 +116,7 @@ if (-not $SkipModels) {
     Write-Host "   1. standard   Qwen3.6-35B-A3B Q4_K_M  (22 GB)  - recommended"
     Write-Host "   2. uncensored Qwen3.6-35B-A3B heretic Q5_K_M (25 GB)"
     Write-Host "   3. both"
-    Write-Host "   4. skip (I'll add my own; see README > Using other models)"
+    Write-Host "   4. skip (add your own later: model picker in 1:llm, paste a Hugging Face link)"
     $free = [math]::Round((Get-PSDrive ((Get-Item $Root).PSDrive.Name)).Free / 1GB)
     Write-Host "   free space here: $free GB"
     $pick = Read-Host "   which? [1-4]"

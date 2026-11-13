@@ -24,6 +24,7 @@ import workspaces  # noqa: E402  (2:code and 3:web)
 import tokens  # noqa: E402  (tokens burned per machine)
 import chats  # noqa: E402  (saved chat history)
 import memory  # noqa: E402  (long-term memory shared by every model)
+import models  # noqa: E402  (the model library: scan models, size for this PC, launch, download)
 import cloud  # noqa: E402  (optional web search / stronger cloud model as tools)
 import updater  # noqa: E402  (new versions from GitHub, installed when you say so)
 import urllib.parse  # noqa: E402
@@ -40,11 +41,8 @@ MAX_BODY = 64 * 1024 * 1024
 IDLE_EXIT = 180
 NOWIN = 0x08000000  # CREATE_NO_WINDOW, so pythonw never flashes consoles
 
-# The browser only ever sends one of these keys. Paths come from here, never from the request.
-MODELS = {
-    "standard": {"bat": "start-standard.bat", "name": "Qwen3.6-35B standard Q4_K_M"},
-    "uncensored": {"bat": "start-uncensored.bat", "name": "Qwen3.6-35B uncensored Q5_K_M"},
-}
+# Models come from models.py, which scans models\ for .gguf files. The browser sends a library id; the file path is
+# always looked up from the scan, never taken from the request.
 
 # The laptop's model, reached through NVIDIA PAIR's proxy on this PC (no API key there).
 PAIR = ("127.0.0.1", 8080)
@@ -82,8 +80,29 @@ def save_target(t):
 lock = threading.Lock()
 last_request = time.time()
 active_streams = 0
-launch = {"key": None, "t": 0.0}  # last model we launched, for LOADING before the port opens
+launch = {"key": None, "t": 0.0, "proc": None, "fail": ""}  # last model we launched, for LOADING before the port opens
 switching = {"on": False, "msg": ""}
+
+
+LOG_FILE = os.path.join(HERE, "server.log")
+_last_err = {}
+
+
+def log_error(where):
+    """Traceback into command-center\\server.log (kept under ~1 MB); the same error at most once a minute."""
+    import traceback
+    tb = traceback.format_exc()
+    key = (where, tb.strip().splitlines()[-1] if tb.strip() else "")
+    if time.time() - _last_err.get(key, 0) < 60:
+        return
+    _last_err[key] = time.time()
+    try:
+        if os.path.exists(LOG_FILE) and os.path.getsize(LOG_FILE) > 1_000_000:
+            os.replace(LOG_FILE, LOG_FILE + ".old")
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + where + "\n" + tb + "\n")
+    except OSError:
+        pass
 
 
 def touch():
@@ -166,26 +185,34 @@ def llama_get(path, timeout=1.5):
 
 
 def which_model(path):
-    p = (path or "").lower()
-    if not p:
-        return None
-    return "uncensored" if "uncensored" in p else "standard"
+    return models.from_path(path)
+
+
+def model_name(key):
+    m = models.find(key) if key else None
+    return m["name"] if m else (os.path.basename(key) if key else None)
 
 
 def model_info(gpu_util):
     info = {"state": "OFF", "key": None, "name": None, "file": None, "ctx": None,
             "vision": None, "engine": None, "id": None, "processing": False,
             "note": switching["msg"] if switching["on"] else ""}
+    p = launch.get("proc")
+    if p is not None and p.poll() is not None:  # llama-server exited on its own: say why instead of "loading"
+        launch.update(proc=None, t=0, fail=models.log_tail(6) or "llama-server exited (code %s)" % p.returncode)
+    if launch.get("fail"):
+        info["note"] = "failed to start: " + launch["fail"].splitlines()[-1][:160]
+        info["error"] = launch["fail"]
     try:
         code, health = llama_get("/health")
     except OSError:
-        if switching["on"] or time.time() - launch["t"] < 90:
+        if switching["on"] or (launch["proc"] is not None and time.time() - launch["t"] < 600) or time.time() - launch["t"] < 90:
             info.update(state="LOADING", key=launch["key"])
-            info["name"] = MODELS.get(launch["key"] or "", {}).get("name")
+            info["name"] = model_name(launch["key"])
         return info
     if code == 503:
         info.update(state="LOADING", key=launch["key"])
-        info["name"] = MODELS.get(launch["key"] or "", {}).get("name")
+        info["name"] = model_name(launch["key"])
         return info
     if code != 200:
         info["state"] = "LOADING"
@@ -196,7 +223,7 @@ def model_info(gpu_util):
         props = props or {}
         path = props.get("model_path", "")
         info["key"] = which_model(path)
-        info["name"] = MODELS.get(info["key"] or "", {}).get("name")
+        info["name"] = model_name(info["key"]) or os.path.basename(path)
         info["file"] = os.path.basename(path)
         info["ctx"] = (props.get("default_generation_settings") or {}).get("n_ctx")
         info["vision"] = bool((props.get("modalities") or {}).get("vision"))
@@ -262,11 +289,16 @@ def stop_model():
     return False, "server did not stop"
 
 
-def start_model(key):
-    bat = os.path.join(ROOT, MODELS[key]["bat"])
-    # Its own minimized console (blue or red), independent of this process.
-    subprocess.Popen(["cmd", "/c", "start", "", "/min", bat], cwd=ROOT, creationflags=NOWIN)
-    launch.update(key=key, t=time.time())
+def model_ctx(m):
+    pref = (settings.get("model_prefs") or {}).get(m["id"]) or {}
+    c = pref.get("ctx")
+    return c if c in models.ctx_choices(m) else models.default_ctx(m)
+
+
+def start_model(m):
+    """llama-server in the background, sized for this PC (models.py); output in command-center\\llama.log."""
+    launch.update(key=m["id"], t=time.time(), fail="", proc=None)
+    launch["proc"] = models.launch(m, model_ctx(m))
 
 
 def model_action(action, key):
@@ -274,8 +306,12 @@ def model_action(action, key):
         if action == "off":
             switching.update(on=True, msg="stopping")
             ok, msg = stop_model()
-            launch.update(key=None, t=0)
+            launch.update(key=None, t=0, proc=None, fail="")
             return ok, msg
+        m = models.find(key)
+        if not m:
+            return False, "no model called %s in the models folder" % key
+        key = m["id"]
         if port_open():
             try:
                 _, props = llama_get("/props")
@@ -284,15 +320,26 @@ def model_action(action, key):
                 running = None
             if running == key:
                 return True, "already on"
-            switching.update(on=True, msg="switching to " + key)
+            switching.update(on=True, msg="switching to " + m["name"])
             ok, msg = stop_model()
             if not ok:
                 return False, msg
-        switching.update(on=True, msg="starting " + key)
-        start_model(key)
-        return True, "starting " + key
+        switching.update(on=True, msg="starting " + m["name"])
+        try:
+            start_model(m)
+        except Exception as e:
+            launch.update(fail=str(e))
+            return False, str(e)
+        return True, "starting " + m["name"]
     finally:
         switching.update(on=False, msg="")
+
+
+def models_state():
+    hw = models.hardware()
+    lib = [models.describe(m, model_ctx(m), hw) for m in models.scan()]
+    return {"hardware": hw, "models": lib, "llama": os.path.exists(models.LLAMA_EXE), "folder": models.MODELS_DIR,
+            "downloads": {k: v for k, v in models.downloads.items() if v["state"] != "cancelled"}}
 
 
 def pair_req(method, path, obj=None, timeout=2.0):
@@ -471,7 +518,7 @@ def laptop_action(action):
 
 
 _stats = {"t": 0, "v": None}
-_BUILD_FILES = ("index.html", "server.py", "workspaces.py", "tokens.py", "chats.py", "memory.py", "importers.py", "cloud.py", "updater.py")
+_BUILD_FILES = ("index.html", "server.py", "models.py", "workspaces.py", "tokens.py", "chats.py", "memory.py", "importers.py", "cloud.py", "updater.py")
 UP = None  # updater.Updater, made in main()
 STARTED = time.time()
 
@@ -510,23 +557,33 @@ def build_stamp():
 token_watch = None
 
 
+def part(fn, fallback, what):
+    try:
+        return fn()
+    except Exception:
+        log_error("stats: " + what)
+        return fallback
+
+
 def stats():
     with lock:
         if time.time() - _stats["t"] < 0.7 and _stats["v"]:
             return _stats["v"]
     # Both machines every time, so the usage pane can show either one whatever the target is.
     g = gpu()
-    pc = {"label": "this pc", "name": socket.gethostname(), "ok": True, "gpu": g, "ram": ram(), "cpu": cpu_percent()}
+    pc = {"label": "this pc", "name": socket.gethostname(), "ok": True, "gpu": g,
+          "ram": part(ram, {"total": 0, "free": 0}, "ram"), "cpu": part(cpu_percent, 0.0, "cpu")}
+    off = {"state": "OFF", "key": None, "name": None, "processing": False, "note": "status unavailable (see server.log)"}
     lm = laptop_cache["machine"]
     lap = {"label": "laptop", "name": lm["name"] if lm else (laptop_address()[1] or "laptop"), "ok": lm is not None,
            "gpu": lm and lm["gpu"], "ram": lm["ram"] if lm else {"total": 0, "free": 0}, "cpu": lm["cpu"] if lm else 0}
     if target["v"] == "laptop":
-        m = laptop_info()
+        m = part(laptop_info, dict(off), "laptop model")
         # Busy comes from our own chats and the laptop's slot status; this PC's GPU says nothing about the laptop.
         busy = active_streams > 0 or m["processing"]
         machine = lap
     else:
-        m = model_info(g and g.get("util"))
+        m = part(lambda: model_info(g and g.get("util")), dict(off), "model")
         busy = active_streams > 0 or m["processing"] or (
             m["state"] == "ON" and g is not None and (g.get("util") or 0) >= 25)
         machine = pc
@@ -535,11 +592,11 @@ def stats():
          "gpu": machine["gpu"], "ram": machine["ram"], "cpu": machine["cpu"], "model": m, "busy": busy,
          "machines": {"pc": pc, "laptop": lap},
          "laptop_online": laptop_cache["machine"] is not None,
-         "laptop_note": None if laptop_cache["machine"] is not None else laptop_reach_note(),
-         "laptop_name": (laptop_cache["machine"] or {}).get("name") or laptop_address()[1],
-         "tokens": token_watch.view() if token_watch else None,
-         "ui_streams": active_streams, "models": {k: v["name"] for k, v in MODELS.items()},
-         "build": build_stamp(), "update": update_brief(), "time": time.time()}
+         "laptop_note": None if laptop_cache["machine"] is not None else part(laptop_reach_note, None, "laptop note"),
+         "laptop_name": (laptop_cache["machine"] or {}).get("name") or part(lambda: laptop_address()[1], None, "laptop name"),
+         "tokens": part(token_watch.view, None, "tokens") if token_watch else None,
+         "ui_streams": active_streams,
+         "build": build_stamp(), "update": part(update_brief, None, "update"), "time": time.time()}
     with lock:
         _stats.update(t=time.time(), v=v)
     return v
@@ -590,7 +647,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
     # From the phone: chat, saved chats, model on/off, run-on target and stats. Not VS Code, not the API key,
     # and not phone access itself (turning that off from the phone would lock the phone out).
     REMOTE_BLOCKED = ("/api/code", "/api/cline", "/api/web/serve", "/api/memory/location", "/api/memory/import",
-                      "/api/memory/import-file", "/api/clinecc", "/cline", "/api/cloud", "/api/update")
+                      "/api/memory/import-file", "/api/clinecc", "/cline", "/api/cloud", "/api/update",
+                      "/api/models/hf", "/api/models/download", "/api/models/cancel", "/api/models/open")
 
     def remote_blocked(self, path):
         if self.remote and any(path == p or path.startswith(p + "/") for p in self.REMOTE_BLOCKED):
@@ -609,6 +667,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return keep
 
     def do_GET(self):
+        self.safely(self._get)
+
+    def do_POST(self):
+        self.safely(self._post)
+
+    def safely(self, fn):
+        try:
+            fn()
+        except (ConnectionError, TimeoutError):
+            pass  # the browser went away mid-reply
+        except Exception as e:
+            log_error("%s %s" % (self.command, self.path.split("?", 1)[0]))
+            self.close_connection = True
+            try:
+                self.send_json(500, {"error": "server error: %s: %s (details in command-center\\server.log)" % (e.__class__.__name__, e)})
+            except Exception:
+                pass
+
+    def _get(self):
         self.hold()
         if not self.guard():
             return
@@ -639,6 +716,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_json(200, memory.M.status())
         elif path == "/api/update":
             self.send_json(200, UP.public())
+        elif path == "/api/models":
+            self.send_json(200, models_state())
         elif path == "/api/cloud":
             self.send_json(200, cloud.status(settings))
         elif path == "/api/clinecc":
@@ -705,7 +784,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         else:
             self.send_json(404, {"error": "not found"})
 
-    def do_POST(self):
+    def _post(self):
         keep = self.hold()
         if not self.guard():
             return
@@ -736,6 +815,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send_json(400, {"error": "expected a JSON object"})
         if path.startswith("/api/memory/"):
             return self.memory_post(path[len("/api/memory/"):], data)
+        if path.startswith("/api/models/"):
+            return self.models_post(path[len("/api/models/"):], data)
         if path.startswith("/cline/") and path.endswith("/v1/chat/completions"):
             return self.cline_chat(path.split("/")[2], data)
         if path == "/api/update/check":
@@ -821,9 +902,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send_json(200, {"ok": True, "target": t})
         if path == "/api/model":
             action = data.get("action")
-            key = data.get("model", "standard")
-            if action not in ("on", "off") or key not in MODELS:
-                return self.send_json(400, {"error": "action must be on/off, model standard/uncensored"})
+            key = data.get("model") or "standard"
+            if action not in ("on", "off") or not isinstance(key, str):
+                return self.send_json(400, {"error": "action must be on or off"})
             if switching["on"]:
                 return self.send_json(409, {"error": "busy: " + switching["msg"]})
             ok, msg = laptop_action(action) if target["v"] == "laptop" else model_action(action, key)
@@ -1104,6 +1185,40 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def models_post(self, op, data):
+        if op == "prefs":
+            m = models.find(data.get("id"))
+            ctx = data.get("ctx")
+            if not m or ctx not in models.ctx_choices(m):
+                return self.send_json(400, {"error": "unknown model or context size"})
+            settings.setdefault("model_prefs", {})[m["id"]] = {"ctx": ctx}
+            save_settings()
+            return self.send_json(200, {"ok": True, "model": models.describe(m, ctx)})
+        if op == "hf":
+            try:
+                return self.send_json(200, models.hf_files(data.get("url")))
+            except ValueError as e:
+                return self.send_json(400, {"error": str(e)})
+            except Exception as e:
+                return self.send_json(502, {"error": "couldn't read that from Hugging Face: " + str(e)[:200]})
+        if op == "download":
+            files = data.get("files")
+            if not isinstance(files, list) or not files or len(files) > 20:
+                return self.send_json(400, {"error": "files must be a list"})
+            try:
+                return self.send_json(200, {"ok": True, "id": models.download(data.get("repo"), files)})
+            except ValueError as e:
+                return self.send_json(400, {"error": str(e)})
+        if op == "cancel":
+            d = models.downloads.get(str(data.get("id")))
+            if d and d["state"] in ("starting", "downloading"):
+                d["state"] = "cancelled"
+            return self.send_json(200, {"ok": True})
+        if op == "open":
+            models.open_folder()
+            return self.send_json(200, {"ok": True})
+        return self.send_json(404, {"error": "not found"})
+
     def memory_post(self, what, data):
         M = memory.M
         if what == "location":
@@ -1315,4 +1430,9 @@ def main():
 
 
 if __name__ == "__main__":
+    if sys.stderr is None:  # pythonw: keep background-thread crashes instead of losing them
+        try:
+            sys.stderr = open(os.path.join(HERE, "server.log"), "a", encoding="utf-8", buffering=1)
+        except OSError:
+            pass
     main()
