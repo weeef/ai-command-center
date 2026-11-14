@@ -159,6 +159,23 @@ has *check now* and an auto-check switch. Nothing installs without you clicking.
 - **ZIP download**: only the files that differ from GitHub are replaced; the old copies are kept as `*.bak`. Your
   settings, keys, chats, memory and models are never touched (they aren't in the repo).
 
+### llama.cpp engine updates
+
+**6:set → llama.cpp engine** keeps `llama.cpp\` on a recent official build from
+[ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp/releases), the same kind you have (CUDA 13 / CUDA 12 /
+Vulkan / CPU). It checks every 12 hours.
+
+- **install automatically** (on by default): downloads the newest build that has been out for at least a day, checks
+  it against the sha256 GitHub publishes, unpacks it to `llama.cpp.next\`, and tests it with `llama-server --version`.
+  It swaps the build in only when no model is running: either when it finds the model off, or right before the
+  command center starts a model. It never stops a running model by itself. The ~400 MB CUDA runtime is downloaded
+  only when it has changed.
+- **install bNNNNN now**: gets the very newest build, stops the model, swaps, and starts the same model again.
+- **roll back**: the previous build is kept in `llama.cpp-prev\`. If a new build is slower or broken, one click
+  switches back. The two folders just trade places.
+- If anything from `llama.cpp\` is still running (for example a `start-llm.bat` window), Windows locks the folder.
+  The swap then fails and nothing changes.
+
 ---
 
 ## Picking and adding models
@@ -205,6 +222,7 @@ command-center\
   importers.py   ChatGPT / Claude export readers
   cloud.py       optional web search / stronger-model tools (Claude, ChatGPT, Gemini)
   updater.py     update check and install (from this GitHub repo)
+  llamaup.py     llama.cpp engine updates (official builds, checksum-verified, roll back)
   chats.py       saved chats
   workspaces.py  VS Code / Cline / Tailscale helpers
   tokens.py      tokens-used meter

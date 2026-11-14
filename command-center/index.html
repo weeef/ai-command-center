@@ -555,6 +555,7 @@ details.think .tbody{white-space:pre-wrap;max-height:260px;overflow-y:auto;font-
 .memloc{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
 .memloc input{flex:1 1 220px}
 #ws6 .col:first-child{overflow-y:auto}
+#ws6 .col>.pane:not(#memListPane){flex:0 0 auto}
 .tpk.on{background:var(--accent);color:var(--bg);border-color:var(--accent)}
 #ws5 .col:first-child{overflow-y:auto}
 #clLogPane{flex:1 1 auto;display:flex;flex-direction:column;min-height:0}
@@ -809,6 +810,7 @@ body.remote #tags span[data-ws="2"]{display:none}
   <div class="col">
     <section class="pane"><div class="title">appearance</div><div id="themePick" class="memloc" style="margin-top:0"></div></section>
     <section class="pane"><div class="title">updates <i>· from github</i></div><div id="updBox">loading…</div></section>
+    <section class="pane"><div class="title">llama.cpp engine <i>· official builds</i></div><div id="lluBox">loading…</div></section>
     <section class="pane"><div class="title">cloud &amp; web search <i>· optional</i></div><div id="cloudBox">loading…</div></section>
     <section class="pane" id="memListPane"><div class="title">memories <i id="memCount"></i></div>
       <div class="memadd"><input id="memNew" maxlength="1000" placeholder="teach it something: e.g. I prefer metric units"><select id="memNewTopic"></select><button id="memAddBtn">remember</button></div>
@@ -2654,6 +2656,57 @@ async function applyUpd(){
   }
   $("updBody").insertAdjacentHTML("beforeend", `<div class="updWarn">The server hasn't come back. Close this window and open the command center again.</div>`);
 }
+/* ---------------- llama.cpp engine updates ----------------
+   The server checks ggml-org/llama.cpp every 12 h. With auto-install on it downloads + checksum-verifies the newest
+   build that's been out a day and swaps it in the next time no model is running (it never stops a running model).
+   "install now" stops the model, swaps, and starts the same model again. The previous build is kept for roll back. */
+let lluSt = null, lluTimer = null;
+async function lluPost(what, obj){
+  try { return await (await fetch("/api/llama-update/" + what, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(obj || {})})).json(); }
+  catch(e) { return {ok: false, msg: "the server didn't answer"}; }
+}
+async function refreshLlu(){
+  try { lluSt = await (await fetch("/api/llama-update", {cache: "no-store"})).json(); } catch(e) { return; }
+  renderLlu();
+  clearTimeout(lluTimer);
+  if (lluSt.busy) lluTimer = setTimeout(refreshLlu, 1000);
+}
+function lluMB(n){ return (n / 1048576).toFixed(0) + " MB"; }
+function renderLlu(){
+  const u = lluSt, box = $("lluBox"); if (!u || !box) return;
+  const inst = u.installed, lat = u.latest, st = u.staged;
+  let line;
+  if (!inst) line = `<span class="updWarn">llama.cpp isn't installed (or llama-server.exe won't start)</span>`;
+  else line = `installed <b>b${inst.build}</b> <i class="hint">${esc(inst.commit)} · ${esc(inst.flavor)}</i>`;
+  let status = "";
+  if (u.busy) {
+    const p = u.progress;
+    status = `<b>${esc(u.phase || "working")}…</b>` + (p ? ` ${lluMB(p.done)} / ${lluMB(p.total)} (${Math.round(100 * p.done / Math.max(1, p.total))}%)` : "");
+  } else if (lat && u.available) status = `<b>newer build: ${esc(lat.tag)}</b> <i class="hint">${esc((lat.published || "").slice(0, 10))}</i>`
+      + (st && st.build >= lat.build ? " · downloaded, swaps in when the model is off" : st ? ` · ${esc(st.tag)} downloaded` : "");
+  else if (u.checked && lat) status = "up to date";
+  else if (!u.checked) status = "not checked yet";
+  box.innerHTML = `<div>${line}</div>
+    ${status ? `<div>${status}</div>` : ""}
+    ${u.error ? `<div class="updWarn">${esc(u.error)}</div>` : ""}
+    ${u.last_msg && !u.busy ? `<div class="hint">${esc(u.last_msg)}</div>` : ""}
+    <div class="hint">checked ${updAgo(u.checked)}${lat ? ` · <a href="${esc(lat.url)}" target="_blank" rel="noopener">release notes</a>` : ""}${u.prev ? ` · previous: b${u.prev.build}` : ""}</div>
+    <div class="memloc"><button id="lluCheck" ${u.busy ? "disabled" : ""}>check now</button>
+      ${u.available ? `<button id="lluInstall" class="primary" ${u.busy ? "disabled" : ""} title="downloads (checksum-verified), stops the model, switches, and starts the same model again">install ${esc(lat.tag)} now</button>` : ""}
+      ${u.prev ? `<button id="lluBack" ${u.busy ? "disabled" : ""} title="switch back to the build you had before (if the new one is slower or broken)">roll back to b${u.prev.build}</button>` : ""}</div>
+    <div class="memloc"><label class="hint" style="display:flex;align-items:center;gap:5px;margin:0"><input type="checkbox" id="lluAuto" ${u.auto_check ? "checked" : ""}>check automatically</label>
+      <label class="hint" style="display:flex;align-items:center;gap:5px;margin:0" title="downloads a build once it's been out a day, and swaps it in only when no model is running (or right before you start one)"><input type="checkbox" id="lluAutoInst" ${u.auto_install ? "checked" : ""}>install automatically</label></div>`;
+  $("lluCheck").onclick = async () => { $("lluCheck").disabled = true; $("lluCheck").textContent = "checking…"; lluSt = await lluPost("check"); renderLlu(); };
+  if ($("lluInstall")) $("lluInstall").onclick = async () => {
+    const r = await lluPost("install"); if (!r.ok) { lluSt.error = r.msg; renderLlu(); return; }
+    setTimeout(refreshLlu, 300); };
+  if ($("lluBack")) $("lluBack").onclick = async () => {
+    const r = await lluPost("rollback"); if (!r.ok) { lluSt.error = r.msg; renderLlu(); return; }
+    setTimeout(refreshLlu, 300); };
+  $("lluAuto").onchange = e => lluPost("settings", {auto_check: e.target.checked});
+  $("lluAutoInst").onchange = e => lluPost("settings", {auto_install: e.target.checked});
+}
+
 $("updBtn").onclick = openUpd;
 $("updNow").onclick = applyUpd;
 $("updLater").onclick = () => $("updDlg").close();
@@ -2799,7 +2852,7 @@ async function refreshWs(){
   try {
     if (ws === "2") renderCode(await (await fetch("/api/code", {cache:"no-store"})).json());
     if (ws === "3") renderWeb(await (await fetch("/api/web", {cache:"no-store"})).json());
-    if (ws === "6") { await refreshMem(); if (!cloudSt) refreshCloud(); refreshUpd(); }
+    if (ws === "6") { await refreshMem(); if (!cloudSt) refreshCloud(); refreshUpd(); refreshLlu(); }
     if (ws === "4") await refreshTree();
     if (ws === "5") renderCline(await (await fetch("/api/clinecc", {cache:"no-store"})).json());
   } catch (e) {}

@@ -27,6 +27,7 @@ import memory  # noqa: E402  (long-term memory shared by every model)
 import models  # noqa: E402  (the model library: scan models, size for this PC, launch, download)
 import cloud  # noqa: E402  (optional web search / stronger cloud model as tools)
 import updater  # noqa: E402  (new versions from GitHub, installed when you say so)
+import llamaup  # noqa: E402  (llama.cpp engine updates)
 import urllib.parse  # noqa: E402
 import collections  # noqa: E402
 import re  # noqa: E402
@@ -298,6 +299,10 @@ def model_ctx(m):
 def start_model(m):
     """llama-server in the background, sized for this PC (models.py); output in command-center\\llama.log."""
     launch.update(key=m["id"], t=time.time(), fail="", proc=None)
+    if LU:  # nothing from the llama.cpp folder runs right now: the moment to swap in a downloaded engine update
+        done = LU.swap_if_staged()
+        if done:
+            sys.stderr and print(time.ctime(), done, file=sys.stderr)
     launch["proc"] = models.launch(m, model_ctx(m))
 
 
@@ -518,8 +523,50 @@ def laptop_action(action):
 
 
 _stats = {"t": 0, "v": None}
-_BUILD_FILES = ("index.html", "server.py", "models.py", "workspaces.py", "tokens.py", "chats.py", "memory.py", "importers.py", "cloud.py", "updater.py")
+_BUILD_FILES = ("index.html", "server.py", "models.py", "workspaces.py", "tokens.py", "chats.py", "memory.py", "importers.py", "cloud.py", "updater.py", "llamaup.py")
 UP = None  # updater.Updater, made in main()
+LU = None  # llamaup.LlamaUpdater, made in main()
+
+
+def llama_stop_all(embedder_only=False):
+    """Frees the llama.cpp folder for an engine swap: stops the memory embedder and (unless embedder_only) the model.
+    Returns (ok, msg, key of the model that was running so it can be started again)."""
+    emb = getattr(memory.M, "embedder", None)
+    if emb:
+        emb.last_start = time.time() + 60  # keep it from restarting itself mid-swap
+        p = emb.proc
+        if p and p.poll() is None:
+            p.terminate()
+            try:
+                p.wait(10)
+            except subprocess.TimeoutExpired:
+                p.kill()
+    if embedder_only:
+        return True, "ok", None
+    if active_streams > 0:
+        return False, "a reply is still streaming; try again when it's done", None
+    running = None
+    if port_open():
+        try:
+            _, props = llama_get("/props")
+            running = which_model((props or {}).get("model_path")) or launch.get("key")
+        except Exception:
+            running = launch.get("key")
+    switching.update(on=True, msg="updating llama.cpp")
+    try:
+        ok, msg = stop_model()
+        launch.update(key=None, t=0, proc=None, fail="")
+    finally:
+        switching.update(on=False, msg="")
+    if not ok:
+        return False, msg, None
+    time.sleep(1.0)  # let Windows release the DLLs
+    return True, "stopped", running
+
+
+def llama_model_off():
+    p = launch.get("proc")
+    return not switching["on"] and not port_open() and (p is None or p.poll() is not None)
 STARTED = time.time()
 
 
@@ -647,7 +694,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     # From the phone: chat, saved chats, model on/off, run-on target and stats. Not VS Code, not the API key,
     # and not phone access itself (turning that off from the phone would lock the phone out).
     REMOTE_BLOCKED = ("/api/code", "/api/cline", "/api/web/serve", "/api/memory/location", "/api/memory/import",
-                      "/api/memory/import-file", "/api/clinecc", "/cline", "/api/cloud", "/api/update",
+                      "/api/memory/import-file", "/api/clinecc", "/cline", "/api/cloud", "/api/update", "/api/llama-update",
                       "/api/models/hf", "/api/models/download", "/api/models/cancel", "/api/models/open")
 
     def remote_blocked(self, path):
@@ -716,6 +763,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_json(200, memory.M.status())
         elif path == "/api/update":
             self.send_json(200, UP.public())
+        elif path == "/api/llama-update":
+            self.send_json(200, LU.public())
         elif path == "/api/models":
             self.send_json(200, models_state())
         elif path == "/api/cloud":
@@ -819,6 +868,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.models_post(path[len("/api/models/"):], data)
         if path.startswith("/cline/") and path.endswith("/v1/chat/completions"):
             return self.cline_chat(path.split("/")[2], data)
+        if path.startswith("/api/llama-update/"):
+            return self.llama_update_post(path.rsplit("/", 1)[1], data)
         if path == "/api/update/check":
             return self.send_json(200, UP.check())
         if path == "/api/update/settings":
@@ -1185,6 +1236,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def llama_update_post(self, what, data):
+        """6:set -> llama.cpp engine. install/rollback run in the background; the page polls /api/llama-update."""
+        if what == "check":
+            return self.send_json(200, LU.check())
+        if what == "settings":
+            for k in ("auto_check", "auto_install"):
+                if k in data:
+                    LU.set_prefs(**{k: bool(data[k])})
+            return self.send_json(200, LU.public())
+        if what in ("install", "rollback"):
+            if LU.state["busy"]:
+                return self.send_json(409, {"ok": False, "msg": "already busy: " + (LU.state["phase"] or "working")})
+            if active_streams > 0 or switching["on"]:
+                return self.send_json(409, {"ok": False, "msg": "wait for the current reply or model switch to finish"})
+            threading.Thread(target=LU.install if what == "install" else LU.rollback, daemon=True).start()
+            return self.send_json(200, {"ok": True, "msg": "started"})
+        return self.send_json(404, {"error": "unknown"})
+
     def models_post(self, op, data):
         if op == "prefs":
             m = models.find(data.get("id"))
@@ -1415,6 +1484,11 @@ def main():
     global UP
     UP = updater.Updater(ROOT, settings, save_settings)
     threading.Thread(target=UP.watch, daemon=True).start()
+    global LU
+    LU = llamaup.LlamaUpdater(ROOT, settings, save_settings)
+    LU.stop_all, LU.model_off = llama_stop_all, llama_model_off
+    LU.restart = lambda key: model_action("on", key)
+    threading.Thread(target=LU.watch, daemon=True).start()
     cpu_percent()
     threading.Thread(target=idle_watch, daemon=True).start()
     threading.Thread(target=laptop_watch, daemon=True).start()
