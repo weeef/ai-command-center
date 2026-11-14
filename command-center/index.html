@@ -1271,12 +1271,12 @@ async function poll(){
 
 /* ---------------- model control ---------------- */
 let ctlBusy = false;
-async function modelAction(action, model){
+async function modelAction(action, model, restart){
   if (ctlBusy) return;
   ctlBusy = true; render();
   $("ctlMsg").textContent = action === "off" ? "stopping…" : `starting ${modelLabel(model || selected)}…`;
   try {
-    const r = await fetch("/api/model", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({action, model: model || selected})});
+    const r = await fetch("/api/model", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({action, model: model || selected, restart: !!restart})});
     const j = await r.json();
     $("ctlMsg").textContent = j.msg || j.error || "";
     if (!r.ok) sys(j.error || j.msg || "model action failed", true);
@@ -1360,12 +1360,13 @@ function renderModelDlg(){
   const running = S && S.target !== "laptop" && S.model.state !== "OFF" ? S.model.key : null;
   $("mdList").innerHTML = mlib.models.length ? mlib.models.map(m => {
     const bits = [m.quant, m.size_gb + " GB", m.params, m.experts ? `MoE ${m.experts_used}/${m.experts} experts` : "dense",
-      m.vision ? "images" : (m.mtp ? "fast text (MTP), no images" : "text only"), m.ctx_train ? kctx(m.ctx_train) + " max context" : ""].filter(Boolean);
+      m.ctx_train ? kctx(m.ctx_train) + " max context" : ""].filter(Boolean);
     return `<div class="mcard ${m.id === selected ? "sel" : ""}" data-id="${esc(m.id)}" tabindex="0" role="button">
       <div class="mn">${esc(m.name)}${capBadges(m)}${m.id === running ? `<span class="tag">running</span>` : m.id === selected ? `<span class="tag next">selected</span>` : ""}</div>
       <div class="ms">${esc(bits.join(" · "))}</div>
       <div class="mside"><span class="fitb fit-${m.plan.fit}" title="needs ~${m.plan.need_gb} GB (weights ${m.plan.weights_gb} + context ${m.plan.kv_gb}); GPU budget ${m.plan.budget_gb} GB">${FITS[m.plan.fit]}</span>
-        <label class="ms">context <select data-ctx="${esc(m.id)}">${m.ctx_choices.map(c => `<option value="${c}" ${c === m.ctx ? "selected" : ""}>${kctx(c)}</option>`).join("")}</select></label></div>
+        <label class="ms">context <select data-ctx="${esc(m.id)}">${m.ctx_choices.map(c => `<option value="${c}" ${c === m.ctx ? "selected" : ""}>${kctx(c)}</option>`).join("")}</select></label>
+        ${m.both ? `<label class="ms" title="llama.cpp can't run MTP and image input at the same time: pick per model">mode <select data-mode="${esc(m.id)}"><option value="fast" ${m.mode === "fast" ? "selected" : ""}>fast text (MTP)</option><option value="images" ${m.mode === "images" ? "selected" : ""}>images</option></select></label>` : ""}</div>
       <div class="mnote">${esc(m.plan.note)} · ${esc(m.tuning)} · <span title="${esc(m.id)}">${esc(m.file)}</span></div>
     </div>`; }).join("")
     : `<div class="hint" style="margin:0 0 8px">No models yet. Paste a Hugging Face link below (the list shows which sizes fit this PC), or copy a .gguf into the models folder.</div>`;
@@ -1382,6 +1383,15 @@ $("mdList").addEventListener("click", e => {
 });
 $("mdList").addEventListener("keydown", e => { const c = e.target.closest(".mcard"); if (c && e.key === "Enter") pickModel(c.dataset.id); });
 $("mdList").addEventListener("change", async e => {
+  const ms = e.target.closest("select[data-mode]");
+  if (ms) {
+    const r = await postJSON("/api/models/prefs", {id: ms.dataset.mode, mode: ms.value});
+    if (!r.ok) return sys("couldn't change the mode: " + (r.msg || r.error), true);
+    await loadModels();
+    const live = S && S.target !== "laptop" && S.model.key === ms.dataset.mode && ["ON", "ASLEEP"].includes(S.model.state);
+    if (live) { sys(ms.value === "images" ? "restarting the model with image input (no MTP)…" : "restarting the model in fast text mode (MTP, no images)…"); modelAction("on", ms.dataset.mode, true); }
+    return;
+  }
   const sel = e.target.closest("select[data-ctx]"); if (!sel) return;
   const r = await postJSON("/api/models/prefs", {id: sel.dataset.ctx, ctx: +sel.value});
   if (!r.ok) return sys("couldn't change the context: " + r.msg, true);

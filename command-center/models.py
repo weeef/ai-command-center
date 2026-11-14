@@ -34,26 +34,34 @@ GiB = 1024 ** 3
 CTX_CHOICES = [16384, 32768, 65536, 131072, 262144, 524288, 1048576]
 DEFAULT_CTX = 131072
 
-# The two original launcher keys keep working (slash commands, start-standard.bat, saved choices).
-ALIASES = {
-    "standard": "Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
-    "uncensored": "Qwen3.6-35B-A3B-uncensored-heretic-GGUF/Qwen3.6-35B-A3B-uncensored-heretic.Q5_K_M.gguf",
-}
+# The two launcher keys keep working (slash commands, saved choices). Since 2026-11-14 they mean Qwen3.8 27B.
+Q36_STD = "Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"
+Q36_UNC = "Qwen3.6-35B-A3B-uncensored-heretic-GGUF/Qwen3.6-35B-A3B-uncensored-heretic.Q5_K_M.gguf"
+Q38_STD = "Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S.gguf"
+Q38_UNC = "Qwen3.8-27B-Uncensored-MTP-GGUF/Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-IQ3_XS.gguf"
+ALIASES = {"standard": Q38_STD, "uncensored": Q38_UNC}
+FALLBACK = {"standard": Q36_STD, "uncensored": Q36_UNC}  # installs that only have the Qwen3.6 files (setup.ps1)
+
+
+def alias_target(a):
+    for p in (ALIASES.get(a), FALLBACK.get(a)):
+        if p and os.path.exists(os.path.join(MODELS_DIR, *p.split("/"))):
+            return p
+    return ALIASES.get(a)
 # files with measured settings from llm-config.bat: id -> (config variable for --n-cpu-moe, its default)
 TUNED = {
-    ALIASES["standard"]: ("MOE_STD", 23),
-    ALIASES["uncensored"]: ("MOE_UNC", 25),
+    Q36_STD: ("MOE_STD", 23),
+    Q36_UNC: ("MOE_UNC", 25),
     "Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf": ("MOE_MTP", 25),
     "Qwen3.6-35B-A3B-uncensored-heretic-MTP-GGUF/Qwen3.6-35B-A3B-uncensored-heretic-Native-MTP-Preserved-Q5_K_M.gguf": ("MOE_MTP_UNC", 27),
 }
-NICE = {ALIASES["standard"]: "Qwen3.6 35B · standard", ALIASES["uncensored"]: "Qwen3.6 35B · uncensored",
+NICE = {Q36_STD: "Qwen3.6 35B · standard", Q36_UNC: "Qwen3.6 35B · uncensored",
         "Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf": "Qwen3.6 35B · standard · fast text (MTP)",
         "Qwen3.6-35B-A3B-uncensored-heretic-MTP-GGUF/Qwen3.6-35B-A3B-uncensored-heretic-Native-MTP-Preserved-Q5_K_M.gguf": "Qwen3.6 35B · uncensored · fast text (MTP)",
-        # Qwen3.8 27B (dense). On a 16 GB card only the 3-bit quants fit fully on the GPU; measured 2026-11-14 on a
-        # 5080 at 32K ctx with MTP: IQ3_S 75-77 t/s, IQ3_XXS ~57 t/s without MTP, IQ4_XS (split with RAM) 12 t/s.
-        "Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S.gguf": "Qwen3.8 27B · best fit (3-bit, MTP)",
-        "Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_XXS.gguf": "Qwen3.8 27B · smaller (3-bit XXS, MTP)",
-        "Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ4_XS.gguf": "Qwen3.8 27B · 4-bit (too big for 16 GB: slow)"}
+        # Qwen3.8 27B (dense). On a 16 GB card only ~3-bit quants fit fully on the GPU; measured 2026-11-14 on a
+        # 5080 at 32K ctx: IQ3_S + MTP 75-77 t/s, without MTP 46 t/s, IQ4_XS split with RAM 12 t/s.
+        Q38_STD: "Qwen3.8 27B · standard",
+        Q38_UNC: "Qwen3.8 27B · uncensored"}
 
 # ------------------------------------------------------------------ GGUF metadata
 _T = {0: "<B", 1: "<b", 2: "<H", 3: "<h", 4: "<I", 5: "<i", 6: "<f", 7: "<?", 10: "<Q", 11: "<q", 12: "<d"}
@@ -218,7 +226,7 @@ def scan():
                     if g != f and g.lower().startswith(low[:split.start()]) and re.search(r"-\d+-of-\d+\.gguf$", g.lower()):
                         size += os.path.getsize(os.path.join(d, g))
             mid = _rel(path)
-            alias = next((a for a, p in ALIASES.items() if p == mid), None)
+            alias = next((a for a in ALIASES if alias_target(a) == mid), None)
             out.append({
                 "id": mid, "alias": alias, "file": f, "folder": _rel(d) if d != MODELS_DIR else "",
                 "name": NICE.get(mid) or md.get("general.name") or _pretty(f),
@@ -249,7 +257,7 @@ def find(key):
     if not key:
         return None
     lib = scan()
-    key = ALIASES.get(key, key)
+    key = alias_target(key) if key in ALIASES else key
     for m in lib:
         if key in (m["id"], m["file"]):
             return m
@@ -334,22 +342,30 @@ def default_ctx(m, hw=None):
     return best if plan(m, best, hw)["fit"] == "gpu" else min(DEFAULT_CTX, ch[-1])
 
 
-def describe(m, ctx=None, hw=None):
+def mtp_on(m, mode=None):
+    """MTP models with a vision projector can run either way: "fast" (MTP, text only) or "images" (no MTP)."""
+    return bool(m["mtp"]) and not (mode == "images" and m["mmproj"])
+
+
+def describe(m, ctx=None, hw=None, mode=None):
     ctx = ctx or default_ctx(m, hw)
     d = {k: v for k, v in m.items() if not k.startswith("_") and k != "mmproj"}
+    # what it will actually run with: MTP and images can't be on together (llama.cpp)
+    d.update(both=bool(m["mtp"] and m["mmproj"]), mode="fast" if mtp_on(m, mode) else "images" if m["vision"] else "text",
+             vision=bool(m["vision"]) and not mtp_on(m, mode), mtp=mtp_on(m, mode), mtp_capable=bool(m["mtp"]))
     d.update(ctx=ctx, ctx_choices=ctx_choices(m), plan=plan(m, ctx, hw),
              tuning="measured on this setup (llm-config.bat)" if m["tuned"] else "auto-fit to this PC by llama.cpp")
     return d
 
 
-def command(m, ctx):
+def command(m, ctx, mode=None):
     """llama-server command line for this model at this context, sized for this PC."""
     c, hw = config(), hardware()
     threads = c.get("THREADS") or str(hw["cores"])
     args = [LLAMA_EXE, "-m", m["_path"]]
     spec = c["SPEC"].split()
     vision = m["vision"]
-    if m["mtp"]:
+    if mtp_on(m, mode):
         # multi-token prediction drafts 2 tokens per pass (+~15%); llama.cpp can't combine it with --mmproj yet
         spec, vision = ["--spec-type", "draft-mtp,ngram-mod", "--spec-draft-n-max", "2"], False
     if vision:
@@ -375,15 +391,15 @@ def command(m, ctx):
     return args
 
 
-def launch(m, ctx):
+def launch(m, ctx, mode=None):
     """Start llama-server in the background (no console window); its output goes to command-center\\llama.log."""
     if not os.path.exists(LLAMA_EXE):
         raise RuntimeError("llama.cpp isn't installed: run setup.bat")
     if not os.path.exists(KEYFILE):
         raise RuntimeError("api-key.txt is missing: run setup.bat")
     log = open(LOG, "w", encoding="utf-8", errors="replace")
-    log.write("# " + " ".join('"%s"' % a if " " in a else a for a in command(m, ctx)) + "\n"); log.flush()
-    p = subprocess.Popen(command(m, ctx), cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+    log.write("# " + " ".join('"%s"' % a if " " in a else a for a in command(m, ctx, mode)) + "\n"); log.flush()
+    p = subprocess.Popen(command(m, ctx, mode), cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                          creationflags=NOWIN | 0x00000200)  # CREATE_NEW_PROCESS_GROUP: outlives the command center
     log.close()
     return p

@@ -290,6 +290,11 @@ def stop_model():
     return False, "server did not stop"
 
 
+def model_mode(m):
+    """"fast" (MTP) or "images" for models that can do both; the picker saves it per model."""
+    return ((settings.get("model_prefs") or {}).get(m["id"]) or {}).get("mode")
+
+
 def model_ctx(m):
     pref = (settings.get("model_prefs") or {}).get(m["id"]) or {}
     c = pref.get("ctx")
@@ -303,10 +308,10 @@ def start_model(m):
         done = LU.swap_if_staged()
         if done:
             sys.stderr and print(time.ctime(), done, file=sys.stderr)
-    launch["proc"] = models.launch(m, model_ctx(m))
+    launch["proc"] = models.launch(m, model_ctx(m), model_mode(m))
 
 
-def model_action(action, key):
+def model_action(action, key, restart=False):
     try:
         if action == "off":
             switching.update(on=True, msg="stopping")
@@ -323,7 +328,7 @@ def model_action(action, key):
                 running = which_model((props or {}).get("model_path"))
             except Exception:
                 running = None
-            if running == key:
+            if running == key and not restart:
                 return True, "already on"
             switching.update(on=True, msg="switching to " + m["name"])
             ok, msg = stop_model()
@@ -342,7 +347,7 @@ def model_action(action, key):
 
 def models_state():
     hw = models.hardware()
-    lib = [models.describe(m, model_ctx(m), hw) for m in models.scan()]
+    lib = [models.describe(m, model_ctx(m), hw, model_mode(m)) for m in models.scan()]
     return {"hardware": hw, "models": lib, "llama": os.path.exists(models.LLAMA_EXE), "folder": models.MODELS_DIR,
             "downloads": {k: v for k, v in models.downloads.items() if v["state"] != "cancelled"}}
 
@@ -992,7 +997,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self.send_json(400, {"error": "action must be on or off"})
             if switching["on"]:
                 return self.send_json(409, {"error": "busy: " + switching["msg"]})
-            ok, msg = laptop_action(action) if target["v"] == "laptop" else model_action(action, key)
+            ok, msg = laptop_action(action) if target["v"] == "laptop" else model_action(action, key, bool(data.get("restart")))
             _stats["t"] = 0
             return self.send_json(200 if ok else 500, {"ok": ok, "msg": msg})
         if path == "/v1/chat/completions":
@@ -1293,12 +1298,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def models_post(self, op, data):
         if op == "prefs":
             m = models.find(data.get("id"))
-            ctx = data.get("ctx")
-            if not m or ctx not in models.ctx_choices(m):
-                return self.send_json(400, {"error": "unknown model or context size"})
-            settings.setdefault("model_prefs", {})[m["id"]] = {"ctx": ctx}
+            if not m:
+                return self.send_json(400, {"error": "unknown model"})
+            pref = dict((settings.get("model_prefs") or {}).get(m["id"]) or {})
+            if "ctx" in data:
+                if data["ctx"] not in models.ctx_choices(m):
+                    return self.send_json(400, {"error": "unknown context size"})
+                pref["ctx"] = data["ctx"]
+            if "mode" in data:
+                if data["mode"] not in ("fast", "images"):
+                    return self.send_json(400, {"error": "mode must be fast or images"})
+                pref["mode"] = data["mode"]
+            settings.setdefault("model_prefs", {})[m["id"]] = pref
             save_settings()
-            return self.send_json(200, {"ok": True, "model": models.describe(m, ctx)})
+            return self.send_json(200, {"ok": True, "model": models.describe(m, model_ctx(m), None, model_mode(m))})
         if op == "hf":
             try:
                 return self.send_json(200, models.hf_files(data.get("url")))

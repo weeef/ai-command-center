@@ -180,6 +180,17 @@ Vulkan / CPU). It checks every 12 hours.
 
 ## Picking and adding models
 
+**Qwen3.8 27B on a 16 GB card.** If `models\Qwen3.8-27B-GGUF\Qwen3.8-27B-UD-IQ3_S.gguf` (standard) and
+`models\Qwen3.8-27B-Uncensored-MTP-GGUF\Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-IQ3_XS.gguf` (uncensored) are
+present, *standard* and *uncensored* mean those. Otherwise they mean the Qwen3.6 files. A dense 27B model is only fast
+when all of it fits on the GPU: the ~3-bit quants do (about 75 t/s with MTP on an RTX 5080), and a 4-bit one that
+spills into RAM drops to about 12 t/s.
+
+**Images or speed.** Each card shows **images** or **text only**, plus **MTP fast** when multi-token prediction is
+on. llama.cpp can't run MTP and image input together, so models that have both get a **mode** switch on their card:
+*fast text (MTP)* or *images* (about 30% slower). If you send an image to a text-only model, it gets your text plus a
+note that an image was left out, instead of an error.
+
 Click the model name next to the **on** button in **1:llm** (or type `/models`). The picker lists every model in
 `models\` and tells you, for **your** PC, how each one will run:
 
