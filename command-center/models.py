@@ -48,7 +48,12 @@ TUNED = {
 }
 NICE = {ALIASES["standard"]: "Qwen3.6 35B · standard", ALIASES["uncensored"]: "Qwen3.6 35B · uncensored",
         "Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf": "Qwen3.6 35B · standard · fast text (MTP)",
-        "Qwen3.6-35B-A3B-uncensored-heretic-MTP-GGUF/Qwen3.6-35B-A3B-uncensored-heretic-Native-MTP-Preserved-Q5_K_M.gguf": "Qwen3.6 35B · uncensored · fast text (MTP)"}
+        "Qwen3.6-35B-A3B-uncensored-heretic-MTP-GGUF/Qwen3.6-35B-A3B-uncensored-heretic-Native-MTP-Preserved-Q5_K_M.gguf": "Qwen3.6 35B · uncensored · fast text (MTP)",
+        # Qwen3.8 27B (dense). On a 16 GB card only the 3-bit quants fit fully on the GPU; measured 2026-11-14 on a
+        # 5080 at 32K ctx with MTP: IQ3_S 75-77 t/s, IQ3_XXS ~57 t/s without MTP, IQ4_XS (split with RAM) 12 t/s.
+        "Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S.gguf": "Qwen3.8 27B · best fit (3-bit, MTP)",
+        "Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_XXS.gguf": "Qwen3.8 27B · smaller (3-bit XXS, MTP)",
+        "Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ4_XS.gguf": "Qwen3.8 27B · 4-bit (too big for 16 GB: slow)"}
 
 # ------------------------------------------------------------------ GGUF metadata
 _T = {0: "<B", 1: "<b", 2: "<H", 3: "<h", 4: "<I", 5: "<i", 6: "<f", 7: "<?", 10: "<Q", 11: "<q", 12: "<d"}
@@ -355,7 +360,10 @@ def command(m, ctx):
         moe = int(c.get(var) or dflt) + (3 if ctx > DEFAULT_CTX else 0)  # bigger KV cache: 3 more layers to RAM
         args += ["--fit", "off", "-ngl", c.get("NGL") or "99", "--n-cpu-moe", str(min(moe, m["layers"] or moe))]
     elif hw["vram_gb"]:
-        args += ["--fit", "on", "--fit-target", "1536"]
+        # A model that fits entirely on the GPU only gets there with a small reserve: with 1536 MiB, llama.cpp's
+        # fit moved a few layers of Qwen3.8 27B to RAM next to the desktop's ~3-4 GB and generation fell 77 -> 49 t/s.
+        target = "512" if plan(m, ctx, hw)["fit"] == "gpu" else "1536"
+        args += ["--fit", "on", "--fit-target", target]
     else:
         args += ["--fit", "off", "-ngl", "0"]
     ub = c.get("UB") or ("2048" if hw["vram_gb"] >= 12 else "512")
