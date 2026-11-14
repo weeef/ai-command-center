@@ -306,6 +306,13 @@ main{display:grid;grid-template-columns:432px 1fr;gap:14px;padding:6px 12px 12px
 .mcard select{background:var(--bg2);color:var(--fg);border:1px solid var(--border);font:inherit;font-size:11.5px;padding:2px 4px}
 .mcard .tag{font-size:10.5px;color:var(--bg);background:var(--ok);padding:1px 6px;border-radius:999px}
 .mcard .tag.next{background:var(--accent)}
+/* what a model can take: images or text only */
+.cap{font-size:10.5px;font-weight:normal;padding:0 6px;border-radius:999px;border:1px solid;line-height:16px;white-space:nowrap}
+.cap.vis{color:var(--ok);border-color:var(--ok)}
+.cap.txt{color:var(--warn,#d8a03a);border-color:var(--warn,#d8a03a)}
+.cap.mtp{color:var(--accent);border-color:var(--accent)}
+#modelPick .cap{margin-left:6px}
+#fileBtn.novis{opacity:.45;text-decoration:line-through}
 .mdadd{display:flex;gap:6px}
 .mdadd input{flex:1;min-width:0;background:var(--bg2);color:var(--fg);border:1px solid var(--border);font:inherit;padding:5px 8px;outline:none}
 .mdadd input:focus{border-color:var(--accent)}
@@ -681,7 +688,7 @@ body.remote #tags span[data-ws="2"]{display:none}
       </div>
       <div id="ctl">
         <button id="powerBtn" title="turn the selected model on or off">⏻ on</button>
-        <button id="modelPick" title="choose a model, change its context, or add new ones"><i class="fitdot"></i><span>model</span> ▾</button>
+        <button id="modelPick" title="choose a model, change its context, or add new ones"><i class="fitdot"></i><span>model</span><b class="cap" id="pickCap" hidden></b> ▾</button>
         <span id="ctlMsg"></span>
       </div>
     </section>
@@ -1142,6 +1149,7 @@ function uiState(){
 }
 function render(){
   if (!S) return;
+  visionUI();
   const m = S.model, st = uiState();
   $("state").textContent = st; $("state").className = "st-" + st;
   $("host").textContent = `${S.user}@${S.host}`;
@@ -1317,6 +1325,9 @@ function renderPick(){
   const b = $("modelPick"), m = libFind(selected);
   b.querySelector("span").textContent = m ? m.name : (mlib && !mlib.models.length ? "no models: add one" : "model");
   b.querySelector(".fitdot").className = "fitdot" + (m ? " fit-" + m.plan.fit : "");
+  const pc = $("pickCap"); pc.hidden = !m;
+  if (m) { pc.className = "cap " + (m.vision ? "vis" : "txt"); pc.textContent = m.vision ? "images" : "text only"; }
+  visionUI();
   b.title = m ? `${m.name} · ${m.quant} · ${m.size_gb} GB · ${kctx(m.ctx)} context\n${m.plan.note}\nclick to choose another model` : "choose a model";
 }
 function pickModel(id){
@@ -1324,6 +1335,22 @@ function pickModel(id){
   const on = S && S.target !== "laptop" && (S.model.state === "ON" || S.model.state === "ASLEEP");
   if (on && S.model.key !== id) modelAction("on", id);  // switch: stops the running one, starts this one
   render();
+}
+function capBadges(m){
+  return (m.vision ? `<span class="cap vis" title="can read images you attach">images</span>`
+                   : `<span class="cap txt" title="${m.mtp ? "fast-text MTP build: llama.cpp can't use MTP and images together" : "no vision projector (mmproj) for this model"}; attached images are left out">text only</span>`)
+    + (m.mtp ? `<span class="cap mtp" title="multi-token prediction: faster replies">MTP fast</span>` : "");
+}
+/* Does the model that will answer take images? The running one if a model is on, else the one selected. */
+function modelSees(){
+  if (S && S.target !== "laptop" && ["ON", "ASLEEP"].includes(S.model.state) && S.model.vision != null) return S.model.vision;
+  const m = libFind(selected); return m ? m.vision : true;
+}
+function visionUI(){
+  const b = $("fileBtn"); if (!b) return;
+  const sees = modelSees();
+  b.classList.toggle("novis", !sees);
+  b.title = sees ? "attach image" : "this model is text only and can't see images: pick one marked \"images\" in the model list";
 }
 function renderModelDlg(){
   if (!mlib) return;
@@ -1335,7 +1362,7 @@ function renderModelDlg(){
     const bits = [m.quant, m.size_gb + " GB", m.params, m.experts ? `MoE ${m.experts_used}/${m.experts} experts` : "dense",
       m.vision ? "images" : (m.mtp ? "fast text (MTP), no images" : "text only"), m.ctx_train ? kctx(m.ctx_train) + " max context" : ""].filter(Boolean);
     return `<div class="mcard ${m.id === selected ? "sel" : ""}" data-id="${esc(m.id)}" tabindex="0" role="button">
-      <div class="mn">${esc(m.name)}${m.id === running ? `<span class="tag">running</span>` : m.id === selected ? `<span class="tag next">selected</span>` : ""}</div>
+      <div class="mn">${esc(m.name)}${capBadges(m)}${m.id === running ? `<span class="tag">running</span>` : m.id === selected ? `<span class="tag next">selected</span>` : ""}</div>
       <div class="ms">${esc(bits.join(" · "))}</div>
       <div class="mside"><span class="fitb fit-${m.plan.fit}" title="needs ~${m.plan.need_gb} GB (weights ${m.plan.weights_gb} + context ${m.plan.kv_gb}); GPU budget ${m.plan.budget_gb} GB">${FITS[m.plan.fit]}</span>
         <label class="ms">context <select data-ctx="${esc(m.id)}">${m.ctx_choices.map(c => `<option value="${c}" ${c === m.ctx ? "selected" : ""}>${kctx(c)}</option>`).join("")}</select></label></div>
@@ -1500,6 +1527,16 @@ function command(t){
   }
 }
 
+/* A text-only model (e.g. a fast-text MTP one) rejects the whole request if any message has an image, even an old
+   one in a reopened chat: swap images for a short note so the chat keeps working. The saved chat keeps the images. */
+function forModel(content){
+  if (!Array.isArray(content) || !(S && S.model && S.model.vision === false)) return content;
+  const n = content.filter(p => p.type === "image_url").length;
+  const parts = content.filter(p => p.type !== "image_url");
+  if (n) parts.push({type: "text", text: `[${n} image${n > 1 ? "s" : ""} omitted: the current model has no image input]`});
+  return parts;
+}
+
 async function send(){
   if (chatBusy) { abortCtl && abortCtl.abort(); return; }
   const ta = $("prompt"), text = ta.value.trim();
@@ -1508,7 +1545,10 @@ async function send(){
   if (!S || !["ON","ASLEEP"].includes(S.model.state)) {
     return sys(S && S.model.state === "LOADING" ? "model is still loading, give it a moment." : "model is off. press ⏻ on, or type /on", true);
   }
-  if (pending.length && S.model.vision === false) sys("note: this model reports vision off, the image may be rejected.", true);
+  if (pending.length && S.model.vision === false) {
+    if (!text) return sys("this model has no image input (fast-text MTP models can't see images). Load a model with images on, or add a question to send the text only.", true);
+    sys("note: this model has no image input, so the image is left out and only your text is sent.", true);
+  }
   const imgs = pending.slice(); pending = []; renderAttach();
   ta.value = ""; autosize();
   addUser(text, imgs);
@@ -1528,7 +1568,7 @@ async function send(){
   const paint = () => { raf = 0; body.innerHTML = md(reply); if (reasoning) { think.hidden = false; tbody.textContent = reasoning; } scroll(); };
   try {
     const r = await fetch("/v1/chat/completions", {method:"POST", signal: abortCtl.signal, headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({model: S.model.id || "local", messages: history.map(h => ({role: h.role, content: h.content})), chat_id: chatId || undefined, stream: true, stream_options:{include_usage:true}})});
+      body: JSON.stringify({model: S.model.id || "local", messages: history.map(h => ({role: h.role, content: forModel(h.content)})), chat_id: chatId || undefined, stream: true, stream_options:{include_usage:true}})});
     try { memInfo = JSON.parse(r.headers.get("X-Memory") || "null"); } catch(e) { memInfo = null; }
     if (memInfo && memInfo.ids && memInfo.ids.length) flashMemories(memInfo.ids);
     if (!r.ok) {
@@ -2795,6 +2835,7 @@ function readImage(f){
   });
 }
 async function addFiles(files){
+  if (!modelSees()) sys("heads up: the current model is text only, so images won't be seen. Pick a model marked \"images\" (▾ model) to use pictures.", true);
   for (const f of files) {
     if (!f.type.startsWith("image/")) { sys(`skipped ${f.name}: not an image`, true); continue; }
     try { pending.push(await readImage(f)); } catch(e) { sys(`could not read ${f.name}`, true); }

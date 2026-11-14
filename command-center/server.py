@@ -564,6 +564,40 @@ def llama_stop_all(embedder_only=False):
     return True, "stopped", running
 
 
+_vision = {"t": 0.0, "v": True}
+
+
+def pc_has_vision():
+    """Whether the model on :8090 takes images (cached a few seconds). Fast-text MTP models run without --mmproj."""
+    if time.time() - _vision["t"] > 5:
+        try:
+            _, props = llama_get("/props")
+            _vision["v"] = bool(((props or {}).get("modalities") or {}).get("vision"))
+        except Exception:
+            _vision["v"] = True  # unknown: leave the request alone
+        _vision["t"] = time.time()
+    return _vision["v"]
+
+
+def strip_images(data):
+    """A text-only model rejects the whole request (HTTP 500) if any message has an image, even an old one.
+    Swap images for a short note instead. Only for this PC's model; returns how many were removed."""
+    msgs = data.get("messages")
+    if not isinstance(msgs, list) or pc_has_vision():
+        return 0
+    n = 0
+    for m in msgs:
+        c = m.get("content") if isinstance(m, dict) else None
+        if not isinstance(c, list):
+            continue
+        k = sum(1 for p in c if isinstance(p, dict) and p.get("type") in ("image_url", "input_image", "image"))
+        if k:
+            n += k
+            m["content"] = [p for p in c if not (isinstance(p, dict) and p.get("type") in ("image_url", "input_image", "image"))]
+            m["content"].append({"type": "text", "text": "[%d image%s omitted: the current model has no image input]" % (k, "s" if k > 1 else "")})
+    return n
+
+
 def llama_model_off():
     p = launch.get("proc")
     return not switching["on"] and not port_open() and (p is None or p.poll() is not None)
@@ -981,6 +1015,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 host, auth = PAIR, {}
             else:
                 host, auth = LLAMA, {"Authorization": "Bearer " + api_key()}
+                strip_images(data)
             tools = cloud.tools_for(settings) if data.get("stream") and not data.get("tools") else None
             if tools:
                 return self.tool_chat(data, host, auth, mem_info, tools)
@@ -1215,6 +1250,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self.send_json(502, {"error": {"message": "no laptop model listed by PAIR. Is the laptop on?"}})
             data["model"] = mid
             return self.proxy_chat(json.dumps(data).encode(), PAIR, {}, info, entry)
+        strip_images(data)
         return self.proxy_chat(json.dumps(data).encode(), LLAMA, {"Authorization": "Bearer " + api_key()}, info, entry)
 
     def cline_models(self, which):
