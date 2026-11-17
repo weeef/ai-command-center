@@ -142,6 +142,31 @@ starting a model.
 
 ---
 
+## Web access for the local model (optional, free)
+
+A connector that lets the local model use the web by itself, with no account and no cost:
+
+- **web_search**: asks a search engine and gets back titles, links and short excerpts.
+- **web_fetch**: opens one page and reads its text (a search result, or a link you paste into the chat).
+
+Turn it on in **6:set → web access**. In the chat you see each search (`🔎`) and each page it reads (`📄`), up to 6
+per reply.
+
+- **How dependable search is.** Without a key, searches go through the public pages of DuckDuckGo and Brave, which
+  only allow a few searches every few minutes; an engine that refuses is left alone for ten minutes and the other one
+  answers. For regular use, save a **search key** in the same box (Tavily or the Brave Search API; both have a free
+  plan): it is asked first and the public pages become the fallback. The key path is written from the services'
+  documentation and has not been run against a real key yet.
+- **What leaves your PC.** The search the model writes goes to the search engine, and a page request goes to the
+  site being read. Never the conversation or the memories.
+- **Safety.** Web pages can contain text aimed at the model. The connector never opens addresses on this PC, your
+  home network or your tailnet, and it only opens links that came from a search result, from a page it read, or
+  from the conversation, so a page can't talk the model into sending your chat somewhere inside a made-up link.
+  The model is also told to treat web text as information, not instructions.
+- With the connector on, the cloud provider below is no longer used for searching, only for `ask_cloud`.
+
+---
+
 ## Web search and a stronger cloud model (optional)
 
 Give your local model two tools it can use when it decides they help:
@@ -275,6 +300,7 @@ command-center\
   memory.py      long-term memory (recall, learning, embedding server, moving, import/export)
   importers.py   ChatGPT / Claude export readers
   cloud.py       optional web search / stronger-model tools (Claude, ChatGPT, Gemini)
+  webtool.py     the web connector: free web search and page reading as tools for the local model
   updater.py     update check and install (from this GitHub repo)
   llamaup.py     llama.cpp engine updates (official builds, checksum-verified, roll back)
   chats.py       saved chats
@@ -303,6 +329,8 @@ docs\review-report.md      what the last review pass measured, fixed and left op
 - Phone access is Tailscale-only, requires the login of the account this PC is signed in to, and reaches only the
   routes listed for the phone; everything else is PC-only.
 - Cloud tools are capped at 3 calls per reply, and an identical search within 15 minutes is answered from a cache.
+- The web connector (off by default) only opens public web addresses, and only links that were in the conversation or
+  in its own search results; it is capped at 6 calls per reply.
 - Your memories, chats and settings stay in files on your PC (the memory folder). Nothing is uploaded anywhere.
 
 ## Troubleshooting

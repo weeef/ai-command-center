@@ -73,7 +73,7 @@ def key(p):
 
 
 def set_key(p, value):
-    if p not in PROVIDERS:
+    if p not in PROVIDERS + ("search",):   # "search": the web connector's optional search key (webtool.py)
         return False
     d = _load()
     d.setdefault("keys", {})[p] = "".join(str(value or "").split())[:400]
@@ -218,7 +218,7 @@ def _gemini(model, prompt, search):
 CALL = {"anthropic": _anthropic, "openai": _openai, "gemini": _gemini}
 
 
-ARG = {"web_search": "query", "ask_cloud": "question"}
+ARG = {"web_search": "query", "ask_cloud": "question", "web_fetch": "url"}
 
 
 def parse_args(tool, raw):
@@ -258,7 +258,7 @@ def run(settings, tool, args):
 
     if not key(p):
         return fail("no %s API key set (6:set → cloud)" % NAMES[p])
-    if tool not in ARG:
+    if tool not in ("web_search", "ask_cloud"):
         return fail("unknown tool %s" % str(tool)[:40])
     if not (c["web_search"] if tool == "web_search" else c["ask_cloud"]):
         return fail("%s is turned off in 6:set" % tool)

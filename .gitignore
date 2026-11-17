@@ -28,6 +28,7 @@ command-center/*
 !command-center/models.py
 !command-center/importers.py
 !command-center/cloud.py
+!command-center/webtool.py
 !command-center/fsutil.py
 !command-center/tuner.py
 !command-center/updater.py

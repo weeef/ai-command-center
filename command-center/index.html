@@ -855,6 +855,7 @@ body.remote #tags span[data-ws="2"]{display:none}
     <section class="pane"><div class="title">appearance</div><div id="themePick" class="memloc" style="margin-top:0"></div></section>
     <section class="pane"><div class="title">updates <i>· from github</i></div><div id="updBox">loading…</div></section>
     <section class="pane"><div class="title">llama.cpp engine <i>· official builds</i></div><div id="lluBox">loading…</div></section>
+    <section class="pane"><div class="title">web access <i>· optional, free</i></div><div id="webBox">loading…</div></section>
     <section class="pane"><div class="title">cloud &amp; web search <i>· optional</i></div><div id="cloudBox">loading…</div></section>
     <section class="pane" id="memListPane"><div class="title">memories <i id="memCount"></i></div>
       <div class="memadd"><input id="memNew" maxlength="1000" placeholder="teach it something: e.g. I prefer metric units"><select id="memNewTopic"></select><button id="memAddBtn">remember</button></div>
@@ -2042,21 +2043,59 @@ function flashMemories(ids){
 loadGraph();
 
 /* ---------------- tools in chat ----------------
-   The server runs web_search / ask_cloud for the local model and streams {cc_tool} progress events. */
+   The server runs web_search / web_fetch / ask_cloud for the local model and streams {cc_tool} progress events. */
 function toolEvent(msg, t){
   let box = msg.querySelector(".tools");
   if (!box) { box = el("div", "tools"); msg.insertBefore(box, msg.children[1] || null); }
   let row = box.querySelector(`[data-tid="${CSS.escape(t.id)}"]`);
   if (!row) { row = el("div", "tool"); row.dataset.tid = t.id; box.appendChild(row); }
-  const what = t.name === "web_search" ? `searching the web: “${(t.args && t.args.query) || ""}”` : `asking ${t.provider || "the cloud model"}: “${((t.args && t.args.question) || "").slice(0, 140)}”`;
+  const a = t.args || {}, link = String(a.url || "").slice(0, 160);
+  const what = t.name === "web_search" ? `searching the web: “${a.query || ""}”` : t.name === "web_fetch" ? `reading ${link}` : `asking ${t.provider || "the cloud model"}: “${(a.question || "").slice(0, 140)}”`;
+  const icon = t.name === "web_search" ? "🔎 " : t.name === "web_fetch" ? "📄 " : "☁ ";
   row.className = "tool" + (t.status === "running" ? " run" : t.status === "error" ? " err" : "");
-  if (t.status === "running") { row.textContent = (t.name === "web_search" ? "🔎 " : "☁ ") + what + " …"; return; }
+  if (t.status === "running") { row.textContent = icon + what + " …"; return; }
   if (t.status === "error") { row.textContent = "✗ " + what + " · " + (t.error || "failed"); return; }
   const src = t.sources || [];
-  const head = (t.name === "web_search" ? "🔎 searched: “" + ((t.args && t.args.query) || "") + "”" : "☁ asked " + (t.provider || "the cloud model")) + (src.length ? ` · ${src.length} source${src.length === 1 ? "" : "s"}` : "");
+  if (t.name === "web_fetch" && src.length) { const s = src[0];
+    row.innerHTML = `📄 read: <a href="${esc(/^https?:\/\//.test(s.url) ? s.url : "#")}" target="_blank" rel="noopener noreferrer">${esc(s.title || s.url)}</a>`; return; }
+  const head = (t.name === "web_search" ? "🔎 searched: “" + (a.query || "") + "”" : icon + (t.name === "web_fetch" ? "read " + link : "asked " + (t.provider || "the cloud model"))) + (src.length ? ` · ${src.length} ${t.name === "web_search" ? "result" : "source"}${src.length === 1 ? "" : "s"}` : "");
   if (!src.length) { row.textContent = head; return; }
   row.innerHTML = `<details><summary>${esc(head)}</summary><ol>${src.map(s => `<li><a href="${esc(/^https?:\/\//.test(s.url) ? s.url : "#")}" target="_blank" rel="noopener noreferrer">${esc(s.title || s.url)}</a></li>`).join("")}</ol></details>`;
 }
+
+/* ---------------- 6:set → web access (the free connector: search + read pages, no key) ---------------- */
+let webSt = null;
+async function refreshWeb(){
+  try { webSt = await (await fetch("/api/connector", {cache:"no-store"})).json(); } catch(e) { return; }
+  const w = webSt, box = $("webBox"); if (!box) return;
+  if (box.contains(document.activeElement) && document.activeElement.tagName === "INPUT") return;  // don't wipe typing
+  box.innerHTML = `
+    <div class="shead"><span class="dot ${w.enabled ? "on" : ""}"></span>
+      <span class="big">${w.enabled ? "on" : "off"}</span><span class="grow"></span>
+      <button class="btn-main ${w.enabled ? "stop" : "go"}" id="wOn">${w.enabled ? "turn off" : "turn on"}</button></div>
+    <div class="hint" style="margin-top:0">Lets your local model search the web and read pages by itself. No account, no key, no cost. It decides when; you see each search and each page in the chat (up to ${w.max_calls} per reply). Only the search it writes goes to the search engine, and a page request goes to the site being read: never your chat or memories. It can't open addresses on this PC or your network, and only opens links from its search results or from your messages.</div>
+    <div class="kvt">
+      <span class="k">search</span><span class="v">${esc(w.engine)}${w.resting.length ? " · resting: " + esc(w.resting.join(", ")) : ""}</span><button id="wTest">test</button>
+      <span class="k">search key</span><span class="v">${w.key ? esc(w.key_engine) + " · saved (" + esc(w.key) + ")" : "none · optional"}</span>${w.key ? `<button id="wDelKey">remove</button>` : "<span></span>"}
+      <span class="k">read pages</span><span class="v">open a result or a link you paste, and read it in full</span><button class="tog ${w.fetch ? "on" : ""}" id="wFetch">${w.fetch ? "on" : "off"}</button>
+    </div>
+    <div class="ckey"><input id="wKey" type="password" autocomplete="off" placeholder="tvly-…  (tavily.com)  or a Brave Search API key"><button id="wSaveKey">save key</button></div>
+    <div class="hint">Without a key, searches use the public pages of DuckDuckGo and Brave, which only allow a few searches every few minutes; when one refuses it rests for ten minutes. A key (both services have a free plan) makes search dependable and is asked first.</div>
+    <div id="wMsg" class="hint"></div>`;
+}
+$("webBox").addEventListener("click", async e => {
+  const t = e.target, w = webSt; if (!w) return;
+  if (t.id === "wOn") { await postJSON("/api/connector/settings", {enabled: !w.enabled}); await refreshWeb(); return refreshCloud(); }
+  if (t.id === "wSaveKey" || t.id === "wDelKey") { const v = t.id === "wDelKey" ? "" : $("wKey").value.trim(); if (t.id === "wSaveKey" && !v) return;
+    await postJSON("/api/connector/key", {key: v}); document.activeElement.blur(); return refreshWeb(); }
+  if (t.id === "wFetch") { await postJSON("/api/connector/settings", {fetch: !w.fetch}); return refreshWeb(); }
+  if (t.id === "wTest") {
+    t.disabled = true; t.textContent = "testing…";
+    let j = {}; try { j = await (await fetch("/api/connector/test", {method:"POST", headers:{"Content-Type":"application/json"}, body: "{}"})).json(); } catch(err) {}
+    await refreshWeb();
+    const x = $("wMsg"); if (x) { x.textContent = j.msg || "test failed"; x.style.color = j.ok ? "var(--ok)" : "var(--crit)"; }
+  }
+});
 
 /* ---------------- 6:set → cloud & web search ---------------- */
 let cloudSt = null, cloudSel = null, cloudModels = {};
@@ -2084,7 +2123,7 @@ function renderCloud(){
     <div id="cMsg" class="hint"></div>
     <div class="kvt" style="margin-top:10px">
       <span class="k">use</span><span class="v">${N[c.provider]}${c.provider !== p ? ` (switch to ${N[p]} →)` : ""}</span>${c.provider !== p ? `<button id="cUse">use ${N[p]}</button>` : "<span></span>"}
-      <span class="k">web search</span><span class="v">look things up online</span><button class="tog ${c.web_search ? "on" : ""}" data-ctool="web_search">${c.web_search ? "on" : "off"}</button>
+      <span class="k">web search</span><span class="v">${c.connector ? "done by web access above, for free" : "look things up online"}</span>${c.connector ? "<span></span>" : `<button class="tog ${c.web_search ? "on" : ""}" data-ctool="web_search">${c.web_search ? "on" : "off"}</button>`}
       <span class="k">ask cloud</span><span class="v">hand hard questions to ${N[c.provider]}</span><button class="tog ${c.ask_cloud ? "on" : ""}" data-ctool="ask_cloud">${c.ask_cloud ? "on" : "off"}</button>
     </div>`;
 }
@@ -2999,7 +3038,7 @@ async function refreshWs(){
   try {
     if (ws === "2") renderCode(await (await fetch("/api/code", {cache:"no-store"})).json());
     if (ws === "3") renderWeb(await (await fetch("/api/web", {cache:"no-store"})).json());
-    if (ws === "6") { await refreshMem(); if (!cloudSt) refreshCloud(); refreshUpd(); refreshLlu(); }
+    if (ws === "6") { await refreshMem(); if (!cloudSt) refreshCloud(); if (!webSt) refreshWeb(); refreshUpd(); refreshLlu(); }
     if (ws === "4") await refreshTree();
     if (ws === "5") renderCline(await (await fetch("/api/clinecc", {cache:"no-store"})).json());
   } catch (e) {}
