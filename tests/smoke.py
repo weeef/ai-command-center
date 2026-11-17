@@ -287,7 +287,7 @@ def t_web():
              '<div class="content t-primary">about b</div></div>')
     check("web: Brave results are read", w.parse_brave(brave) == [{"title": "B page", "url": "https://b.org/q", "snippet": "about b"}], w.parse_brave(brave))
 
-    hop, w._via_curl = w._via_curl, lambda *a: (302, {"location": "http://127.0.0.1:8099/api/key"}, b"")
+    hop, w._via_curl = w._via_curl, lambda *a: (302, {"location": "http://127.0.0.1/api/key"}, b"")
     curl, w.CURL = w.CURL, "stub"
     try:
         r = w.fetch("https://1.1.1.1/")
