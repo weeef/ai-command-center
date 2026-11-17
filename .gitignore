@@ -16,6 +16,8 @@
 !docs/*.md
 !bench/
 !bench/*.py
+!tests/
+!tests/*.py
 !command-center/
 command-center/*
 !command-center/server.py

@@ -79,7 +79,7 @@ How it works: `command-center\memory.py`. SQLite with full-text search plus embe
 |---|---|
 | `MOE_STD`, `MOE_UNC` | how many of the model's expert layers stay in system RAM. **Lower = faster but more VRAM.** Each layer moved to the GPU costs ~0.46 GB (Q4) / ~0.56 GB (Q5). 40 = all in RAM (8 GB cards). |
 | `UB` | prompt batch size. 2048 reads long prompts (Cline, long chats) ~2.3x faster than 512 for ~1.5 GB VRAM. |
-| `SPEC` | `--spec-type ngram-mod` drafts repeated text, making code rewrites (what Cline does all day) ~2.4x faster. |
+| `SPEC` | `--spec-type ngram-mod` drafts repeated text, making code rewrites (what Cline does all day) 2.5-4x faster. The default drafts long runs (`n-min 16, n-max 256, n-match 16`). A `SPEC=` line in your own `llm-config.bat` overrides it. |
 | `THREADS`, `CACHE_RAM`, `NGL` | CPU threads, RAM for llama.cpp's prompt cache (MB), GPU layers (0 = CPU only). |
 
 If a model fails to start with an out-of-memory error, raise `MOE_*` by 2. If VRAM has room to spare (watch **usage**
@@ -98,6 +98,25 @@ in 1:llm while chatting), lower it by 1-2.
 
 Also measured: CPU threads (8/12/16) make no difference; every expert layer moved to the GPU adds ~2.5% writing
 speed; `UB 2048` costs ~1.5 GB VRAM. Writing speed is limited by system-RAM bandwidth for the experts kept in RAM.
+
+**Re-measured on 2026-11-11** with `benchench.py` (same PC and the standard Q4 model of that date, before Qwen3.8
+became the standard; about 2.8 GB of VRAM was already in use by the desktop, so these are not comparable with the
+table above row for row):
+
+| speculation | writing | rewriting a 2.9k-token file | peak VRAM |
+|---|---|---|---|
+| none | 79 tok/s | 74 tok/s | 15.4 GB |
+| `ngram-mod`, old defaults | 77 tok/s | 191 tok/s | 15.4-15.6 GB |
+| **`ngram-mod`, `n-min 16, n-max 256, n-match 16` (the default now)** | 76 tok/s | **292 tok/s** | 15.1 GB |
+
+One file and one task were measured, and run-to-run noise is about ±4 tok/s on writing. In the same run: thread
+count, pinning to the V-cache cores, process priority, polling, an f16 KV cache and a smaller context made no
+difference; `-ub 4096` read prompts ~30% faster but needs VRAM that is already tight. With a desktop using 2.8 GB,
+`MOE 23` leaves under 1 GB of VRAM spare, so use 24 if other GPU apps are open.
+
+**Checking a change:** `python benchench.py` measures speed (it starts its own llama-server on port 8190);
+`python tests\smoke.py` checks the command center's request guard, phone rules, key handling and importers without
+starting a model.
 
 ---
 
