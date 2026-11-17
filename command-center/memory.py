@@ -42,8 +42,13 @@ EMBED_PORT = 8091
 NOWIN = 0x08000000
 QUERY_INSTRUCT = ("Instruct: Given a message from the user, retrieve memories about them and earlier conversation "
                   "snippets that help answer it\nQuery: ")
-# Scores are cosine similarity for the embedding model. Below these, a match is noise.
-MEM_MIN, CHUNK_MIN = 0.36, 0.45
+# Scores are cosine similarity for the embedding model. Below these, a match is noise. The values come from
+# bench\memeval.py (Qwen3-Embedding-0.6B): at 0.40 every memory a question asks about is still found, while
+# unrelated memories per question drop from 1.0 (at the old 0.36) to 0.3. Re-run it before changing them.
+MEM_MIN, CHUNK_MIN = 0.40, 0.45
+# Two sentences this similar say the same thing (rewordings measure 0.86-0.97, different facts 0.73 at most), so
+# the new one replaces the old one. The old 0.93 let most rewordings through as duplicates.
+DUP_MIN = 0.85
 MAX_BLOCK = 6000  # characters (~1,500 tokens) of recalled memory per request, at most
 README = """This folder is the long-term memory of the local AI command center.
 
@@ -859,7 +864,7 @@ class Memory:
         qv = self.embedder.embed([text]) if self.embedder.ready() else None
         if qv:
             for mid, s in self.store.similar("m", self.embedder.name, qv[0], 1):
-                if s >= 0.93:
+                if s >= DUP_MIN:
                     self.store.update(mid, text=text)
                     return mid
         mid = self.store.add(text, topic, source, pinned)

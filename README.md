@@ -115,7 +115,7 @@ difference; `-ub 4096` read prompts ~30% faster but needs VRAM that is already t
 `MOE 23` leaves under 1 GB of VRAM spare, so use 24 if other GPU apps are open.
 
 **Checking a change:** `python bench\bench.py` measures speed (it starts its own llama-server on port 8190);
-`python tests\smoke.py` checks the command center's request guard, phone rules, key handling and importers without
+`python bench\memeval.py` measures memory recall on a fixed, invented set of memories and questions (run it before changing the thresholds in `memory.py`); `python tests\smoke.py` checks the command center's request guard, phone rules, key handling and importers without
 starting a model.
 
 ---
