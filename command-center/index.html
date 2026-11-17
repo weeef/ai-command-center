@@ -2080,7 +2080,7 @@ async function refreshWeb(){
       <span class="k">read pages</span><span class="v">open a result or a link you paste, and read it in full</span><button class="tog ${w.fetch ? "on" : ""}" id="wFetch">${w.fetch ? "on" : "off"}</button>
     </div>
     <div class="ckey"><input id="wKey" type="password" autocomplete="off" placeholder="tvly-…  (tavily.com)  or a Brave Search API key"><button id="wSaveKey">save key</button></div>
-    <div class="hint">Without a key, searches use the public pages of DuckDuckGo and Brave, which only allow a few searches every few minutes; when one refuses it rests for ten minutes. A key (both services have a free plan) makes search dependable and is asked first.</div>
+    <div class="hint">Without a key, searches use the public pages of DuckDuckGo and Brave, which can refuse when asked too often; one that refuses rests for ten minutes while the other answers. A key from Tavily or the Brave Search API is asked first and doesn't have that limit.</div>
     <div id="wMsg" class="hint"></div>`;
 }
 $("webBox").addEventListener("click", async e => {

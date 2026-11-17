@@ -5,10 +5,10 @@ Off by default (6:set -> web access). The local model decides when to use it (to
   web_search  asks a public search engine's plain HTML page and returns titles, links and snippets
   web_fetch   downloads one page and returns its readable text
 
-Search engines limit how often a program may ask without an account: DuckDuckGo and Brave each allow only a
-few searches every few minutes. When one says "slow down" it is left alone for ten minutes and the other
-answers. For dependable search, save a search key in 6:set (Tavily or Brave Search API, both have a free
-plan): it is asked first and the public pages become the fallback. The key lives in secrets.json.
+Search engines limit how often a program may ask without an account. DuckDuckGo and Brave take turns; when
+one says "slow down" it is left alone for ten minutes and the other answers. A search key saved in 6:set
+(Tavily or Brave Search API) is asked first and the public pages become the fallback. The key lives in
+secrets.json.
 
 What leaves this PC: the search query the model wrote goes to the search engine, and a page request goes to
 the site being read. The conversation and the memories are never sent.
@@ -27,8 +27,10 @@ import html.parser
 import http.client
 import ipaddress
 import re
+import shutil
 import socket
 import ssl
+import subprocess
 import threading
 import time
 import json
@@ -51,6 +53,9 @@ ARG = {"web_search": "query", "web_fetch": "url"}
 _cache = {}              # (tool, input) -> (time, result)
 _lock = threading.Lock()
 _CTX = ssl.create_default_context()
+# Search engines and many sites turn away Python's own HTTPS client on sight, but not curl, which ships with
+# Windows 10 and later. So pages are downloaded with curl when it is there, and with Python otherwise.
+CURL = shutil.which("curl")
 
 TOOLS = [
     {"type": "function", "function": {
@@ -178,45 +183,86 @@ class _HTTPS(http.client.HTTPSConnection):
         self.sock = _CTX.wrap_socket(socket.create_connection((self._ip, self.port), self.timeout), server_hostname=self.host)
 
 
+def _via_python(scheme, host, port, path, ip, accept):
+    """One GET with Python's client. -> (status, {header: value}, body)"""
+    c = (_HTTPS if scheme == "https" else _HTTP)(host, port, ip)
+    try:
+        c.request("GET", path, headers={"User-Agent": UA, "Accept": accept, "Accept-Language": "en-US,en;q=0.8",
+                                        "Accept-Encoding": "gzip, deflate"})
+        r = c.getresponse()
+        hdr = {k.lower(): v for k, v in r.getheaders()}
+        if r.status in (301, 302, 303, 307, 308):
+            return r.status, hdr, b""
+        raw, deadline = b"", time.time() + 30
+        while len(raw) < MAX_BYTES:
+            if time.time() > deadline:
+                raise Refused("the site took too long to answer")
+            b = r.read(min(65536, MAX_BYTES - len(raw)))
+            if not b:
+                break
+            raw += b
+        enc = hdr.get("content-encoding", "").lower()
+        try:
+            if "gzip" in enc:
+                raw = zlib.decompressobj(31).decompress(raw, MAX_BYTES * 4)
+            elif "deflate" in enc:
+                try:
+                    raw = zlib.decompressobj().decompress(raw, MAX_BYTES * 4)
+                except zlib.error:
+                    raw = zlib.decompressobj(-15).decompress(raw, MAX_BYTES * 4)
+        except (zlib.error, gzip.BadGzipFile):
+            pass
+        return r.status, hdr, raw
+    finally:
+        c.close()
+
+
+def _via_curl(scheme, host, port, path, ip, accept):
+    """One GET with curl, connecting to the address that was checked (--resolve). -> (status, {header: value}, body)"""
+    cmd = [CURL, "-q", "-sS", "-i", "--compressed", "--max-time", "30", "--connect-timeout", str(TIMEOUT),
+           "--proto", "=http,https", "--max-redirs", "0", "--resolve", "%s:%d:%s" % (host, port, "[%s]" % ip if ":" in ip else ip),
+           "-A", UA, "-H", "Accept: " + accept, "-H", "Accept-Language: en-US,en;q=0.8", "%s://%s%s" % (scheme, host, path)]
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
+                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    try:
+        out = p.stdout.read(MAX_BYTES + 65536)   # more than this is cut off: nobody needs a 2 MB page
+    finally:
+        if p.poll() is None:
+            p.kill()
+        p.stdout.close()
+        rc = p.wait()
+    while True:   # headers first; a "100 Continue" or "103 Early Hints" block may come before the real ones
+        head, sep, out = out.partition(b"\r\n\r\n")
+        lines = head.decode("latin-1").split("\r\n")
+        m = re.match(r"HTTP/[\d.]+ (\d{3})", lines[0])
+        if not m:
+            if rc in (35, 51, 58, 59, 60, 77, 90, 91):
+                raise ssl.SSLError("curl %d" % rc)
+            if rc == 28:
+                raise Refused("the site took too long to answer")
+            raise OSError("curl gave up (%d)" % rc)
+        if not m.group(1).startswith("1") or not sep:
+            break
+    hdr = {}
+    for ln in lines[1:]:
+        k, _, v = ln.partition(":")
+        hdr[k.strip().lower()] = v.strip()
+    return int(m.group(1)), hdr, out[:MAX_BYTES]
+
+
 def _get(url, accept="text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5"):
     """GET a public page, following up to 5 redirects (each one checked again). -> (status, content type, bytes, final url)"""
-    deadline = time.time() + 30
     for _ in range(6):
         scheme, host, port, path, ip = check_url(url)
-        c = (_HTTPS if scheme == "https" else _HTTP)(host, port, ip)
-        try:
-            c.request("GET", path, headers={"User-Agent": UA, "Accept": accept, "Accept-Language": "en-US,en;q=0.8",
-                                            "Accept-Encoding": "gzip, deflate"})
-            r = c.getresponse()
-            if r.status in (301, 302, 303, 307, 308) and r.getheader("Location"):
-                url = urllib.parse.urljoin(url, r.getheader("Location"))
-                continue
-            ctype = (r.getheader("Content-Type") or "").lower()
-            kind = ctype.split(";")[0].strip()
-            if r.status == 200 and kind and not (kind.startswith("text/") or kind.endswith(("json", "xml"))):
-                raise Refused("that link is a %s file, not a page of text" % kind[:40])
-            raw = b""
-            while len(raw) < MAX_BYTES:
-                if time.time() > deadline:
-                    raise Refused("the site took too long to answer")
-                b = r.read(min(65536, MAX_BYTES - len(raw)))
-                if not b:
-                    break
-                raw += b
-            enc = (r.getheader("Content-Encoding") or "").lower()
-            try:
-                if "gzip" in enc:
-                    raw = zlib.decompressobj(31).decompress(raw, MAX_BYTES * 4)
-                elif "deflate" in enc:
-                    try:
-                        raw = zlib.decompressobj().decompress(raw, MAX_BYTES * 4)
-                    except zlib.error:
-                        raw = zlib.decompressobj(-15).decompress(raw, MAX_BYTES * 4)
-            except (zlib.error, gzip.BadGzipFile):
-                pass
-            return r.status, ctype, raw, url
-        finally:
-            c.close()
+        st, hdr, raw = (_via_curl if CURL else _via_python)(scheme, host, port, path, ip, accept)
+        if st in (301, 302, 303, 307, 308) and hdr.get("location"):
+            url = urllib.parse.urljoin(url, hdr["location"])
+            continue
+        ctype = hdr.get("content-type", "").lower()
+        kind = ctype.split(";")[0].strip()
+        if st == 200 and kind and not (kind.startswith("text/") or kind.endswith(("json", "xml"))):
+            raise Refused("that link is a %s file, not a page of text" % kind[:40])
+        return st, ctype, raw, url
     raise Refused("too many redirects")
 
 

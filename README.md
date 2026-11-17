@@ -152,11 +152,12 @@ A connector that lets the local model use the web by itself, with no account and
 Turn it on in **6:set → web access**. In the chat you see each search (`🔎`) and each page it reads (`📄`), up to 6
 per reply.
 
-- **How dependable search is.** Without a key, searches go through the public pages of DuckDuckGo and Brave, which
-  only allow a few searches every few minutes; an engine that refuses is left alone for ten minutes and the other one
-  answers. For regular use, save a **search key** in the same box (Tavily or the Brave Search API; both have a free
-  plan): it is asked first and the public pages become the fallback. The key path is written from the services'
-  documentation and has not been run against a real key yet.
+- **How dependable search is.** Without a key, searches go through the public pages of DuckDuckGo and Brave, taking
+  turns. They can refuse a program that asks too often; one that refuses is left alone for ten minutes while the
+  other answers. If that gets in the way, save a **search key** in the same box (Tavily or the Brave Search API):
+  it is asked first and the public pages become the fallback. The key path has not been run against a real key yet.
+- Pages are downloaded with `curl`, which ships with Windows 10 and later, because search engines and many sites
+  turn away Python's own client. Without curl it falls back to Python and search will mostly be refused.
 - **What leaves your PC.** The search the model writes goes to the search engine, and a page request goes to the
   site being read. Never the conversation or the memories.
 - **Safety.** Web pages can contain text aimed at the model. The connector never opens addresses on this PC, your

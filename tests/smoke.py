@@ -287,6 +287,14 @@ def t_web():
              '<div class="content t-primary">about b</div></div>')
     check("web: Brave results are read", w.parse_brave(brave) == [{"title": "B page", "url": "https://b.org/q", "snippet": "about b"}], w.parse_brave(brave))
 
+    hop, w._via_curl = w._via_curl, lambda *a: (302, {"location": "http://127.0.0.1:8099/api/key"}, b"")
+    curl, w.CURL = w.CURL, "stub"
+    try:
+        r = w.fetch("https://1.1.1.1/")
+        check("web: a public page that redirects to this PC is not followed", r[0] is False and "private network" in r[1], r)
+    finally:
+        w._via_curl, w.CURL = hop, curl
+
     on, got = {"web": {"enabled": True}}, []
     real = w.search, w.fetch
     w.search = lambda q: (True, [{"title": "A", "url": "https://a.org/p", "snippet": "s"}], "Stub")
