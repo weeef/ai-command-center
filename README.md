@@ -124,7 +124,8 @@ for any GGUF, not only the built-in models.
 
 - **What is tried:** how much of the model sits on the GPU (llama.cpp's own fit with different VRAM reserves, and
   for mixture-of-experts models the number of expert layers kept in RAM) and the prompt batch size.
-- **How it decides:** writing speed first. A change has to be at least 3% faster to replace the default, and of
+- **How it decides:** writing speed first. A change has to be at least 3% faster to replace the default, a setting
+  that leaves less than 0.6 GB of VRAM free is never chosen, and of
   two near-equal settings the one using less VRAM wins, because a model that touches the VRAM limit slows to a crawl.
   The default is measured twice (first and last), so a slow first load can't make everything else look better.
 - **When it runs again:** a result belongs to one model file, context size, mode (fast text / images) and GPU.

@@ -29,7 +29,8 @@ PROFILES = os.path.join(HERE, "tuning.json")
 LOG = os.path.join(HERE, "tune.log")
 PORT = 8191                 # trial servers; 8090 is the model, 8091/8192 embeddings, 8190 bench.py
 NOWIN = 0x08000000
-HEADROOM_GB = 0.4           # a trial that leaves less VRAM free than this is not chosen: the desktop needs room to breathe
+HEADROOM_GB = 0.6           # a trial leaving less VRAM free than this is never chosen: on a 16 GB card speed halves
+                            # once use passes ~15.4 GB (Windows starts paging VRAM), so the edge is kept clear
 WORTH = 1.03                # a change has to be at least 3% faster to replace the default (below that it is noise)
 
 S = {"running": False, "model": None, "msg": "", "step": 0, "of": 0, "cancel": False, "proc": None}
@@ -294,7 +295,8 @@ def choose(base, trials, hw):
     if cands:
         top = max(r["tg"] for r in cands)
         if top > base["tg"] * WORTH:
-            near = [r for r in cands if r["tg"] >= top / WORTH]
+            # ...but whatever is picked must itself beat the default by 3%, or the default stays
+            near = [r for r in cands if r["tg"] >= top / WORTH and r["tg"] > base["tg"] * WORTH]
             best = min(near, key=lambda r: (r["vram_gb"] if r["vram_gb"] is not None else 99.0, -r["tg"]))
     place = best
     for r in trials:   # batch size, measured on top of the chosen placement

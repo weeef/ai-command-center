@@ -246,8 +246,10 @@ def t_tuner():
     check("tuner: a 10% faster placement wins", tuner.choose(base, [r({"moe": 20}, 88, 2000, 15.2)], hw)["tune"] == {"moe": 20})
     check("tuner: faster but out of VRAM headroom loses", tuner.choose(base, [r({"moe": 18}, 95, 2000, 15.8)], hw)["tune"] == {})
     check("tuner: a trial that didn't load loses", tuner.choose(base, [r({"moe": 17}, 0, 0, 15.9, ok=False)], hw)["tune"] == {})
-    two = [r({"moe": 20}, 88, 2000, 15.4), r({"moe": 21}, 87, 2000, 14.8)]
+    two = [r({"moe": 20}, 88, 2000, 15.3), r({"moe": 21}, 87, 2000, 14.8)]
     check("tuner: of two near-equal placements the leaner one wins", tuner.choose(base, two, hw)["tune"] == {"moe": 21})
+    edge = [r({"moe": 22}, 82, 2000, 15.1), r({"moe": 21}, 84, 2000, 15.5)]
+    check("tuner: the leaner near-tie must itself beat the default, and the edge of VRAM is off limits", tuner.choose(base, edge, hw)["tune"] == {})
     check("tuner: a batch size that reads faster wins", tuner.choose(base, [r({"ub": 4096}, 80, 2600, 15.3)], hw)["tune"] == {"ub": 4096})
     check("tuner: a batch size that slows writing loses", tuner.choose(base, [r({"ub": 4096}, 43, 2600, 15.2)], hw)["tune"] == {})
     check("tuner: same speed with 0.7 GB less VRAM wins", tuner.choose(base, [r({"ub": 1024}, 81, 2010, 14.2)], hw)["tune"] == {"ub": 1024})
