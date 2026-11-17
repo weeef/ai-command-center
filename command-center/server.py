@@ -729,12 +729,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def guard(self):
         """Local window: Host is 127.0.0.1/localhost. Phone: Host is this PC's tailnet name, which only reaches us
         through `tailscale serve` (it binds nothing public); serve stamps Tailscale-User-Login on requests from
-        the owner's signed-in devices, so anything without it is refused."""
+        signed-in devices, and that login must be this PC's own Tailscale user (or one listed in settings.json ->
+        "tailscale_allow"), so a device someone else shared into the tailnet gets nothing."""
         host = self.headers.get("Host", "").lower()
         self.remote = False
         if host not in ALLOWED_HOSTS:
-            dns = workspaces.tailnet_dns()
-            if not dns or host.split(":")[0] != dns or not self.headers.get("Tailscale-User-Login"):
+            dns, owner = workspaces.tailnet_identity()
+            login = (self.headers.get("Tailscale-User-Login") or "").strip().lower()
+            allowed = {owner} | {str(x).lower() for x in settings.get("tailscale_allow") or []} if owner else None
+            if not dns or host.split(":")[0] != dns or not login or (allowed is not None and login not in allowed):
                 self.send_json(403, {"error": "bad host"})
                 return False
             self.remote = True
@@ -742,6 +745,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if origin is not None and origin not in ALLOWED_ORIGINS and not (self.remote and origin.lower() == "https://" + host.split(":")[0]):
             self.send_json(403, {"error": "bad origin"})
             return False
+        # Browsers label where a request comes from. Another site (or another local port) may only navigate to
+        # the page itself; it may not call the API or load anything else, even with a "simple" request that
+        # carries no Origin header.
+        site = self.headers.get("Sec-Fetch-Site")
+        if site not in (None, "same-origin", "none"):
+            page = self.command == "GET" and self.path.split("?", 1)[0] in ("/", "/index.html")
+            if not (page and self.headers.get("Sec-Fetch-Mode") == "navigate"):
+                self.send_json(403, {"error": "cross-site request"})
+                return False
         if not self.remote:
             touch()  # only the PC window keeps the app alive; the phone works while it's open
         return True
@@ -874,7 +886,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif path == "/api/code":
             self.send_json(200, workspaces.code_info(settings, model_info(None), laptop_info(), mask_key(api_key())))
         elif path == "/api/web":
-            w = dict(workspaces.web_info("" if self.remote else mask_key(api_key()), model_info(None)))
+            w = dict(workspaces.web_info("", model_info(None)), api_key="" if self.remote else mask_key(api_key()))   # web_info caches: set the key here
             self.send_json(200, dict(w, remote=self.remote))
         elif path == "/api/cline":
             if target["v"] == "laptop":
