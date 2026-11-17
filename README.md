@@ -99,7 +99,7 @@ in 1:llm while chatting), lower it by 1-2.
 Also measured: CPU threads (8/12/16) make no difference; every expert layer moved to the GPU adds ~2.5% writing
 speed; `UB 2048` costs ~1.5 GB VRAM. Writing speed is limited by system-RAM bandwidth for the experts kept in RAM.
 
-**Re-measured on 2026-11-11** with `benchench.py` (same PC and the standard Q4 model of that date, before Qwen3.8
+**Re-measured on 2026-11-11** with `bench\bench.py` (same PC and the standard Q4 model of that date, before Qwen3.8
 became the standard; about 2.8 GB of VRAM was already in use by the desktop, so these are not comparable with the
 table above row for row):
 
@@ -114,7 +114,7 @@ count, pinning to the V-cache cores, process priority, polling, an f16 KV cache 
 difference; `-ub 4096` read prompts ~30% faster but needs VRAM that is already tight. With a desktop using 2.8 GB,
 `MOE 23` leaves under 1 GB of VRAM spare, so use 24 if other GPU apps are open.
 
-**Checking a change:** `python benchench.py` measures speed (it starts its own llama-server on port 8190);
+**Checking a change:** `python bench\bench.py` measures speed (it starts its own llama-server on port 8190);
 `python tests\smoke.py` checks the command center's request guard, phone rules, key handling and importers without
 starting a model.
 
