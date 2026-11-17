@@ -758,14 +758,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
             touch()  # only the PC window keeps the app alive; the phone works while it's open
         return True
 
-    # From the phone: chat, saved chats, model on/off, run-on target and stats. Not VS Code, not the API key,
-    # and not phone access itself (turning that off from the phone would lock the phone out).
-    REMOTE_BLOCKED = ("/api/code", "/api/cline", "/api/web/serve", "/api/memory/location", "/api/memory/import",
-                      "/api/memory/import-file", "/api/clinecc", "/cline", "/api/cloud", "/api/update", "/api/llama-update",
-                      "/api/key", "/api/models/hf", "/api/models/download", "/api/models/cancel", "/api/models/open")
+    # Everything is PC-only unless it is listed here, so a route added later is never open to the phone by accident.
+    # From the phone: chat, saved chats, memory, model on/off, run-on target and stats.
+    REMOTE_ALLOWED = ("/", "/index.html", "/fonts", "/api/ping", "/api/stats", "/api/memory", "/api/models", "/api/model",
+                      "/api/tokens", "/api/chats", "/api/web", "/api/target", "/v1/chat/completions")
+    # ...except these, inside the allowed groups: moving or importing memory, downloading models, and phone access
+    # itself (turning that off from the phone would lock the phone out).
+    REMOTE_BLOCKED = ("/api/web/serve", "/api/memory/location", "/api/memory/import", "/api/memory/import-file",
+                      "/api/models/hf", "/api/models/download", "/api/models/cancel", "/api/models/open")
 
     def remote_blocked(self, path):
-        if self.remote and any(path == p or path.startswith(p + "/") for p in self.REMOTE_BLOCKED):
+        def within(group):
+            return any(path == p or path.startswith(p + "/") for p in group)
+        if self.remote and (not within(self.REMOTE_ALLOWED) or within(self.REMOTE_BLOCKED)):
             self.send_json(403, {"error": "only available on the PC"})
             return True
         return False
