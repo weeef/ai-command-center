@@ -106,6 +106,22 @@ def log_error(where):
         pass
 
 
+def mask_key(k):
+    return ("\u2022" * 8 + k[-4:]) if k else ""
+
+
+def copy_to_clipboard(text):
+    """Put text on the Windows clipboard from here, so a secret can be copied without the page ever holding it."""
+    try:
+        data = text.encode("ascii")
+    except UnicodeEncodeError:
+        data = b"\xff\xfe" + text.encode("utf-16-le")
+    try:
+        return subprocess.run(["clip"], input=data, timeout=5, creationflags=NOWIN).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def touch():
     global last_request
     last_request = time.time()
@@ -734,7 +750,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     # and not phone access itself (turning that off from the phone would lock the phone out).
     REMOTE_BLOCKED = ("/api/code", "/api/cline", "/api/web/serve", "/api/memory/location", "/api/memory/import",
                       "/api/memory/import-file", "/api/clinecc", "/cline", "/api/cloud", "/api/update", "/api/llama-update",
-                      "/api/models/hf", "/api/models/download", "/api/models/cancel", "/api/models/open")
+                      "/api/key", "/api/models/hf", "/api/models/download", "/api/models/cancel", "/api/models/open")
 
     def remote_blocked(self, path):
         if self.remote and any(path == p or path.startswith(p + "/") for p in self.REMOTE_BLOCKED):
@@ -856,11 +872,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             c = chats.get_chat(path[len("/api/chats/"):])
             self.send_json(200 if c else 404, c or {"error": "no such chat"})
         elif path == "/api/code":
-            self.send_json(200, workspaces.code_info(settings, model_info(None), laptop_info(), api_key()))
+            self.send_json(200, workspaces.code_info(settings, model_info(None), laptop_info(), mask_key(api_key())))
         elif path == "/api/web":
-            w = dict(workspaces.web_info(api_key(), model_info(None)))
-            if self.remote:
-                w["api_key"] = ""
+            w = dict(workspaces.web_info("" if self.remote else mask_key(api_key()), model_info(None)))
             self.send_json(200, dict(w, remote=self.remote))
         elif path == "/api/cline":
             if target["v"] == "laptop":
@@ -868,7 +882,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                      "base_url": workspaces.cline_url("laptop", workspaces.ROUTE["laptop"]), "api_key": "any"})
             else:
                 self.send_json(200, {"provider": "OpenAI Compatible", "target": "local",
-                                     "base_url": workspaces.cline_url("pc", workspaces.ROUTE["pc"]), "api_key": api_key()})
+                                     "base_url": workspaces.cline_url("pc", workspaces.ROUTE["pc"]), "api_key": mask_key(api_key())})
         else:
             self.send_json(404, {"error": "not found"})
 
@@ -901,6 +915,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if not isinstance(data, dict):
             return self.send_json(400, {"error": "expected a JSON object"})
+        if path == "/api/key/copy":   # the page only ever sees a masked key; the real one goes straight to the clipboard
+            k = api_key()
+            ok = bool(k) and copy_to_clipboard(k)
+            return self.send_json(200 if ok else 500, {"ok": ok, "msg": "copied" if ok else "no key set" if not k else "couldn't reach the clipboard"})
         if path.startswith("/api/memory/"):
             return self.memory_post(path[len("/api/memory/"):], data)
         if path.startswith("/api/models/"):

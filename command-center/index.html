@@ -1435,13 +1435,13 @@ function resolveModel(a){
 }
 
 /* ---------------- cline pane ---------------- */
-let clineKey = "";
+let clineLaptop = false;
 async function loadCline(){
   try {
     const j = await (await fetch("/api/cline", {cache:"no-store"})).json();
-    $("cProv").textContent = j.provider; $("cUrl").textContent = j.base_url; clineKey = j.api_key || "";
+    $("cProv").textContent = j.provider; $("cUrl").textContent = j.base_url; clineLaptop = j.target === "laptop";
     $("cKeyMask").textContent = j.target === "laptop" ? "anything (PAIR has no key)"
-      : clineKey ? clineKey.slice(0,4) + "•".repeat(Math.max(4, clineKey.length-8)) + clineKey.slice(-4) : "(none)";
+      : j.api_key || "(none)";
   } catch(e){}
 }
 async function copyText(t, btn){
@@ -1450,7 +1450,14 @@ async function copyText(t, btn){
   if (btn){ const o = btn.textContent; btn.textContent = "ok"; setTimeout(() => btn.textContent = o, 900); }
 }
 document.querySelectorAll("[data-copy]").forEach(b => b.onclick = () => { const e = $(b.dataset.copy); copyText(e.dataset.full || e.textContent, b); });
-$("cKeyBtn").onclick = e => copyText(clineKey, e.currentTarget);
+// the real key never reaches the page: the server puts it on the clipboard itself
+async function copyKey(btn){
+  let ok = false;
+  try { ok = (await (await fetch("/api/key/copy", {method:"POST", headers:{"Content-Type":"application/json"}, body:"{}"})).json()).ok; } catch(e){}
+  if (btn){ const o = btn.textContent; btn.textContent = ok ? "ok" : "failed"; setTimeout(() => btn.textContent = o, 900); }
+}
+const keyRow = masked => `<span class="k">api key</span><span class="v">${esc(masked || "(none)")}</span><button class="cpk">copy</button>`;
+$("cKeyBtn").onclick = e => clineLaptop ? copyText("any", e.currentTarget) : copyKey(e.currentTarget);
 
 /* ---------------- markdown (escape first) ---------------- */
 function esc(s){ return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
@@ -2925,7 +2932,7 @@ function flash(el, text, bad){ if (!el) return; el.textContent = text; el.style.
 function copyRow(label, value, display){
   return `<span class="k">${esc(label)}</span><span class="v" title="${esc(value)}">${esc(display ?? value)}</span><button class="cpv" data-v="${esc(value)}">copy</button>`;
 }
-document.addEventListener("click", e => { const b = e.target.closest(".cpv"); if (b) copyText(b.dataset.v, b); });
+document.addEventListener("click", e => { const b = e.target.closest(".cpv"); if (b) copyText(b.dataset.v, b); const k = e.target.closest(".cpk"); if (k) copyKey(k); });
 const stateDot = st => st === "ON" ? "on" : st === "LOADING" || st === "ASLEEP" ? "warn" : "";
 
 /* 2:code */
@@ -2936,7 +2943,6 @@ function renderCode(d){
     const s = d.setups[k], m = s.model || {}, el = $("setup-" + k).querySelector(".sbody");
     const usable = k === "pc" ? d.installed : d.installed && d.laptop_setup;
     const mstate = m.state || "OFF";
-    const masked = k === "pc" && s.cline.api_key ? s.cline.api_key.slice(0,4) + "•".repeat(12) + s.cline.api_key.slice(-4) : s.cline.api_key;
     el.innerHTML = `
       <div class="shead"><span class="dot ${s.running ? "on" : ""}"></span><span class="big">${esc(s.label)}</span>
         <span class="sub">${s.running ? "running" : "not running"}</span><span class="grow"></span>
@@ -2953,7 +2959,7 @@ function renderCode(d){
       <div class="kvt">
         ${copyRow("provider", s.cline.provider)}
         ${copyRow("base url", s.cline.base_url)}
-        ${copyRow("api key", s.cline.api_key, masked)}
+        ${k === "pc" ? keyRow(s.cline.api_key) : copyRow("api key", s.cline.api_key)}
         ${copyRow("model id", s.cline.model_id, String(s.cline.model_id).split(/[\\/]/).pop())}
       </div>
       ${mstate === "OFF" ? `<div class="note">The ${k === "pc" ? "PC" : "laptop"} model is off, so Cline in this window will get connection errors. Turn it on in <b>1:llm</b>.</div>` : ""}
@@ -3011,7 +3017,6 @@ function renderWeb(d){
   const p = $("phone");
   if (!d.installed || d.error) { p.innerHTML = `<div class="note">${esc(d.error || "Tailscale isn't installed")}</div>`; $("tailnet").textContent = ""; return; }
   const m = d.model || {}, on = d.serve.on, up = m.state === "ON" || m.state === "ASLEEP";
-  const masked = d.api_key ? d.api_key.slice(0,4) + "•".repeat(12) + d.api_key.slice(-4) : "(none)";
   p.innerHTML = `
     <div class="shead"><span class="dot ${!d.running ? "crit" : on ? (up ? "on" : "warn") : ""}"></span>
       <span class="big">${!d.running ? "tailscale is off" : on ? (up ? "phone access is on" : "on, but the model is off") : "phone access is off"}</span>
@@ -3021,7 +3026,7 @@ function renderWeb(d){
     <div class="urlbox">${esc(d.serve.url || "–")}</div>
     <div class="kvt">
       ${copyRow("address", d.serve.url || "")}
-      ${d.remote ? "" : copyRow("api key", d.api_key || "", masked)}
+      ${d.remote ? "" : keyRow(d.api_key)}
       <span class="k">serves</span><span class="v">${esc(d.serve.target || "127.0.0.1:8099")} · ${String(d.serve.target || "").endsWith(":8099") || !d.serve.on ? "this command center" : "llama-server only (turn off and on to switch)"}</span><span></span>
       <span class="k">model</span><span class="v"><span class="dot ${stateDot(m.state || "OFF")}"></span>${esc(m.name || "off")}</span><span></span>
       <span class="k">this pc</span><span class="v">${esc(d.self ? d.self.ip + " · " + d.self.dns : "–")}</span><span></span>
