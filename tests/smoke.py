@@ -236,7 +236,31 @@ def t_tools():
     check("the model still answers, in a round sent without tools", "final answer" in out and len(seen) == 2 and "tools" not in seen[1])
 
 
-GROUPS = {"modules": t_modules, "smuggle": t_smuggle, "key": t_key, "guard": t_guard, "phone": t_phone, "tools": t_tools}
+def t_tuner():
+    """The optimiser's choice among measured trials (no model is loaded here)."""
+    import tuner
+    hw = {"gpu": "test", "vram_gb": 16.0}
+    r = lambda tune, tg, pp, vram, ok=True: {"tune": tune, "ok": ok, "tg": tg, "pp": pp, "vram_gb": vram, "load_s": 9, "why": ""}
+    base = r({}, 80, 2000, 14.9)
+    check("tuner: nothing clearly faster -> the default stays", tuner.choose(base, [r({"fit_target": 256}, 81, 2000, 15.0)], hw)["tune"] == {})
+    check("tuner: a 10% faster placement wins", tuner.choose(base, [r({"moe": 20}, 88, 2000, 15.2)], hw)["tune"] == {"moe": 20})
+    check("tuner: faster but out of VRAM headroom loses", tuner.choose(base, [r({"moe": 18}, 95, 2000, 15.8)], hw)["tune"] == {})
+    check("tuner: a trial that didn't load loses", tuner.choose(base, [r({"moe": 17}, 0, 0, 15.9, ok=False)], hw)["tune"] == {})
+    two = [r({"moe": 20}, 88, 2000, 15.4), r({"moe": 21}, 87, 2000, 14.8)]
+    check("tuner: of two near-equal placements the leaner one wins", tuner.choose(base, two, hw)["tune"] == {"moe": 21})
+    check("tuner: a batch size that reads faster wins", tuner.choose(base, [r({"ub": 4096}, 80, 2600, 15.3)], hw)["tune"] == {"ub": 4096})
+    check("tuner: a batch size that slows writing loses", tuner.choose(base, [r({"ub": 4096}, 43, 2600, 15.2)], hw)["tune"] == {})
+    check("tuner: same speed with 0.7 GB less VRAM wins", tuner.choose(base, [r({"ub": 1024}, 81, 2010, 14.2)], hw)["tune"] == {"ub": 1024})
+    lib = server.models.scan()
+    if not lib or not server.models.hardware()["vram_gb"]:
+        return print("skip tuner: command line (needs a model in the models folder and an NVIDIA GPU)")
+    m = lib[0]
+    cmd = server.models.command(m, 16384, None, {"moe": 21, "ub": 4096})
+    check("tuner: measured settings reach the command line", "--n-cpu-moe" in cmd and cmd[cmd.index("--n-cpu-moe") + 1] == "21"
+          and cmd[cmd.index("-ub") + 1] == "4096" and cmd[cmd.index("-b") + 1] == "4096", cmd)
+
+
+GROUPS = {"modules": t_modules, "smuggle": t_smuggle, "key": t_key, "guard": t_guard, "phone": t_phone, "tools": t_tools, "tuner": t_tuner}
 
 if __name__ == "__main__":
     want = sys.argv[1:] or list(GROUPS)

@@ -26,6 +26,7 @@ import chats  # noqa: E402  (saved chat history)
 import memory  # noqa: E402  (long-term memory shared by every model)
 import models  # noqa: E402  (the model library: scan models, size for this PC, launch, download)
 import fsutil  # noqa: E402  (atomic file writes)
+import tuner  # noqa: E402  (measures the fastest settings for each model on this PC)
 import cloud  # noqa: E402  (optional web search / stronger cloud model as tools)
 import updater  # noqa: E402  (new versions from GitHub, installed when you say so)
 import llamaup  # noqa: E402  (llama.cpp engine updates)
@@ -218,6 +219,9 @@ def model_info(gpu_util):
     info = {"state": "OFF", "key": None, "name": None, "file": None, "ctx": None,
             "vision": None, "engine": None, "id": None, "processing": False,
             "note": switching["msg"] if switching["on"] else ""}
+    if tuner.S["running"]:   # trial copies of the model are being measured; the real one starts when that is done
+        info.update(state="LOADING", key=tuner.S["model"], name=model_name(tuner.S["model"]), note=tuner.S["msg"])
+        return info
     p = launch.get("proc")
     if p is not None and p.poll() is not None:  # llama-server exited on its own: say why instead of "loading"
         launch.update(proc=None, t=0, fail=models.log_tail(6) or "llama-server exited (code %s)" % p.returncode)
@@ -328,11 +332,28 @@ def start_model(m):
         done = LU.swap_if_staged()
         if done:
             sys.stderr and print(time.ctime(), done, file=sys.stderr)
-    launch["proc"] = models.launch(m, model_ctx(m), model_mode(m))
+    ctx, mode = model_ctx(m), model_mode(m)
+    launch["proc"] = models.launch(m, ctx, mode, tuner.best(m, ctx, mode))   # with the measured settings, if any
 
 
-def model_action(action, key, restart=False):
+def tune_then_start(m):
+    """First load of a model (or "optimise again"): measure it, then start it with what was found."""
+    launch.update(key=m["id"], t=time.time(), fail="", proc=None)
     try:
+        tuner.optimise(m, model_ctx(m), model_mode(m))
+    except Exception:
+        log_error("optimise " + m["id"])
+    if tuner.S["cancel"]:
+        return
+    try:
+        start_model(m)
+    except Exception as e:
+        launch.update(fail=str(e))
+
+
+def model_action(action, key, restart=False, retune=False):
+    try:
+        tuner.cancel()   # turning the model off, or picking another one, ends a running optimisation
         if action == "off":
             switching.update(on=True, msg="stopping")
             ok, msg = stop_model()
@@ -348,12 +369,19 @@ def model_action(action, key, restart=False):
                 running = which_model((props or {}).get("model_path"))
             except Exception:
                 running = None
-            if running == key and not restart:
+            if running == key and not restart and not retune:
                 return True, "already on"
             switching.update(on=True, msg="switching to " + m["name"])
             ok, msg = stop_model()
             if not ok:
                 return False, msg
+        ctx, mode = model_ctx(m), model_mode(m)
+        if retune:
+            tuner.forget(m, ctx, mode)
+        if (retune or settings.get("auto_tune", True)) and models.hardware()["vram_gb"] and not tuner.profile(m, ctx, mode):
+            tuner.S.update(running=True, model=m["id"], cancel=False, msg="optimising %s for this PC" % m["name"])
+            threading.Thread(target=tune_then_start, args=(m,), daemon=True).start()
+            return True, "optimising %s for this PC first (a few minutes, once per model)" % m["name"]
         switching.update(on=True, msg="starting " + m["name"])
         try:
             start_model(m)
@@ -367,8 +395,10 @@ def model_action(action, key, restart=False):
 
 def models_state():
     hw = models.hardware()
-    lib = [models.describe(m, model_ctx(m), hw, model_mode(m)) for m in models.scan()]
-    return {"hardware": hw, "models": lib, "llama": os.path.exists(models.LLAMA_EXE), "folder": models.MODELS_DIR,
+    lib = [dict(models.describe(m, model_ctx(m), hw, model_mode(m)), tuned=tuner.summary(m, model_ctx(m), model_mode(m), hw))
+           for m in models.scan()]
+    return {"hardware": hw, "models": lib, "auto_tune": bool(settings.get("auto_tune", True)),
+            "tuning": tuner.S["model"] if tuner.S["running"] else None, "llama": os.path.exists(models.LLAMA_EXE), "folder": models.MODELS_DIR,
             "downloads": {k: v for k, v in models.downloads.items() if v["state"] != "cancelled"}}
 
 
@@ -548,7 +578,7 @@ def laptop_action(action):
 
 
 _stats = {"t": 0, "v": None}
-_BUILD_FILES = ("index.html", "server.py", "models.py", "workspaces.py", "tokens.py", "chats.py", "memory.py", "importers.py", "cloud.py", "updater.py", "llamaup.py", "fsutil.py")
+_BUILD_FILES = ("index.html", "server.py", "models.py", "workspaces.py", "tokens.py", "chats.py", "memory.py", "importers.py", "cloud.py", "updater.py", "llamaup.py", "fsutil.py", "tuner.py")
 UP = None  # updater.Updater, made in main()
 LU = None  # llamaup.LlamaUpdater, made in main()
 
@@ -625,7 +655,7 @@ def strip_images(data):
 
 def llama_model_off():
     p = launch.get("proc")
-    return not switching["on"] and not port_open() and (p is None or p.poll() is not None)
+    return not switching["on"] and not tuner.S["running"] and not port_open() and (p is None or p.poll() is not None)
 STARTED = time.time()
 
 
@@ -1036,7 +1066,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self.send_json(400, {"error": "action must be on or off"})
             if switching["on"]:
                 return self.send_json(409, {"error": "busy: " + switching["msg"]})
-            ok, msg = laptop_action(action) if target["v"] == "laptop" else model_action(action, key, bool(data.get("restart")))
+            ok, msg = laptop_action(action) if target["v"] == "laptop" else model_action(action, key, bool(data.get("restart")), bool(data.get("retune")))
             _stats["t"] = 0
             return self.send_json(200 if ok else 500, {"ok": ok, "msg": msg})
         if path == "/v1/chat/completions":
@@ -1357,6 +1387,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             settings.setdefault("model_prefs", {})[m["id"]] = pref
             save_settings()
             return self.send_json(200, {"ok": True, "model": models.describe(m, model_ctx(m), None, model_mode(m))})
+        if op == "tune-settings":
+            settings["auto_tune"] = bool(data.get("auto"))
+            save_settings()
+            return self.send_json(200, {"ok": True, "auto_tune": settings["auto_tune"]})
         if op == "hf":
             try:
                 return self.send_json(200, models.hf_files(data.get("url")))
@@ -1561,7 +1595,7 @@ def idle_watch():
     import or a move of the memory folder, which would be cut off half-done."""
     while True:
         time.sleep(5)
-        if active_streams > 0 or memory.M.job.get("running") or memory.M.moving:
+        if active_streams > 0 or memory.M.job.get("running") or memory.M.moving or tuner.S["running"]:
             touch()
         elif time.time() - last_request > IDLE_EXIT:
             memory.M.shutdown()  # stops the embedding server too

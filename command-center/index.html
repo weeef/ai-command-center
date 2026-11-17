@@ -303,6 +303,9 @@ main{display:grid;grid-template-columns:432px 1fr;gap:14px;padding:6px 12px 12px
 .mcard .mn{font-weight:600;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .mcard .ms{color:var(--dim);font-size:11.5px}
 .mcard .mnote{color:var(--dim);font-size:11.5px;grid-column:1/-1}
+.mcard .mtuned{color:var(--ok)}
+.mcard .mtune{font-size:11px;padding:0 7px;margin-left:8px}
+.mdauto{display:flex;align-items:center;gap:6px;margin:0 0 10px;color:var(--dim);cursor:pointer}
 .mcard .mside{display:flex;flex-direction:column;align-items:flex-end;gap:6px;grid-row:1/3;grid-column:2}
 .mcard select{background:var(--bg2);color:var(--fg);border:1px solid var(--border);font:inherit;font-size:11.5px;padding:2px 4px}
 .mcard .tag{font-size:10.5px;color:var(--bg);background:var(--ok);padding:1px 6px;border-radius:999px}
@@ -863,6 +866,7 @@ body.remote #tags span[data-ws="2"]{display:none}
 <dialog id="modelDlg" aria-labelledby="mdTitle">
   <div class="mdhead"><div class="title" id="mdTitle">models</div><span id="mdHw"></span><button id="mdClose" title="close (Esc)">✕</button></div>
   <div id="mdWarn" hidden></div>
+  <label class="ms mdauto" title="The first time a model is turned on, a few trial runs measure which settings are fastest on this PC (a few minutes). The result is saved and used on every later load."><input type="checkbox" id="mdAuto"> optimise each model for this PC the first time it loads</label>
   <div id="mdList"></div>
   <div class="sect">add a model</div>
   <div class="mdadd">
@@ -1338,12 +1342,12 @@ async function poll(){
 
 /* ---------------- model control ---------------- */
 let ctlBusy = false;
-async function modelAction(action, model, restart){
+async function modelAction(action, model, restart, retune){
   if (ctlBusy) return;
   ctlBusy = true; render();
   $("ctlMsg").textContent = action === "off" ? "stopping…" : `starting ${modelLabel(model || selected)}…`;
   try {
-    const r = await fetch("/api/model", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({action, model: model || selected, restart: !!restart})});
+    const r = await fetch("/api/model", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({action, model: model || selected, restart: !!restart, retune: !!retune})});
     const j = await r.json();
     $("ctlMsg").textContent = j.msg || j.error || "";
     if (!r.ok) sys(j.error || j.msg || "model action failed", true);
@@ -1423,6 +1427,7 @@ function renderModelDlg(){
   if (!mlib) return;
   const hw = mlib.hardware;
   $("mdHw").textContent = (hw.gpu ? `${hw.gpu} · ${hw.vram_gb} GB VRAM` : "no NVIDIA GPU found") + ` · ${hw.ram_gb} GB RAM · ${hw.cores} cores`;
+  $("mdAuto").checked = !!mlib.auto_tune;
   $("mdWarn").hidden = mlib.llama; $("mdWarn").textContent = "llama.cpp isn't installed yet: run setup.bat in the repo folder first.";
   const running = S && S.target !== "laptop" && S.model.state !== "OFF" ? S.model.key : null;
   $("mdList").innerHTML = mlib.models.length ? mlib.models.map(m => {
@@ -1434,7 +1439,8 @@ function renderModelDlg(){
       <div class="mside"><span class="fitb fit-${m.plan.fit}" title="needs ~${m.plan.need_gb} GB (weights ${m.plan.weights_gb} + context ${m.plan.kv_gb}); GPU budget ${m.plan.budget_gb} GB">${FITS[m.plan.fit]}</span>
         <label class="ms">context <select data-ctx="${esc(m.id)}">${m.ctx_choices.map(c => `<option value="${c}" ${c === m.ctx ? "selected" : ""}>${kctx(c)}</option>`).join("")}</select></label>
         ${m.both ? `<label class="ms" title="llama.cpp can't run MTP and image input at the same time: pick per model">mode <select data-mode="${esc(m.id)}"><option value="fast" ${m.mode === "fast" ? "selected" : ""}>fast text (MTP)</option><option value="images" ${m.mode === "images" ? "selected" : ""}>images</option></select></label>` : ""}</div>
-      <div class="mnote">${esc(m.plan.note)} · ${esc(m.tuning)} · <span title="${esc(m.id)}">${esc(m.file)}</span></div>
+      <div class="mnote">${esc(m.plan.note)} · ${m.tuned ? `<span class="mtuned">${esc(m.tuned)}</span>` : esc(m.tuning)} · <span title="${esc(m.id)}">${esc(m.file)}</span>
+        ${hw.gpu ? `<button class="mtune" data-tune="${esc(m.id)}" ${mlib.tuning ? "disabled" : ""} title="measure the fastest settings for this model on this PC (a few minutes), then start it">${mlib.tuning === m.id ? "optimising…" : m.tuned ? "optimise again" : "optimise"}</button>` : ""}</div>
     </div>`; }).join("")
     : `<div class="hint" style="margin:0 0 8px">No models yet. Paste a Hugging Face link below (the list shows which sizes fit this PC), or copy a .gguf into the models folder.</div>`;
   const dls = Object.entries(mlib.downloads || {});
@@ -1444,7 +1450,12 @@ function renderModelDlg(){
 }
 $("modelPick").onclick = () => { loadModels(); renderModelDlg(); $("modelDlg").showModal(); };
 $("mdClose").onclick = () => $("modelDlg").close();
+$("mdAuto").onchange = async e => { const r = await postJSON("/api/models/tune-settings", {auto: e.target.checked}); if (!r.ok) sys("couldn't save that: " + r.msg, true); loadModels(); };
 $("mdList").addEventListener("click", e => {
+  const tb = e.target.closest("[data-tune]");
+  if (tb) { e.stopPropagation(); selected = tb.dataset.tune; store.set("rt.model", selected); $("modelDlg").close();
+    sys("optimising " + modelLabel(selected) + " for this PC: a few trial runs, a few minutes. It starts by itself when that's done; turning it off cancels.");
+    modelAction("on", selected, true, true).then(loadModels); return; }
   if (e.target.closest("select,label")) return;
   const c = e.target.closest(".mcard"); if (c) pickModel(c.dataset.id);
 });

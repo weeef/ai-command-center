@@ -29,6 +29,7 @@ command-center/*
 !command-center/importers.py
 !command-center/cloud.py
 !command-center/fsutil.py
+!command-center/tuner.py
 !command-center/updater.py
 !command-center/llamaup.py
 !command-center/taskbar.py

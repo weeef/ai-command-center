@@ -358,8 +358,11 @@ def describe(m, ctx=None, hw=None, mode=None):
     return d
 
 
-def command(m, ctx, mode=None):
-    """llama-server command line for this model at this context, sized for this PC."""
+def command(m, ctx, mode=None, tune=None):
+    """llama-server command line for this model at this context, sized for this PC. `tune` holds settings measured
+    for this model by tuner.py: {"moe": expert layers kept in RAM} or {"fit_target": MiB of VRAM left free}, and
+    {"ub": prompt batch size}. Without it the defaults below apply."""
+    tune = tune or {}
     c, hw = config(), hardware()
     threads = c.get("THREADS") or str(hw["cores"])
     args = [LLAMA_EXE, "-m", m["_path"]]
@@ -371,7 +374,11 @@ def command(m, ctx, mode=None):
     if vision:
         args += ["--mmproj", m["mmproj"], "--no-mmproj-offload"]
     args += ["--host", "127.0.0.1", "--port", "8090", "--api-key-file", KEYFILE]
-    if m["tuned"]:
+    if "moe" in tune and hw["vram_gb"]:
+        args += ["--fit", "off", "-ngl", "99", "--n-cpu-moe", str(max(0, min(int(tune["moe"]), m["layers"] or 999)))]
+    elif "fit_target" in tune and hw["vram_gb"]:
+        args += ["--fit", "on", "--fit-target", str(int(tune["fit_target"]))]
+    elif m["tuned"]:
         var, dflt = TUNED[m["id"]]
         moe = int(c.get(var) or dflt) + (3 if ctx > DEFAULT_CTX else 0)  # bigger KV cache: 3 more layers to RAM
         args += ["--fit", "off", "-ngl", c.get("NGL") or "99", "--n-cpu-moe", str(min(moe, m["layers"] or moe))]
@@ -382,24 +389,25 @@ def command(m, ctx, mode=None):
         args += ["--fit", "on", "--fit-target", target]
     else:
         args += ["--fit", "off", "-ngl", "0"]
-    ub = c.get("UB") or ("2048" if hw["vram_gb"] >= 12 else "512")
+    ub = str(int(tune["ub"])) if "ub" in tune else c.get("UB") or ("2048" if hw["vram_gb"] >= 12 else "512")
     args += ["-c", str(ctx), "-np", "1", "--cache-ram", c.get("CACHE_RAM") or "8192",
              "-fa", "on", "-ctk", "q8_0", "-ctv", "q8_0",
-             "-t", threads, "-b", "2048", "-ub", ub] + spec + ["--metrics"]
+             "-t", threads, "-b", str(max(2048, int(ub))), "-ub", ub] + spec + ["--metrics"]
     if plan(m, ctx, hw)["fit"] != "gpu":
         args += ["--load-mode", "none"]  # weights that stay on the CPU: read into RAM up front, faster prompts than mmap
     return args
 
 
-def launch(m, ctx, mode=None):
+def launch(m, ctx, mode=None, tune=None):
     """Start llama-server in the background (no console window); its output goes to command-center\\llama.log."""
     if not os.path.exists(LLAMA_EXE):
         raise RuntimeError("llama.cpp isn't installed: run setup.bat")
     if not os.path.exists(KEYFILE):
         raise RuntimeError("api-key.txt is missing: run setup.bat")
     log = open(LOG, "w", encoding="utf-8", errors="replace")
-    log.write("# " + " ".join('"%s"' % a if " " in a else a for a in command(m, ctx, mode)) + "\n"); log.flush()
-    p = subprocess.Popen(command(m, ctx, mode), cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+    cmd = command(m, ctx, mode, tune)
+    log.write("# " + " ".join('"%s"' % a if " " in a else a for a in cmd) + "\n"); log.flush()
+    p = subprocess.Popen(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                          creationflags=NOWIN | 0x00000200)  # CREATE_NEW_PROCESS_GROUP: outlives the command center
     log.close()
     return p

@@ -114,6 +114,27 @@ count, pinning to the V-cache cores, process priority, polling, an f16 KV cache 
 difference; `-ub 4096` read prompts ~30% faster but needs VRAM that is already tight. With a desktop using 2.8 GB,
 `MOE 23` leaves under 1 GB of VRAM spare, so use 24 if other GPU apps are open.
 
+### Optimise any model automatically
+
+In the model list, **optimise each model for this PC the first time it loads** is on by default. The first time you
+turn a model on, the command center starts a few trial copies of it one after another on a spare port, each with
+different settings, has each one read a long prompt and write a short text, and keeps the fastest settings that
+leave VRAM to spare. That takes a few minutes, once; every later load uses the saved result straight away. It works
+for any GGUF, not only the built-in models.
+
+- **What is tried:** how much of the model sits on the GPU (llama.cpp's own fit with different VRAM reserves, and
+  for mixture-of-experts models the number of expert layers kept in RAM) and the prompt batch size.
+- **How it decides:** writing speed first. A change has to be at least 3% faster to replace the default, and of
+  two near-equal settings the one using less VRAM wins, because a model that touches the VRAM limit slows to a crawl.
+  The default is measured twice (first and last), so a slow first load can't make everything else look better.
+- **When it runs again:** a result belongs to one model file, context size, mode (fast text / images) and GPU.
+  Change one and that combination is measured the next time it loads. **optimise again** on a model's card repeats
+  it on request, for example after closing other apps that use the GPU or after a big llama.cpp update.
+- Turning the model off cancels a running optimisation. Results are in `command-center\tuning.json`, the trial
+  servers' output in `command-center\tune.log`.
+
+Measure with the programs you normally keep open: what else is using VRAM at that moment decides what fits.
+
 **Checking a change:** `python bench\bench.py` measures speed (it starts its own llama-server on port 8190);
 `python bench\memeval.py` measures memory recall on a fixed, invented set of memories and questions (run it before changing the thresholds in `memory.py`); `python tests\smoke.py` checks the command center's request guard, phone rules, key handling and importers without
 starting a model.
@@ -258,6 +279,7 @@ command-center\
   chats.py       saved chats
   workspaces.py  VS Code / Cline / Tailscale helpers
   tokens.py      tokens-used meter
+  tuner.py       measures the fastest settings for each model on this PC (auto-optimise)
   fsutil.py      atomic file writes shared by the modules above
   index.html     the whole UI (no build step, works offline)
   fonts\         Inter and IBM Plex Mono (SIL Open Font License)
