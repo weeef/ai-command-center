@@ -25,6 +25,7 @@ import tokens  # noqa: E402  (tokens burned per machine)
 import chats  # noqa: E402  (saved chat history)
 import memory  # noqa: E402  (long-term memory shared by every model)
 import models  # noqa: E402  (the model library: scan models, size for this PC, launch, download)
+import fsutil  # noqa: E402  (atomic file writes)
 import cloud  # noqa: E402  (optional web search / stronger cloud model as tools)
 import updater  # noqa: E402  (new versions from GitHub, installed when you say so)
 import llamaup  # noqa: E402  (llama.cpp engine updates)
@@ -64,11 +65,14 @@ settings = load_settings()
 target = {"v": settings.get("target") if settings.get("target") in TARGETS else "local"}
 
 
+_settings_lock = threading.Lock()
+
+
 def save_settings():
     try:
-        with open(SETTINGS, "w", encoding="utf-8") as f:
-            json.dump(settings, f, indent=1)
-    except OSError:
+        with _settings_lock:
+            fsutil.write_json(SETTINGS, settings, indent=1)   # atomic: a crash mid-write can't leave half a file
+    except (OSError, RuntimeError):   # RuntimeError: another thread changed the dict mid-dump; the next save has it
         pass
 
 
@@ -1139,9 +1143,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         with lock:
             active_streams += 1
         try:
+            left = cloud.MAX_CALLS   # tool calls left for this reply: each one is billed to the owner's cloud key
             for rnd in range(5):
                 body = dict(data, messages=msgs, stream=True)
-                if rnd < 4:
+                if rnd < 4 and left > 0:
                     body["tools"] = tools
                 up = http.client.HTTPConnection(*upstream, timeout=900)
                 try:
@@ -1212,12 +1217,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 for t in tcs:
                     name = t["function"]["name"]
                     args = cloud.parse_args(name, t["function"]["arguments"])   # recovers broken JSON from the model
+                    if left <= 0:
+                        self._sse({"cc_tool": {"id": t["id"], "name": name, "args": args, "status": "error", "sources": [],
+                                               "error": "not run (limit of %d per reply)" % cloud.MAX_CALLS}})
+                        msgs.append({"role": "tool", "tool_call_id": t["id"], "content": "Not run: the limit of %d tool calls "
+                                     "per reply is used up. Answer now with what you have." % cloud.MAX_CALLS})
+                        continue
                     self._sse({"cc_tool": {"id": t["id"], "name": name, "args": args, "status": "running",
                                            "provider": cloud.NAMES[cloud.config(settings)["provider"]]}})
                     try:
                         res = cloud.run(settings, name, args)
                     except Exception as e:
                         res = {"ok": False, "error": "tool crashed: %s" % e.__class__.__name__, "sources": []}
+                    if not res.get("cached"):   # an answer from the 15-minute cache cost nothing
+                        left -= 1
                     self._sse({"cc_tool": {"id": t["id"], "name": name, "args": args, "status": "done" if res["ok"] else "error",
                                            "error": res.get("error"), "sources": res.get("sources", []), "provider": res.get("provider")}})
                     if res["ok"]:
@@ -1544,9 +1557,13 @@ def llm_json(messages, schema, max_tokens):
 
 
 def idle_watch():
+    """Exit a few minutes after the window closes. Not while something is streaming, and not in the middle of an
+    import or a move of the memory folder, which would be cut off half-done."""
     while True:
         time.sleep(5)
-        if active_streams == 0 and time.time() - last_request > IDLE_EXIT:
+        if active_streams > 0 or memory.M.job.get("running") or memory.M.moving:
+            touch()
+        elif time.time() - last_request > IDLE_EXIT:
             memory.M.shutdown()  # stops the embedding server too
             os._exit(0)
 
