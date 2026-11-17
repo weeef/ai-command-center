@@ -12,11 +12,18 @@ Providers (any one is enough; each has its own built-in web search):
 import http.client
 import json
 import os
+import re
 import threading
+import time
 import urllib.parse
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+import fsutil
+
+HERE = os.environ.get("CC_STATE_DIR") or os.path.dirname(os.path.abspath(__file__))
 SECRETS = os.path.join(HERE, "secrets.json")
+MAX_CALLS = 3          # tool calls the local model gets per reply (each one is billed to the owner's key)
+CACHE_SECONDS = 900    # an identical search within 15 minutes is answered from memory instead of paid for again
+_cache = {}            # (provider, model, tool, normalised input) -> (time, result)
 PROVIDERS = ("anthropic", "openai", "gemini")
 NAMES = {"anthropic": "Claude", "openai": "ChatGPT", "gemini": "Gemini"}
 # Defaults; the model box in 6:set changes them (the "test" button lists what your key can use).
@@ -30,8 +37,11 @@ SEARCH_PROMPT = ("Search the web and answer with current, accurate information.\
 TOOLS = [
     {"type": "function", "function": {
         "name": "web_search",
-        "description": ("Search the web. Use it for anything current or that you don't reliably know: news, prices, "
-                        "recent releases, schedules, documentation, facts worth verifying. Returns a summary with sources."),
+        "description": ("Search the web. Use it for things that are current or that you don't reliably know: news, "
+                        "prices, recent releases, schedules, documentation. Don't use it for things you already know. "
+                        "Returns a summary with sources. Put everything you need into ONE specific query: a single "
+                        "search usually answers the question, so search again only if the first result left out "
+                        "something essential."),
         "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "what to look up"}},
                        "required": ["query"]}}},
     {"type": "function", "function": {
@@ -55,10 +65,7 @@ def _load():
 
 def _save(d):
     with _lock:
-        tmp = SECRETS + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(d, f, indent=1)
-        os.replace(tmp, SECRETS)
+        fsutil.write_json(SECRETS, d, indent=1)
 
 
 def key(p):
@@ -69,7 +76,7 @@ def set_key(p, value):
     if p not in PROVIDERS:
         return False
     d = _load()
-    d.setdefault("keys", {})[p] = str(value or "").strip()
+    d.setdefault("keys", {})[p] = "".join(str(value or "").split())[:400]
     if not d["keys"][p]:
         del d["keys"][p]
     _save(d)
@@ -168,7 +175,9 @@ def _anthropic(model, prompt, search):
                 sources += [{"title": r.title, "url": r.url} for r in b.content if getattr(r, "url", None)]
         if resp.stop_reason != "pause_turn":
             break
-        messages.append({"role": "assistant", "content": resp.content})
+        # resume: the same user message plus everything the paused turn produced so far, as one assistant message
+        paused = (messages[1]["content"] if len(messages) > 1 else []) + list(resp.content)
+        messages = [messages[0], {"role": "assistant", "content": paused}]
         kw["messages"] = messages
     return True, "".join(text).strip(), sources
 
@@ -209,31 +218,73 @@ def _gemini(model, prompt, search):
 CALL = {"anthropic": _anthropic, "openai": _openai, "gemini": _gemini}
 
 
+ARG = {"web_search": "query", "ask_cloud": "question"}
+
+
+def parse_args(tool, raw):
+    """The arguments of a tool call as a dict. Local models sometimes emit broken JSON (cut off, single quotes,
+    a bare string); the one string argument is recovered where possible instead of wasting the call."""
+    if isinstance(raw, dict):
+        return raw
+    raw = str(raw or "").strip()
+    try:
+        j = json.loads(raw or "{}")
+        if isinstance(j, dict):
+            return j
+        if isinstance(j, str):
+            return {ARG.get(tool, "query"): j}
+    except ValueError:
+        pass
+    name = ARG.get(tool)
+    if not name:
+        return {}
+    m = re.search(r"""["']%s["']\s*:\s*["'](.*)""" % name, raw, re.S)
+    text = re.sub(r"""["']?\s*\}?\s*$""", "", m.group(1)) if m else ("" if raw[:1] in ("{", "[") else raw)
+    return {name: text.strip()} if text.strip() else {}
+
+
+def norm_input(tool, args):
+    """What makes two calls 'the same': the tool's one string, lower-cased, with whitespace collapsed."""
+    return " ".join(str((args or {}).get(ARG.get(tool, "query")) or "").lower().split())
+
+
 def run(settings, tool, args):
-    """Execute one tool call from the local model. -> {"ok", "text", "sources", "provider", "model"}"""
+    """Execute one tool call from the local model. -> {"ok", "text", "error", "sources", "provider", "model"}"""
     c = config(settings)
     p, model = c["provider"], c["models"][c["provider"]]
+
+    def fail(msg):
+        return {"ok": False, "text": "", "error": msg, "sources": [], "provider": NAMES[p], "model": model}
+
     if not key(p):
-        return {"ok": False, "text": "no %s API key set (6:set → cloud)" % NAMES[p], "sources": []}
-    if tool == "web_search":
-        q = str((args or {}).get("query") or "").strip()[:500]
-        if not q:
-            return {"ok": False, "text": "empty search query", "sources": []}
-        ok, text, sources = CALL[p](model, SEARCH_PROMPT.format(q=q), True)
-    elif tool == "ask_cloud":
-        q = str((args or {}).get("question") or "").strip()[:8000]
-        if not q:
-            return {"ok": False, "text": "empty question", "sources": []}
-        ok, text, sources = CALL[p](model, q, True)
-    else:
-        return {"ok": False, "text": "unknown tool %s" % tool, "sources": []}
+        return fail("no %s API key set (6:set → cloud)" % NAMES[p])
+    if tool not in ARG:
+        return fail("unknown tool %s" % str(tool)[:40])
+    if not (c["web_search"] if tool == "web_search" else c["ask_cloud"]):
+        return fail("%s is turned off in 6:set" % tool)
+    q = str((args or {}).get(ARG[tool]) or "").strip()[:500 if tool == "web_search" else 8000]
+    if not q:
+        return fail("empty search query" if tool == "web_search" else "empty question")
+    ck = (p, model, tool, norm_input(tool, {ARG[tool]: q}))
+    with _lock:
+        hit = _cache.get(ck)
+        if hit and time.time() - hit[0] < CACHE_SECONDS:
+            return dict(hit[1], cached=True)
+    ok, text, sources = CALL[p](model, SEARCH_PROMPT.format(q=q) if tool == "web_search" else q, True)
     seen, uniq = set(), []
     for s in sources:
-        if s.get("url") and s["url"] not in seen:
-            seen.add(s["url"])
-            uniq.append({"title": (s.get("title") or s["url"])[:150], "url": s["url"]})
-    return {"ok": ok, "text": text if ok else "", "error": None if ok else text, "sources": uniq[:10],
-            "provider": NAMES[p], "model": model}
+        url = s.get("url") if isinstance(s, dict) else None
+        if isinstance(url, str) and url.startswith(("http://", "https://")) and url not in seen:
+            seen.add(url)
+            uniq.append({"title": str(s.get("title") or url)[:150], "url": url[:2000]})
+    res = {"ok": ok, "text": text if ok else "", "error": None if ok else text, "sources": uniq[:10],
+           "provider": NAMES[p], "model": model}
+    if ok and text:
+        with _lock:
+            _cache[ck] = (time.time(), res)
+            for k in sorted(_cache, key=lambda k: _cache[k][0])[:-64]:   # keep the 64 newest
+                del _cache[k]
+    return res
 
 
 def list_models(p):

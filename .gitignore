@@ -26,6 +26,7 @@ command-center/*
 !command-center/models.py
 !command-center/importers.py
 !command-center/cloud.py
+!command-center/fsutil.py
 !command-center/updater.py
 !command-center/llamaup.py
 !command-center/taskbar.py

@@ -528,7 +528,7 @@ def laptop_action(action):
 
 
 _stats = {"t": 0, "v": None}
-_BUILD_FILES = ("index.html", "server.py", "models.py", "workspaces.py", "tokens.py", "chats.py", "memory.py", "importers.py", "cloud.py", "updater.py", "llamaup.py")
+_BUILD_FILES = ("index.html", "server.py", "models.py", "workspaces.py", "tokens.py", "chats.py", "memory.py", "importers.py", "cloud.py", "updater.py", "llamaup.py", "fsutil.py")
 UP = None  # updater.Updater, made in main()
 LU = None  # llamaup.LlamaUpdater, made in main()
 
@@ -1176,10 +1176,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 msgs.append({"role": "assistant", "content": content, "tool_calls": tcs})
                 for t in tcs:
                     name = t["function"]["name"]
-                    try:
-                        args = json.loads(t["function"]["arguments"] or "{}")
-                    except ValueError:
-                        args = {}
+                    args = cloud.parse_args(name, t["function"]["arguments"])   # recovers broken JSON from the model
                     self._sse({"cc_tool": {"id": t["id"], "name": name, "args": args, "status": "running",
                                            "provider": cloud.NAMES[cloud.config(settings)["provider"]]}})
                     try:
