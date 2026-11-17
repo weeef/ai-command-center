@@ -35,7 +35,7 @@ That's it. Everything below is optional.
 
 | tab | what it's for |
 |---|---|
-| **1:llm** | Turn the model on/off, pick *standard* or *uncensored*, choose **run on** *this pc* or *laptop*, and chat. Paste or drop images (vision). Live GPU/RAM/CPU usage, speed of the last reply (pp = reading, tg = writing) and tokens used. The **brain** shows the state: grey = off, nodes lighting up = loading, pulses = thinking. In the *corpus* theme its glowing nodes are your memories. |
+| **1:llm** | Turn the model on/off, pick *standard* or *uncensored*, choose **run on** *this pc* or *laptop*, and chat. Paste or drop images (vision). Live GPU/RAM/CPU usage, speed of the last reply (pp = reading, tg = writing) and tokens used. The **brain** shows the state: grey = off, nodes lighting up = loading, pulses = thinking. In the *corpus* theme its glowing nodes are your memories; it drifts and breathes even when the model is off, leans toward the pointer, and a click fires the nearest neurons. |
 | **2:code** | Open projects in VS Code with the Cline coding agent wired to your local model. Optional second "laptop" VS Code (see *Two machines*). |
 | **3:web** | Phone access over Tailscale: one button to turn it on, the address to open on your phone, your devices. |
 | **4:mem** | Your memories as a **brain**: every memory is a neuron in its topic's region (about you = frontal lobe, preferences = prefrontal, how-tos = motor strip, projects = parietal, people + events = temporal, facts = occipital, other = cerebellum). Bigger = recalled more often, ring = pinned. Synapses join memories with related meaning; signals travel along them and a neuron fires when the model recalls it. Click a neuron to read/edit/pin/forget it; switch to **tree** for a radial tree by topic. Scroll to zoom, drag to move. |
@@ -150,7 +150,9 @@ grounding. Defaults can be changed per provider in 6:set. Not used by Cline (it 
 
 The phone gets the same app in a phone layout: chat, saved chats, memory, model on/off. It can't open VS Code, see the
 API key, move the memory or switch phone access off. It works while the command center is open on the PC. Only
-devices signed in to your Tailscale account can reach it; it is not on the public internet.
+devices signed in to the same Tailscale account as the PC can reach it; it is not on the public internet. A device
+that someone else shared into your tailnet is refused. To let another account in, add its login to a list called
+`tailscale_allow` in `command-center\settings.json`, for example `"tailscale_allow": ["partner@example.com"]`.
 
 ## VS Code + Cline (optional)
 
@@ -256,9 +258,14 @@ command-center\
   chats.py       saved chats
   workspaces.py  VS Code / Cline / Tailscale helpers
   tokens.py      tokens-used meter
+  fsutil.py      atomic file writes shared by the modules above
   index.html     the whole UI (no build step, works offline)
   fonts\         Inter and IBM Plex Mono (SIL Open Font License)
+bench\bench.py             speed benchmark (starts its own llama-server)
+bench\memeval.py           memory recall evaluation on a fixed, invented set of memories
+tests\smoke.py             smoke tests for the request guard, phone rules, key handling and importers
 docs\review-prompt.md      a prompt for a full review/improvement pass with a strong model
+docs\review-report.md      what the last review pass measured, fixed and left open
 ```
 
 **Not in the repo** (created on your PC): `api-key.txt`, `command-center\secrets.json` (cloud keys), `llm-config.bat`, `llama.cpp\`, `models\`, `memory\`,
@@ -266,9 +273,13 @@ docs\review-prompt.md      a prompt for a full review/improvement pass with a st
 
 ## Privacy and security
 
-- Every server listens on `127.0.0.1` only. The browser never sees the API key; the command center adds it.
-- Requests are checked for the right Host/Origin, so other websites can't drive the app.
-- Phone access is Tailscale-only and requires Tailscale's signed-in user header.
+- Every server listens on `127.0.0.1` only. The page never receives the API key: it shows a masked key, and
+  **copy** has the command center put the real one on the clipboard.
+- Requests are checked for the right Host and Origin, and cross-site requests are refused, so other websites can't
+  drive the app. A refused request closes its connection, so nothing can be hidden in its body.
+- Phone access is Tailscale-only, requires the login of the account this PC is signed in to, and reaches only the
+  routes listed for the phone; everything else is PC-only.
+- Cloud tools are capped at 3 calls per reply, and an identical search within 15 minutes is answered from a cache.
 - Your memories, chats and settings stay in files on your PC (the memory folder). Nothing is uploaded anywhere.
 
 ## Troubleshooting

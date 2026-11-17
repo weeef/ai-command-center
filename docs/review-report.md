@@ -1,5 +1,23 @@
 # Review pass: status report (2026-11-11)
 
+> **Update 2026-11-16.** Most of what this report lists as open is now on `main`, done as small patches instead of
+> merging the branch (which had fallen 11 commits behind):
+>
+> - ported from the branch: `workspaces.py` cmd.exe quoting, streamed imports, chat list caching, cloud search
+>   cache and tool-argument recovery, atomic writes (`fsutil.py`)
+> - hardening: the API key never reaches the page, cross-site requests refused, the phone must use this PC's own
+>   Tailscale login, phone routes are an allow-list, atomic `settings.json`, idle exit waits for imports and moves,
+>   3 cloud tool calls per reply
+> - `tests/smoke.py` covers the above, including the request-smuggling fix
+> - `bench/memeval.py` exists; the recall floor (0.36 -> 0.40) and duplicate threshold (0.93 -> 0.85) were tuned
+>   against it
+> - the README speed section has the numbers from section 1
+>
+> Still open: the route-table refactor and the `memory.py` rewrite on `review-pass-wip` (the rewrite should be
+> judged against `bench/memeval.py` before any of it is taken), an evaluation of the learner prompt, a benchmark
+> run on the current standard model, the UI split and CSP tightening, setup testing on other GPUs, and cloud
+> provider checks with a real key. The rest of this report is unchanged from 2026-11-11.
+
 This pass was stopped early (usage limit). What is on `main` is small and measured. The larger rewrite is parked,
 unmerged, on the branch `review-pass-wip`; it passed a smoke test but not a full test run, so it is **not** on `main`.
 
