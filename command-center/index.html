@@ -258,7 +258,8 @@ main{display:grid;grid-template-columns:432px 1fr;gap:14px;padding:6px 12px 12px
 [data-theme="corpus"] #brainWrap{background:none}
 [data-theme="corpus"] #brainWrap::before,[data-theme="corpus"] #brainWrap::after,[data-theme="corpus"] #brain{display:none}
 [data-theme="corpus"] #brainNet{display:block;position:absolute;inset:0;width:100%;height:100%;transition:opacity .6s}
-[data-theme="corpus"] #brainNet.off{opacity:.7}
+[data-theme="corpus"] #brainNet.off{opacity:.85}
+[data-theme="corpus"] #brainWrap{cursor:pointer}
 
 [data-theme="corpus"] #brainTag{color:var(--dim);font-family:var(--font);opacity:1}
 [data-theme="corpus"] #brainPane{padding:6px}
@@ -963,10 +964,11 @@ function measureBrain(){
   brain.cols = Math.max(10, Math.floor(w.clientWidth / brain.cw));
   brain.rows = Math.max(6, Math.floor(w.clientHeight / brain.ch));
 }
-/* corpus theme: the same 3D brain, drawn as a cloud of tiny spectrum-coloured points with ~44 bright nodes
-   wired by hairlines. Pulses run along the wires while the model is generating. */
+/* corpus theme: the same 3D brain, drawn as a cloud of tiny spectrum-coloured points with bright nodes (one per
+   memory) wired by hairlines. It breathes and drifts at rest; signals run along the wires, a few when idle and a storm
+   while the model is generating. */
 const SPECTRUM = ["--l0","--l1","--l2","--l3","--l4","--l5","--l6","--l7"];
-const net = { nodes:null, edges:null, buckets:null, pulses:[], cols:null };
+const net = { nodes:null, edges:null, buckets:null, pulses:[], cols:null, adj:null, adjOf:null, poke:[], px:0, py:0, lx:0, ly:0, P:null };
 function buildNet(){
   const pts = brain.pts, n = pts.length / 7;
   let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
@@ -1009,57 +1011,87 @@ function renderNet(flash){
   const W = w.clientWidth, H = w.clientHeight; if (!W || !H || !brain.pts) return;
   if (cv.width !== Math.round(W*dpr) || cv.height !== Math.round(H*dpr)) { cv.width = Math.round(W*dpr); cv.height = Math.round(H*dpr); }
   if (!net.nodes) buildNet();
+  if (net.adjOf !== net.edges) {   // which wires leave each node, so a signal can travel on
+    net.adj = net.nodes.map(() => []); net.edges.forEach(([i, j], e) => { net.adj[i].push(e); net.adj[j].push(e); }); net.adjOf = net.edges;
+  }
   const g = cv.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
   const cs = getComputedStyle(document.documentElement), col = SPECTRUM.map(v => cs.getPropertyValue(v).trim() || "#fff");
-  const pts = brain.pts, S = Math.min(W/1.75, H/2.05), ay = brain.angle, ax = 0.32;
+  const still = reduced.matches, now = performance.now() / 1000, mode = brain.mode, mono = mode === "off";
+  // alive even at rest: a slow breath (faster while thinking), a slight float, and it leans toward the pointer
+  const breath = still ? 0.5 : 0.5 + 0.5 * Math.sin(now * (flash ? 2.6 : mono ? 0.7 : 1.2));
+  net.lx += ((still ? 0 : net.px) - net.lx) * 0.08; net.ly += ((still ? 0 : net.py) - net.ly) * 0.08;
+  const pts = brain.pts, S = Math.min(W/1.75, H/2.05) * (1 + 0.012 * (breath - 0.5)), ay = brain.angle + net.lx * 0.45, ax = 0.32 + net.ly * 0.22;
   const ca = Math.cos(ay), sa = Math.sin(ay), cb = Math.cos(ax), sb = Math.sin(ax);
-  const cx = W/2 + (W > 520 ? W*0.08 : 0), cy = H/2;
+  const cx = W/2 + (W > 520 ? Math.min(W*0.08, Math.max(0, W/2 - S*0.95)) : 0), cy = H/2 + (still ? 0 : Math.sin(now * 0.8) * H * 0.012);   // off-centre only where there is room
   const proj = i => { const x = pts[i*7], y = pts[i*7+1] + 0.2, z = pts[i*7+2];
     const x1 = x*ca + z*sa, z1 = -x*sa + z*ca; return [cx + x1*S, cy - (y*cb - z1*sb)*S, y*sb + z1*cb]; };
-  const mono = brain.mode === "off";
-  const reveal = brain.mode === "loading" ? Math.floor(performance.now() / 70) % (net.nodes.length + 12) : 1e9;
-  // dust
+  const reveal = mode === "loading" ? Math.floor(performance.now() / 70) % (net.nodes.length + 12) : 1e9;
+  // a soft halo behind the brain that breathes with it
+  const halo = g.createRadialGradient(cx, cy, 0, cx, cy, S * 1.15);
+  halo.addColorStop(0, "rgba(255,255,255," + ((mono ? 0.035 : 0.05) + 0.04 * breath + (flash ? 0.05 : 0)) + ")"); halo.addColorStop(0.55, "rgba(255,255,255,0.012)"); halo.addColorStop(1, "rgba(255,255,255,0)");
+  g.fillStyle = halo; g.fillRect(0, 0, W, H);
+  // dust, each colour field shimmering on its own beat
   const sz = W > 600 ? 1.3 : 1.1;
   net.buckets.forEach((b, c) => {
-    g.fillStyle = mono ? "#8a8a8a" : col[c];
+    g.fillStyle = mono ? "#9a9a9a" : col[c];
+    const tw = still ? 1 : 0.82 + 0.18 * Math.sin(now * 1.7 + c * 0.9);
     for (let k = 0; k < b.length; k += 2) {
       const [px, py, pz] = proj(b[k]);
-      g.globalAlpha = (pz > 0 ? 0.55 : 0.18) * (mono ? 0.45 : 1);
+      g.globalAlpha = (pz > 0 ? 0.55 : 0.18) * (mono ? 0.42 + 0.14 * breath : tw);
       g.fillRect(px, py, sz, sz);
     }
   });
-  // wires
+  // wires: the near side reads brighter than the far side
   const P = net.nodes.map(nd => proj(nd.p));
-  g.lineWidth = 0.7;
+  g.lineWidth = 0.7; g.strokeStyle = "#fff";
   for (const [i, j] of net.edges) {
-    g.globalAlpha = flash ? 0.34 : 0.22; g.strokeStyle = "#fff";
+    g.globalAlpha = (flash ? 0.32 : 0.16 + 0.06 * breath) * (P[i][2] + P[j][2] > 0 ? 1 : 0.5);
     g.beginPath(); g.moveTo(P[i][0], P[i][1]); g.lineTo(P[j][0], P[j][1]); g.stroke();
   }
-  // pulses travelling along wires while firing
-  if (flash) {
-    if (net.pulses.length < 14 && Math.random() < 0.45) net.pulses.push({e: (Math.random()*net.edges.length)|0, t: 0, v: 0.04 + Math.random()*0.05, back: Math.random() < .5});
-    for (const pl of net.pulses) {
-      pl.t += pl.v; const [i, j] = net.edges[pl.e], a = pl.back ? P[j] : P[i], b = pl.back ? P[i] : P[j];
-      const x = a[0] + (b[0]-a[0])*pl.t, y = a[1] + (b[1]-a[1])*pl.t;
-      g.globalAlpha = 1; g.fillStyle = "#fff"; g.shadowColor = "#fff"; g.shadowBlur = 8;
-      g.beginPath(); g.arc(x, y, 1.6, 0, 7); g.fill(); g.shadowBlur = 0;
-      if (pl.t >= 1) net.nodes[pl.back ? i : j].flash = 1;
-    }
-    net.pulses = net.pulses.filter(pl => pl.t < 1);
-  } else net.pulses = [];
-  // nodes, back to front
+  // signals along the wires: a storm while thinking, a few stray thoughts when idle, a rare dream when off.
+  // Where one lands the neuron fires, and while thinking it usually passes the signal on.
+  const cap = flash ? 30 : mode === "loading" ? 6 : mono ? 1 : 3, rate = flash ? 0.6 : mode === "loading" ? 0.15 : mono ? 0.012 : 0.05;
+  const spawn = (e, from) => { const [i, j] = net.edges[e], back = from === j; const to = net.nodes[back ? i : j];
+    net.pulses.push({e, t: 0, v: (flash ? 0.05 : 0.025) + Math.random() * 0.04, back, c: mono ? "#cfcfcf" : to.c >= 0 ? col[to.c] : "#fff"}); };
+  if (!still && net.pulses.length < cap && Math.random() < rate) { const e = (Math.random() * net.edges.length) | 0; spawn(e, net.edges[e][Math.random() < .5 ? 0 : 1]); }
+  for (const k of net.poke.splice(0)) for (const e of net.adj[k]) spawn(e, k);
+  g.lineCap = "round";
+  for (const pl of net.pulses) {
+    pl.t += pl.v; const [i, j] = net.edges[pl.e], a = pl.back ? P[j] : P[i], b = pl.back ? P[i] : P[j];
+    const t1 = Math.min(1, pl.t), t0 = Math.max(0, t1 - 0.3);
+    const x = a[0] + (b[0]-a[0])*t1, y = a[1] + (b[1]-a[1])*t1, x0 = a[0] + (b[0]-a[0])*t0, y0 = a[1] + (b[1]-a[1])*t0;
+    const tail = g.createLinearGradient(x0, y0, x, y); tail.addColorStop(0, "rgba(255,255,255,0)"); tail.addColorStop(1, pl.c);
+    g.globalAlpha = 0.9; g.strokeStyle = tail; g.lineWidth = 1.4; g.beginPath(); g.moveTo(x0, y0); g.lineTo(x, y); g.stroke();
+    g.globalAlpha = 1; g.fillStyle = "#fff"; g.shadowColor = pl.c; g.shadowBlur = 10;
+    g.beginPath(); g.arc(x, y, 1.7, 0, 7); g.fill(); g.shadowBlur = 0;
+    if (pl.t >= 1) { const k = pl.back ? i : j, nd = net.nodes[k]; nd.flash = 1; nd.ring = 1;
+      if (flash && net.pulses.length < cap + 8 && Math.random() < 0.5) { const out = net.adj[k].filter(e => e !== pl.e); if (out.length) spawn(out[(Math.random() * out.length) | 0], k); } }
+  }
+  net.pulses = net.pulses.filter(pl => pl.t < 1);
+  // nodes, back to front: each breathes on its own phase, flares when a signal lands and sends out a ripple
   net.nodes.map((nd, k) => [k, P[k][2]]).sort((u, v) => u[1] - v[1]).forEach(([k]) => {
-    const nd = net.nodes[k], [x, y, z] = P[k];
-    const c = mono || k >= reveal ? "#4a4a4a" : nd.c === -2 ? "#5a5a5a" : nd.c < 0 ? "#fff" : col[nd.c];
-    const r = nd.r * (z > 0 ? 1 : 0.75) * (1 + nd.flash * 0.9);
+    const nd = net.nodes[k], [x, y, z] = P[k], dark = mono || k >= reveal;
+    const grey = Math.round(74 + 34 * breath + nd.flash * 120);
+    const c = dark ? "rgb(" + grey + "," + grey + "," + grey + ")" : nd.c === -2 ? "#5a5a5a" : nd.c < 0 ? "#fff" : col[nd.c];
+    const r = nd.r * (z > 0 ? 1 : 0.75) * (1 + nd.flash * 0.9) * (still ? 1 : 1 + 0.09 * Math.sin(now * 1.6 + k * 1.7));
+    if (nd.ring > 0.03) { g.globalAlpha = nd.ring * 0.55; g.strokeStyle = c; g.lineWidth = 1; g.beginPath(); g.arc(x, y, r + (1 - nd.ring) * 16, 0, 7); g.stroke(); nd.ring *= 0.9; } else nd.ring = 0;
     g.globalAlpha = z > 0 ? 1 : 0.55;
-    g.fillStyle = c; g.shadowColor = c; g.shadowBlur = mono || k >= reveal ? 0 : 6 + nd.flash * 14;
+    g.fillStyle = c; g.shadowColor = c; g.shadowBlur = dark ? nd.flash * 10 : 6 + 3 * breath + nd.flash * 14;
     g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
     g.shadowBlur = 0; g.globalAlpha *= 0.85; g.fillStyle = "#fff";
     g.beginPath(); g.arc(x - r*0.25, y - r*0.25, r*0.35, 0, 7); g.fill();
     nd.flash *= 0.86;
   });
   g.globalAlpha = 1;
+  net.P = P;
+}
+/* the brain leans toward the pointer, and a click fires the neurons nearest to it */
+{ const w = $("brainWrap");
+  w.addEventListener("pointermove", e => { const r = w.getBoundingClientRect(); net.px = ((e.clientX - r.left) / r.width - 0.5) * 2; net.py = ((e.clientY - r.top) / r.height - 0.5) * 2; });
+  w.addEventListener("pointerleave", () => { net.px = net.py = 0; });
+  w.addEventListener("click", e => { if (!net.P || document.documentElement.dataset.theme !== "corpus") return;
+    const r = w.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+    net.P.map((p, k) => [k, (p[0]-x)**2 + (p[1]-y)**2]).sort((a, b) => a[1] - b[1]).slice(0, 3).forEach(([k]) => { net.nodes[k].flash = 1; net.nodes[k].ring = 1; net.poke.push(k); }); });
 }
 function renderBrain(flash){
   if (document.documentElement.dataset.theme === "corpus") return renderNet(flash);
@@ -1125,18 +1157,20 @@ function brainLoop(ts){
   requestAnimationFrame(brainLoop);
   if (document.hidden) { brain.last = ts; return; }
   const m = brain.mode;
-  const speed = m === "busy" ? 1.5 : m === "on" ? 0.28 : m === "loading" ? 0.7 : 0;
+  const corpus = document.documentElement.dataset.theme === "corpus";   // its brain drifts and dreams even when the model is off
+  const speed = m === "busy" ? (corpus ? 1.1 : 1.5) : m === "on" ? 0.28 : m === "loading" ? 0.7 : corpus ? 0.06 : 0;
   if (reduced.matches || speed === 0) {
     if (brain.dirty) { renderBrain(false); brain.dirty = false; }
     brain.last = ts; return;
   }
-  const fps = m === "busy" ? 30 : 20;
+  const fps = m === "busy" ? 30 : m === "off" ? 15 : corpus ? 24 : 20;
   if (ts - brain.last < 1000/fps) return;
   const dt = Math.min(0.2, (ts - (brain.last || ts)) / 1000);
   brain.last = ts;
   brain.angle += dt * speed;
   renderBrain(m === "busy");
 }
+const forceBrain = (location.hash.match(/brain=(off|on|busy|loading)/) || [])[1];   // #brain=busy shows a state without a model
 function setBrainMode(m){
   if (m === brain.mode) return;
   brain.mode = m; brain.dirty = true;
@@ -1219,7 +1253,7 @@ function render(){
   $("modelPick").disabled = ctlBusy;
   renderUsage();
   renderTokens();
-  setBrainMode(loading ? "loading" : st === "THINKING" ? "busy" : on ? "on" : "off");
+  setBrainMode(forceBrain || (loading ? "loading" : st === "THINKING" ? "busy" : on ? "on" : "off"));
   $("brainTag").textContent = S.gpu && S.gpu.temp != null ? `${Math.round(S.gpu.temp)}°C` : (S.machine || "");
 }
 /* usage pane: shows either machine. Follows "run on" until you click it, then stays where you put it. */
