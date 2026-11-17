@@ -627,6 +627,39 @@ body.remote #impFileBox{display:none}
   .routes{font-size:11px}
 }
 body.remote #tags span[data-ws="2"]{display:none}
+/* corpus, everywhere: one label style, controls in white ink, calm motion (kept last so it wins over the parts above) */
+[data-theme="corpus"]{color-scheme:dark}
+[data-theme="corpus"] .row .k,[data-theme="corpus"] .tok .th>span:first-child,[data-theme="corpus"] .hint.lab,
+[data-theme="corpus"] .tok .tr .m{color:var(--dim);font:400 11px var(--font);text-transform:uppercase;letter-spacing:.08em}
+[data-theme="corpus"] .row{margin:3px 0}
+[data-theme="corpus"] .row .k{width:78px}
+[data-theme="corpus"] .row .v,[data-theme="corpus"] .tok .tr{font-family:var(--font);font-size:12.5px}
+[data-theme="corpus"] .tok{border-top-style:solid}
+[data-theme="corpus"] .meter .val,[data-theme="corpus"] .spark .val,[data-theme="corpus"] .stat,[data-theme="corpus"] #clock,
+[data-theme="corpus"] .kvt .v,[data-theme="corpus"] .tok .tr{font-variant-numeric:tabular-nums}
+[data-theme="corpus"] ::placeholder{color:#5e5e5e}
+[data-theme="corpus"] input,[data-theme="corpus"] select,[data-theme="corpus"] textarea{accent-color:#fff}
+[data-theme="corpus"] input:focus,[data-theme="corpus"] select:focus,[data-theme="corpus"] textarea:focus{border-color:rgba(255,255,255,.55)}
+[data-theme="corpus"] button:focus-visible,[data-theme="corpus"] select:focus-visible,[data-theme="corpus"] [tabindex]:focus-visible{outline:1px solid #fff;outline-offset:2px}
+[data-theme="corpus"] select{border-radius:6px;font-family:var(--sans)}
+[data-theme="corpus"] input[type=checkbox]{appearance:none;-webkit-appearance:none;box-sizing:border-box;width:14px;height:14px;min-width:14px;max-width:14px;
+  flex:none;margin:0;padding:0;vertical-align:-2px;border:1px solid rgba(255,255,255,.35);border-radius:4px;background:transparent center/10px no-repeat;cursor:pointer}
+[data-theme="corpus"] input[type=checkbox]:hover{border-color:#fff}
+[data-theme="corpus"] input[type=checkbox]:checked{background-color:#fff;border-color:#fff;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M1.5 5.2l2.4 2.4 4.6-5' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")}
+[data-theme="corpus"] input[type=checkbox]:focus-visible{outline:1px solid #fff;outline-offset:2px}
+[data-theme="corpus"] a{color:#fff;text-decoration-color:rgba(255,255,255,.4);text-underline-offset:3px}
+[data-theme="corpus"] a:hover{text-decoration-color:#fff}
+[data-theme="corpus"] .tool a{color:var(--cyan)}
+[data-theme="corpus"] input[type=file]{font-family:var(--sans);color:var(--dim)}
+[data-theme="corpus"] input[type=file]::file-selector-button{font:500 12.5px var(--sans);color:#fff;background:transparent;
+  border:1px solid rgba(255,255,255,.22);border-radius:6px;padding:2px 10px;margin-right:10px;cursor:pointer;transition:border-color .15s}
+[data-theme="corpus"] input[type=file]::file-selector-button:hover{border-color:#fff}
+[data-theme="corpus"] button,[data-theme="corpus"] input,[data-theme="corpus"] select,[data-theme="corpus"] textarea,
+[data-theme="corpus"] .chip,[data-theme="corpus"] #tags span,[data-theme="corpus"] .pane{transition:border-color .15s,background-color .15s,color .15s}
+[data-theme="corpus"] .pane:hover{border-color:#383838}
+[data-theme="corpus"] button:not(:disabled):active{transform:translateY(1px)}
+@media (prefers-reduced-motion:reduce){[data-theme="corpus"] *{transition:none!important}}
 </style>
 </head>
 <body>
@@ -1845,7 +1878,7 @@ function renderMemStatus(st){
   }
   const loc = $("memLoc"), drive = (st.home || "").slice(0, 2);
   loc.innerHTML = `
-    <div class="hint">memory folder</div>
+    <div class="hint lab">memory folder</div>
     <div class="urlbox" style="font-size:14px">${esc(st.home || "–")}</div>
     <div class="kvt">
       <span class="k">holds</span><span class="v">memory.db (memories + search index) · chats\\</span><span></span>
@@ -3022,7 +3055,7 @@ function renderWeb(d){
       <span class="big">${!d.running ? "tailscale is off" : on ? (up ? "phone access is on" : "on, but the model is off") : "phone access is off"}</span>
       <span class="grow"></span>
       ${d.remote ? "" : `<button class="btn-main ${on ? "stop" : "go"}" id="serveBtn" ${d.running && !serveBusy ? "" : "disabled"}>${serveBusy ? "…" : on ? "turn off" : "turn on"}</button>`}</div>
-    <div class="hint">address</div>
+    <div class="hint lab">address</div>
     <div class="urlbox">${esc(d.serve.url || "–")}</div>
     <div class="kvt">
       ${copyRow("address", d.serve.url || "")}
