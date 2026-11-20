@@ -1219,6 +1219,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 offer = [t for t in tools if left["web" if own_web and t["function"]["name"] in webtool.ARG else "cloud"] > 0]
                 if rnd < rounds - 1 and offer:
                     body["tools"] = offer
+                elif rnd > 0 and msgs[-1].get("role") == "tool" and isinstance(msgs[-1].get("content"), str):
+                    # No tools this round. Unless told, the model writes another call as plain text
+                    # ("<tool_call>...") and that becomes the reply the user sees.
+                    last = msgs[-1]
+                    msgs[-1] = dict(last, content=last["content"] + "\n\n(No more tool calls are possible in this reply. "
+                                    "Write your final answer to the user now from what you have.)")
+                    body["messages"] = msgs
                 up = http.client.HTTPConnection(*upstream, timeout=900)
                 try:
                     up.request("POST", "/v1/chat/completions", json.dumps(body),

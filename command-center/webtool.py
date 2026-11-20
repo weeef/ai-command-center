@@ -379,12 +379,38 @@ def parse_ddg(doc):
     return _results(found)
 
 
+BRAVE = "https://search.brave.com"
+
+
+def brave_destination(go):
+    """Where one of Brave's /go/v1/<token> links leads, or "". Brave no longer writes the real address in its
+    results: each one links to a /go/v1/ page that names the destination (<a class="destination" href=...>)."""
+    try:
+        st, ctype, raw, _ = _get(BRAVE + go)
+    except (Refused, OSError, http.client.HTTPException):
+        return ""
+    if st != 200:
+        return ""
+    tag = re.search(r"""<a\b[^>]*\bclass="[^"]*\bdestination\b[^"]*"[^>]*>""", _decode(raw, ctype))
+    url = html.unescape(_first(r'\bhref="([^"]+)"', tag.group(0))) if tag else ""
+    return url if url.startswith(("http://", "https://")) else ""
+
+
 def parse_brave(doc):
+    """Each result's own link: the first one in its block, which is the title link. It is either the real address
+    or (current Brave) a /go/v1/ redirect that is looked up. A result whose link can't be worked out is dropped,
+    never paired with a neighbour's link."""
     found = []
     for part in doc.split('data-type="web"')[1:]:
-        found.append((html.unescape(_first(r'<a[^>]+href="(https?://[^"]+)"', part)),
-                      _first(r"""class="[^"]*search-snippet-title[^"]*"[^>]*>(.*?)</div>""", part),
-                      _first(r"""class="content [^"]*"[^>]*>(.*?)</div>""", part)))
+        title = _first(r"""class="[^"]*search-snippet-title[^"]*"[^>]*>(.*?)</div>""", part)
+        snippet = _first(r"""class="content [^"]*"[^>]*>(.*?)</div>""", part)
+        m = re.search(r'<a\b[^>]*\bhref="([^"]*)"', part)
+        href = html.unescape(m.group(1)) if m else ""
+        if href.startswith("/go/v1/"):
+            if len(_results(found)) >= RESULTS:
+                break      # enough results: don't ask Brave for more lookups than are handed to the model
+            href = brave_destination(href)
+        found.append((href, title, snippet))
     return _results(found)
 
 

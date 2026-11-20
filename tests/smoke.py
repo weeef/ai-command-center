@@ -286,6 +286,22 @@ def t_web():
     brave = ('<div class="snippet" data-type="web"><a href="https://b.org/q" class="l1"><div class="title search-snippet-title x">B page</div></a>'
              '<div class="content t-primary">about b</div></div>')
     check("web: Brave results are read", w.parse_brave(brave) == [{"title": "B page", "url": "https://b.org/q", "snippet": "about b"}], w.parse_brave(brave))
+    # Current Brave: each title links to /go/v1/<token>, whose page names the destination. A result whose own link
+    # is missing must be dropped, not given the next result's link (it used to slide every link one result over).
+    brave2 = ('<div data-type="web"><div class="title search-snippet-title">No link</div><div class="content x">none</div></div>'
+              '<div data-type="web"><a href="/go/v1/tokA" class="l1"><div class="title search-snippet-title">Gh</div></a>'
+              '<div class="content x">releases</div><a href="https://www.youtube.com/watch?v=1">video</a></div>'
+              '<div data-type="web"><a href="/go/v1/tokB"><div class="title search-snippet-title">Gone</div></a></div>')
+    pages = {"/go/v1/tokA": b'<p>sending you to <a class="destination svelte-1" href="https://github.com/o/r/releases">x</a></p>',
+             "/go/v1/tokB": b'<p>expired</p>'}
+    get, asked = w._get, []
+    w._get = lambda u, *a: asked.append(u) or (200, "text/html", pages[u[len(w.BRAVE):]], u)
+    try:
+        r = w.parse_brave(brave2)
+    finally:
+        w._get = get
+    check("web: Brave /go/v1 links are resolved, a link-less result doesn't take its neighbour's link",
+          r == [{"title": "Gh", "url": "https://github.com/o/r/releases", "snippet": "releases"}] and len(asked) == 2, (r, asked))
 
     hop, w._via_curl = w._via_curl, lambda *a: (302, {"location": "http://127.0.0.1/api/key"}, b"")
     curl, w.CURL = w.CURL, "stub"
