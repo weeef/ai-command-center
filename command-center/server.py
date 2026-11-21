@@ -467,7 +467,7 @@ def laptop_machine():
             "cpu": (j.get("cpu") or {}).get("utilization_percent", 0) or 0, "cpu_name": (j.get("cpu") or {}).get("name")}
 
 
-laptop_cache = {"machine": None, "t": 0.0, "resolved": None}
+laptop_cache = {"machine": None, "t": 0.0, "resolved": None, "model": None}
 
 
 def resolve_laptop(name):
@@ -501,6 +501,11 @@ def laptop_watch():
     while True:
         m = laptop_machine()
         laptop_cache.update(machine=m, t=time.time())
+        try:   # the laptop's model too, so "this pc" mode still shows when something runs on the laptop
+            laptop_cache["model"] = laptop_info(overlay=False)
+        except Exception:
+            log_error("laptop watch: model")
+            laptop_cache["model"] = None
         if m is None:   # only look the name up when something is wrong (it can take a moment)
             laptop_cache["resolved"] = resolve_laptop(laptop_address()[1] or "")
         time.sleep(3)
@@ -509,7 +514,7 @@ def laptop_watch():
 PAIR_STATES = {"loaded": "ON", "loading": "LOADING", "sleeping": "ASLEEP", "unloaded": "OFF"}
 
 
-def laptop_info(timeout=2.0):
+def laptop_info(timeout=2.0, overlay=True):
     info = {"state": "OFF", "key": "laptop", "name": None, "file": None, "ctx": None, "vision": None,
             "engine": "PAIR → laptop", "id": None, "processing": False, "note": ""}
     try:
@@ -550,9 +555,21 @@ def laptop_info(timeout=2.0):
                 info["processing"] = any(s.get("is_processing") for s in (slots if isinstance(slots, list) else []) if isinstance(s, dict))
         except OSError:
             pass
-    if switching["on"]:
+    if overlay and switching["on"]:
         info["state"], info["note"] = "LOADING", switching["msg"]
     return info
+
+
+def laptop_brief(m, machine):
+    """What the laptop is running, for the chip and usage pane whatever "run on" is set to."""
+    if not m:
+        return None
+    out = {k: m.get(k) for k in ("state", "name", "processing", "vision", "ctx", "note")}
+    g = (machine or {}).get("gpu") or {}
+    # PAIR only knows the models it starts; a lot of VRAM in use with PAIR idle means something else is on the GPU
+    out["gpu_other"] = m.get("state") == "OFF" and (g.get("used") or 0) > 3 * 1024 ** 3
+    out["gpu_used"] = g.get("used")
+    return out
 
 
 def laptop_action(action):
@@ -729,6 +746,8 @@ def stats():
          "gpu": machine["gpu"], "ram": machine["ram"], "cpu": machine["cpu"], "model": m, "busy": busy,
          "machines": {"pc": pc, "laptop": lap},
          "laptop_online": laptop_cache["machine"] is not None,
+         "laptop_model": part(lambda: laptop_brief(m if target["v"] == "laptop" else laptop_cache["model"], lm),
+                              None, "laptop model brief"),
          "laptop_note": None if laptop_cache["machine"] is not None else part(laptop_reach_note, None, "laptop note"),
          "laptop_name": (laptop_cache["machine"] or {}).get("name") or part(lambda: laptop_address()[1], None, "laptop name"),
          "tokens": part(token_watch.view, None, "tokens") if token_watch else None,

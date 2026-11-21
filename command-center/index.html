@@ -284,6 +284,9 @@ main{display:grid;grid-template-columns:432px 1fr;gap:14px;padding:6px 12px 12px
 #tgtRow .k{color:var(--accent);width:56px}
 .chip.tg.sel{background:var(--accent2);border-color:var(--accent2)}
 .chip.tg.online:not(.sel){color:var(--ok)}
+#usagePane>.title{display:flex;align-items:baseline;gap:0;white-space:nowrap;max-width:calc(100% - 26px)}#usageNote{margin-left:6px;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.chip.tg .lrun{font-size:.92em;opacity:.9}
+.chip.tg.sel .lrun{color:inherit}
 .hide{display:none!important}
 #modelPick{display:inline-flex;align-items:center;gap:6px;max-width:260px;min-width:0}
 #modelPick span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -1230,9 +1233,14 @@ function render(){
   $("modelPick").hidden = laptop;
   $("chatHost").textContent = laptop ? "· laptop via PAIR 127.0.0.1:8080" : "· 127.0.0.1:8090";
   const lc = document.querySelector('.chip.tg[data-t="laptop"]');
-  lc.textContent = (S.laptop_online ? "● " : "○ ") + "laptop";
+  const LM = S.laptop_model, lst = LM ? LM.state : "OFF", lname = S.laptop_name || "laptop";
+  const lrun = lst !== "OFF", lword = !lrun ? "" : LM.processing ? "busy" : ({ON: "on", ASLEEP: "asleep", LOADING: "loading"})[lst] || lst.toLowerCase();
+  lc.innerHTML = (S.laptop_online ? "● " : "○ ") + "laptop" + (lrun ? ` <span class="lrun st-${LM.processing ? "THINKING" : lst}">· ${lword}</span>` : "");
   lc.classList.toggle("online", !!S.laptop_online);
-  lc.title = S.laptop_online ? `${S.laptop_name || "laptop"} is on and reachable` : (S.laptop_note || `${S.laptop_name || "laptop"} is off or not reachable`);
+  lc.classList.toggle("running", lrun);
+  lc.title = !S.laptop_online ? (S.laptop_note || `${lname} is off or not reachable`)
+    : lrun ? `${lname} is running ${shortModel(LM.name)} (${lword}${LM.ctx ? ", " + LM.ctx.toLocaleString() + " ctx" : ""}) through PAIR` + (laptop ? "" : " · click to chat with it")
+    : `${lname} is on and reachable, no model loaded` + (LM && LM.gpu_other ? ` (but ${(LM.gpu_used / 1024 ** 3).toFixed(1)} GB of its GPU is in use by something PAIR didn't start)` : "");
   const key = m.key || (m.state === "OFF" ? null : selected);
   $("fModel").textContent = laptop ? (m.name || m.note || "–")
     : m.state === "OFF" ? `off · next: ${modelLabel(selected)}` : (m.name || key || "–");
@@ -1274,7 +1282,9 @@ function renderUsage(){
     t.classList.toggle("down", !mm.ok);
     t.title = (t.dataset.u === "pc" ? "this PC" : "the laptop") + (mm.ok ? "" : " (not reachable)") + " · click to show";
   });
-  $("usageNote").textContent = M.ok ? M.name : "not reachable";
+  const LM = k === "laptop" && S.laptop_model;
+  $("usageNote").textContent = !M.ok ? "not reachable" : M.name + (LM && LM.state !== "OFF" ? ` · ${shortModel(LM.name)} ${LM.processing ? "busy" : LM.state.toLowerCase()}`
+    : LM && LM.gpu_other ? " · gpu in use outside PAIR" : k === "laptop" ? " · no model loaded" : "");
   hist.gpu = mhist[k].gpu; hist.cpu = mhist[k].cpu;
   const segsOff = id => $(id).querySelectorAll(".segs i").forEach(s => s.classList.remove("f"));
   if (M.gpu) {
@@ -1287,6 +1297,7 @@ function renderUsage(){
   $("vCpu").innerHTML = M.ok ? `<b>${M.cpu}%</b>` : "n/a";
   drawSparks();
 }
+const shortModel = n => (n || "model").replace(/-GGUF/i, "").replace(/:[^:]*$/, "");
 function setUsage(k){ usageView = k; renderUsage(); }
 /* tokens burned: both machines at once */
 const fmtTok = n => n == null ? "–" : n >= 1e9 ? (n/1e9).toFixed(2) + "B" : n >= 1e6 ? (n/1e6).toFixed(2) + "M" : n >= 1e4 ? (n/1e3).toFixed(1) + "k" : String(n);
