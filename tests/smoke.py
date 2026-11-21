@@ -377,7 +377,44 @@ def t_web():
         w._cache.clear()
 
 
-GROUPS = {"web": t_web, "modules": t_modules, "smuggle": t_smuggle, "key": t_key, "guard": t_guard, "phone": t_phone, "tools": t_tools, "tuner": t_tuner}
+def t_laptop():
+    """The laptop picker: switching unloads what's up before loading the pick; unknown ids are refused."""
+    st = {"unsloth/A-GGUF:Q4_K_M": "loaded", "unsloth/B-GGUF:Q6_K": "unloaded"}
+    calls = []
+
+    def fake(method, path, obj=None, timeout=2.0):
+        if method == "GET" and path == "/models":
+            return 200, {"data": [{"id": k, "status": {"value": v, "args": ["--ctx-size", "32768"]},
+                                   "architecture": {"input_modalities": ["text"]}} for k, v in st.items()]}
+        calls.append((path, obj["model"]))
+        st[obj["model"]] = "loaded" if path == "/models/load" else "unloaded"
+        return 200, {"success": True}
+    real, save, pick = server.pair_req, server.save_settings, server.settings.get("laptop_pick")
+    server.pair_req, server.save_settings = fake, lambda: None
+    try:
+        ok, msg = server.laptop_action("on", "unsloth/B-GGUF:Q6_K")
+        check("laptop: picking another model unloads the running one, then loads the pick",
+              ok and calls == [("/models/unload", "unsloth/A-GGUF:Q4_K_M"), ("/models/load", "unsloth/B-GGUF:Q6_K")], (ok, msg, calls))
+        check("laptop: the pick is remembered", server.settings.get("laptop_pick") == "unsloth/B-GGUF:Q6_K")
+        calls.clear()
+        ok, msg = server.laptop_action("on", "unsloth/../evil")
+        check("laptop: a model the laptop doesn't list is refused", not ok and not calls, (ok, msg))
+        ok, msg = server.laptop_action("on")
+        check("laptop: on with the pick already running does nothing", ok and not calls and "already" in msg, (ok, msg))
+        ok, msg = server.laptop_action("off")
+        check("laptop: off unloads it", ok and calls == [("/models/unload", "unsloth/B-GGUF:Q6_K")], (ok, calls))
+        v = server.laptop_models_state()
+        check("laptop: the picker lists both with names and context", [m["name"] for m in v["models"]] == ["A", "B"]
+              and v["models"][1]["quant"] == "Q6_K" and v["models"][0]["ctx"] == 32768 and v["picked"] == "unsloth/B-GGUF:Q6_K", v)
+    finally:
+        server.pair_req, server.save_settings = real, save
+        if pick is None:
+            server.settings.pop("laptop_pick", None)
+        else:
+            server.settings["laptop_pick"] = pick
+
+
+GROUPS = {"web": t_web, "modules": t_modules, "smuggle": t_smuggle, "key": t_key, "guard": t_guard, "phone": t_phone, "tools": t_tools, "tuner": t_tuner, "laptop": t_laptop}
 
 if __name__ == "__main__":
     want = sys.argv[1:] or list(GROUPS)

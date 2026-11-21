@@ -512,6 +512,55 @@ def laptop_watch():
 
 
 PAIR_STATES = {"loaded": "ON", "loading": "LOADING", "sleeping": "ASLEEP", "unloaded": "OFF"}
+UP_STATES = ("loaded", "sleeping", "loading")
+
+
+def pair_model_view(m):
+    """One PAIR model in the shape the laptop picker shows."""
+    st = m.get("status") or {}
+    args = st.get("args") or []
+
+    def arg(flag):
+        try:
+            return args[args.index(flag) + 1]
+        except (ValueError, IndexError):
+            return None
+    ctx = (m.get("meta") or {}).get("n_ctx")
+    if not ctx:
+        try:
+            ctx = int(arg("--ctx-size") or 0) or None
+        except ValueError:
+            ctx = None
+    mid = m.get("id") or ""
+    repo, _, quant = mid.partition(":")
+    return {"id": mid, "name": repo.split("/")[-1].replace("-GGUF", "").replace("-gguf", ""), "repo": repo,
+            "quant": quant or None, "state": PAIR_STATES.get(st.get("value", ""), "OFF"), "ctx": ctx,
+            "vision": "image" in ((m.get("architecture") or {}).get("input_modalities") or []) or bool(arg("--mmproj"))}
+
+
+def laptop_models_state():
+    """The laptop picker: what PAIR can load there, which one is up, which one "on" starts."""
+    out = {"models": [], "picked": settings.get("laptop_pick"), "online": laptop_cache["machine"] is not None,
+           "name": (laptop_cache["machine"] or {}).get("name") or laptop_address()[1], "note": None, "busy": switching["on"]}
+    try:
+        out["models"] = [pair_model_view(m) for m in laptop_models()]
+    except ConnectionRefusedError:
+        out["note"] = "PAIR isn't running on this PC (nothing on 127.0.0.1:8080)"
+    except OSError:
+        out["note"] = "PAIR is running, but " + laptop_reach_note()
+    ids = [m["id"] for m in out["models"]]
+    if out["picked"] not in ids:
+        out["picked"] = ids[0] if ids else None
+    g = (laptop_cache["machine"] or {}).get("gpu") or {}
+    out["vram_gb"] = round(g["total"] / 1024 ** 3, 1) if g.get("total") else None
+    return out
+
+
+def laptop_models(timeout=4.0):
+    """Every model PAIR can load on the laptop (what the laptop has downloaded), or raises OSError."""
+    _, j = pair_req("GET", "/models", timeout=timeout)
+    data = j.get("data") if isinstance(j, dict) else None
+    return [x for x in (data or []) if isinstance(x, dict) and x.get("id")]
 
 
 def laptop_info(timeout=2.0, overlay=True):
@@ -530,8 +579,9 @@ def laptop_info(timeout=2.0, overlay=True):
     if not data:
         info["note"] = "PAIR lists no laptop model: " + laptop_reach_note()
         return info
-    # Prefer a model that's already up; otherwise the first one PAIR lists.
-    m = next((x for x in data if (x.get("status") or {}).get("value") in ("loaded", "sleeping", "loading")), data[0])
+    # Prefer a model that's already up; otherwise the one picked in the laptop picker; otherwise the first one PAIR lists.
+    pick = settings.get("laptop_pick")
+    m = next((x for x in data if (x.get("status") or {}).get("value") in UP_STATES), None)         or next((x for x in data if x.get("id") == pick), data[0])
     st = (m.get("status") or {}).get("value", "")
     args = (m.get("status") or {}).get("args") or []
     ctx = (m.get("meta") or {}).get("n_ctx")
@@ -572,27 +622,59 @@ def laptop_brief(m, machine):
     return out
 
 
-def laptop_action(action):
-    info = laptop_info(timeout=12)   # a click can wait; the 1 s stats poll can't
-    if not info["id"]:
-        return False, info["note"] or "laptop model not found"
-    if action == "on" and info["state"] in ("ON", "ASLEEP"):
-        return True, "already on" + (" (asleep, wakes on the first message)" if info["state"] == "ASLEEP" else "")
-    if action == "off" and info["state"] == "OFF":
-        return True, "already off"
-    switching.update(on=True, msg=("waking " if action == "on" else "unloading ") + "laptop model")
+def laptop_action(action, model=None):
+    """Turn the laptop's model on or off. With model (a PAIR id) "on" switches to that model: whatever else is up on
+    the laptop is unloaded first, since two big models don't fit its 16 GB."""
     try:
-        code, j = pair_req("POST", "/models/load" if action == "on" else "/models/unload", {"model": info["id"]}, timeout=30)
+        listed = laptop_models(timeout=12)   # a click can wait; the 1 s stats poll can't
+    except OSError:
+        info = laptop_info(timeout=12)
+        return False, info["note"] or "PAIR did not answer"
+    if not listed:
+        return False, laptop_info(timeout=12)["note"] or "PAIR lists no laptop model"
+    ids = [x["id"] for x in listed]
+    if model is not None and model not in ids:
+        return False, "the laptop doesn't have that model (PAIR doesn't list it)"
+    up = [x["id"] for x in listed if (x.get("status") or {}).get("value") in UP_STATES]
+    if action == "off":
+        if not up:
+            return True, "already off"
+        todo = [("/models/unload", u) for u in up]
+        msg = "unloading laptop model"
+    else:
+        want = model or (up[0] if up else settings.get("laptop_pick") if settings.get("laptop_pick") in ids else ids[0])
+        if model:
+            settings["laptop_pick"] = model
+            save_settings()
+        if up == [want]:
+            st = next(x for x in listed if x["id"] == want)["status"].get("value")
+            return True, "already on" + (" (asleep, wakes on the first message)" if st == "sleeping" else "")
+        todo = [("/models/unload", u) for u in up if u != want] + [("/models/load", want)]
+        msg = ("switching the laptop to " if up else "waking ") + want.split("/")[-1]
+    switching.update(on=True, msg=msg)
+    try:
+        for path, mid in todo:
+            code, j = pair_req("POST", path, {"model": mid}, timeout=30)
+            if code >= 400:
+                err = j.get("error") if isinstance(j, dict) else j
+                if isinstance(err, dict):
+                    err = err.get("message")
+                return False, f"PAIR refused ({code}): {err}"
+            if path == "/models/unload" and action == "on":
+                # let the laptop free the VRAM before the next model starts loading
+                for _ in range(30):
+                    try:
+                        now = {x["id"]: (x.get("status") or {}).get("value") for x in laptop_models()}
+                    except OSError:
+                        break
+                    if now.get(mid) not in UP_STATES:
+                        break
+                    time.sleep(1)
     except OSError as e:
         return False, f"PAIR did not answer ({e.__class__.__name__})"
     finally:
         switching.update(on=False, msg="")
-    if code >= 400:
-        msg = j.get("error") if isinstance(j, dict) else j
-        if isinstance(msg, dict):
-            msg = msg.get("message")
-        return False, f"PAIR refused ({code}): {msg}"
-    return True, ("loading" if action == "on" else "unloading") + " laptop model"
+    return True, msg
 
 
 _stats = {"t": 0, "v": None}
@@ -901,6 +983,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_json(200, LU.public())
         elif path == "/api/models":
             self.send_json(200, models_state())
+        elif path == "/api/models/laptop":
+            self.send_json(200, laptop_models_state())
         elif path == "/api/cloud":
             self.send_json(200, dict(cloud.status(settings), connector=webtool.config(settings)["enabled"]))
         elif path == "/api/connector":
@@ -1109,7 +1193,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self.send_json(400, {"error": "action must be on or off"})
             if switching["on"]:
                 return self.send_json(409, {"error": "busy: " + switching["msg"]})
-            ok, msg = laptop_action(action) if target["v"] == "laptop" else model_action(action, key, bool(data.get("restart")), bool(data.get("retune")))
+            lm = data.get("laptop_model") if isinstance(data.get("laptop_model"), str) else None
+            ok, msg = laptop_action(action, lm) if target["v"] == "laptop" else model_action(action, key, bool(data.get("restart")), bool(data.get("retune")))
             _stats["t"] = 0
             return self.send_json(200 if ok else 500, {"ok": ok, "msg": msg})
         if path == "/v1/chat/completions":
@@ -1439,6 +1524,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return self.send_json(404, {"error": "unknown"})
 
     def models_post(self, op, data):
+        if op == "laptop":   # remember which laptop model "on" starts; switching a running one goes through /api/model
+            mid = data.get("id")
+            try:
+                ids = [x["id"] for x in laptop_models()]
+            except OSError:
+                return self.send_json(502, {"error": "PAIR didn't answer: is it running?"})
+            if not isinstance(mid, str) or mid not in ids:
+                return self.send_json(400, {"error": "the laptop doesn't have that model"})
+            settings["laptop_pick"] = mid
+            save_settings()
+            return self.send_json(200, {"ok": True, "picked": mid})
         if op == "prefs":
             m = models.find(data.get("id"))
             if not m:

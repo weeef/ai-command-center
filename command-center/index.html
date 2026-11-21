@@ -294,6 +294,8 @@ main{display:grid;grid-template-columns:432px 1fr;gap:14px;padding:6px 12px 12px
 .fit-gpu{--fc:var(--ok)}.fit-split{--fc:var(--cyan)}.fit-ram{--fc:var(--warn)}.fit-cpu{--fc:var(--warn)}.fit-too-big{--fc:var(--crit)}
 .fitdot[class*="fit-"]{background:var(--fc)}
 .fitb{font-size:10.5px;padding:1px 7px;border:1px solid var(--fc,var(--border));color:var(--fc,var(--dim));white-space:nowrap;border-radius:999px}
+#lapDlg{background:var(--bg);color:var(--fg);border:1px solid var(--border);padding:16px 18px;width:min(640px,calc(100vw - 32px));max-height:calc(100vh - 48px);overflow:auto}
+#lapDlg::backdrop{background:rgba(0,0,0,.6)}
 #modelDlg{background:var(--bg);color:var(--fg);border:1px solid var(--border);padding:16px 18px;width:min(760px,calc(100vw - 32px));max-height:calc(100vh - 48px);overflow:auto}
 #modelDlg::backdrop{background:rgba(0,0,0,.6);backdrop-filter:blur(2px)}
 .mdhead{display:flex;align-items:center;gap:12px;margin-bottom:10px}
@@ -882,6 +884,12 @@ body.remote #tags span[data-ws="2"]{display:none}
   <div class="hint">Or copy any <b>.gguf</b> file into the models folder (any subfolder; a <b>mmproj*.gguf</b> next to it adds image input) and it appears here.
     <button id="mdOpen">open models folder</button> <button id="mdRescan">rescan</button></div>
 </dialog>
+<dialog id="lapDlg" aria-labelledby="ldTitle">
+  <div class="mdhead"><div class="title" id="ldTitle">laptop models</div><span id="ldHw"></span><button id="ldClose" title="close (Esc)">✕</button></div>
+  <div id="ldList"></div>
+  <div class="hint">These are the models downloaded on the laptop, run through NVIDIA PAIR. Picking one while the laptop's model is on unloads the current one and loads the new one (they don't fit together). While it's off, the pick is what <b>⏻ on</b> starts.
+    To put another model on the laptop, add it from the model catalog in the PAIR app; it shows up here.</div>
+</dialog>
 <dialog id="updDlg" aria-labelledby="updTitle">
   <div class="title" id="updTitle">new version available</div>
   <div id="updBody"></div>
@@ -1230,7 +1238,6 @@ function render(){
   $("host").textContent = `${S.user}@${S.host}`;
   const laptop = S.target === "laptop";
   document.querySelectorAll(".chip.tg").forEach(c => { c.classList.toggle("sel", c.dataset.t === S.target); c.disabled = ctlBusy; });
-  $("modelPick").hidden = laptop;
   $("chatHost").textContent = laptop ? "· laptop via PAIR 127.0.0.1:8080" : "· 127.0.0.1:8090";
   const lc = document.querySelector('.chip.tg[data-t="laptop"]');
   const LM = S.laptop_model, lst = LM ? LM.state : "OFF", lname = S.laptop_name || "laptop";
@@ -1354,12 +1361,15 @@ async function poll(){
 
 /* ---------------- model control ---------------- */
 let ctlBusy = false;
-async function modelAction(action, model, restart, retune){
+async function modelAction(action, model, restart, retune, laptopModel){
   if (ctlBusy) return;
   ctlBusy = true; render();
-  $("ctlMsg").textContent = action === "off" ? "stopping…" : `starting ${modelLabel(model || selected)}…`;
+  const onLap = S && S.target === "laptop", lapId = laptopModel || (lap && lap.picked) || null;
+  $("ctlMsg").textContent = action === "off" ? "stopping…" : `starting ${onLap ? shortModel(lapId || S.model.id) : modelLabel(model || selected)}…`;
   try {
-    const r = await fetch("/api/model", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({action, model: model || selected, restart: !!restart, retune: !!retune})});
+    const body = {action, model: model || selected, restart: !!restart, retune: !!retune};
+    if (onLap && action === "on" && laptopModel) body.laptop_model = laptopModel;
+    const r = await fetch("/api/model", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
     const j = await r.json();
     $("ctlMsg").textContent = j.msg || j.error || "";
     if (!r.ok) sys(j.error || j.msg || "model action failed", true);
@@ -1377,7 +1387,7 @@ async function setTarget(t){
     const r = await fetch("/api/target", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({target: t})});
     if (!r.ok) throw new Error((await r.json()).error);
     sys(t === "laptop" ? "now using the laptop's model (through PAIR)." : "now using this PC's models.");
-    const j = await (await fetch("/api/stats", {cache:"no-store"})).json(); S = j; render(); loadCline();
+    const j = await (await fetch("/api/stats", {cache:"no-store"})).json(); S = j; render(); loadCline(); if (t === "laptop") loadLaptop().then(render);
   } catch (e) { sys("could not switch: " + e.message, true); }
 }
 document.querySelectorAll(".chip.tg").forEach(c => c.onclick = () => setTarget(c.dataset.t));
@@ -1405,6 +1415,7 @@ async function loadModels(){
   renderPick(); if ($("modelDlg").open) renderModelDlg();
 }
 function renderPick(){
+  if (S && S.target === "laptop") return renderLapPick();
   const b = $("modelPick"), m = libFind(selected);
   b.querySelector("span").textContent = m ? m.name : (mlib && !mlib.models.length ? "no models: add one" : "model");
   b.querySelector(".fitdot").className = "fitdot" + (m ? " fit-" + m.plan.fit : "");
@@ -1419,6 +1430,52 @@ function pickModel(id){
   if (on && S.model.key !== id) modelAction("on", id);  // switch: stops the running one, starts this one
   render();
 }
+/* laptop picker: the models PAIR can load on the laptop */
+let lap = null;
+async function loadLaptop(){
+  try { lap = await (await fetch("/api/models/laptop", {cache: "no-store"})).json(); } catch (e) { lap = null; }
+  if ($("lapDlg").open) renderLapDlg();
+}
+function renderLapPick(){
+  const b = $("modelPick"), m = S.model, up = m.state !== "OFF";
+  const pickedM = lap && lap.models.find(x => x.id === lap.picked);
+  const name = up || !pickedM ? shortModel(m.name || m.id || (pickedM && pickedM.id)) : pickedM.name;
+  b.querySelector("span").textContent = name || (m.note ? "no laptop model" : "laptop model");
+  b.querySelector(".fitdot").className = "fitdot" + (up ? " fit-gpu" : "");
+  const pc = $("pickCap"), vis = up ? m.vision : pickedM && pickedM.vision;
+  pc.hidden = vis == null;
+  if (vis != null) { pc.className = "cap " + (vis ? "vis" : "txt"); pc.textContent = vis ? "images" : "text only"; }
+  visionUI();
+  b.title = (S.laptop_name || "laptop") + (up ? ` is running ${name}` : ` · next: ${name}`) + " · click to choose the laptop's model";
+}
+function renderLapDlg(){
+  const L = lap;
+  $("ldHw").textContent = L ? `${L.name || "laptop"}${L.vram_gb ? " · " + L.vram_gb + " GB VRAM" : ""}${L.online ? "" : " · not reachable"}` : "";
+  if (!L) { $("ldList").innerHTML = `<div class="hint">couldn't ask the command center for the laptop's models.</div>`; return; }
+  if (!L.models.length) { $("ldList").innerHTML = `<div class="hint" style="margin:0 0 8px">${esc(L.note || "PAIR lists no models for the laptop.")}</div>`; return; }
+  const upId = S && S.target === "laptop" && S.model.state !== "OFF" ? S.model.id : (L.models.find(x => x.state !== "OFF") || {}).id;
+  $("ldList").innerHTML = L.models.map(x => {
+    const st = x.state === "OFF" ? "" : x.state === "ASLEEP" ? "asleep" : x.state === "LOADING" ? "loading" : "running";
+    const bits = [x.quant, x.ctx ? kctx(x.ctx) + " context" : "", x.repo].filter(Boolean);
+    return `<div class="mcard ${x.id === (upId || L.picked) ? "sel" : ""}" data-lid="${esc(x.id)}" tabindex="0" role="button">
+      <div class="mn">${esc(x.name)}${x.vision ? `<span class="cap vis" title="can read images you attach">images</span>` : `<span class="cap txt">text only</span>`}${st ? `<span class="tag">${st}</span>` : x.id === L.picked ? `<span class="tag next">selected</span>` : ""}</div>
+      <div class="ms">${esc(bits.join(" · "))}</div>
+    </div>`; }).join("");
+}
+async function pickLaptop(id){
+  if (ctlBusy || !lap) return;
+  const m = S && S.model, up = S && S.target === "laptop" && m.state !== "OFF";
+  if (up && m.id === id) return $("lapDlg").close();
+  if (up) {   // switch the running laptop model (the server saves the pick too)
+    $("lapDlg").close();
+    sys(`switching the laptop to ${shortModel(id)}: unloading ${shortModel(m.id)} first…`);
+    await modelAction("on", null, false, false, id);
+  } else {
+    const r = await postJSON("/api/models/laptop", {id});
+    if (!r.ok) return sys("couldn't pick that: " + r.msg, true);
+  }
+  await loadLaptop(); render();
+}
 function capBadges(m){
   return (m.vision ? `<span class="cap vis" title="can read images you attach">images</span>`
                    : `<span class="cap txt" title="${m.mtp ? "fast-text MTP build: llama.cpp can't use MTP and images together" : "no vision projector (mmproj) for this model"}; attached images are left out">text only</span>`)
@@ -1426,6 +1483,7 @@ function capBadges(m){
 }
 /* Does the model that will answer take images? The running one if a model is on, else the one selected. */
 function modelSees(){
+  if (S && S.target === "laptop") return S.model.vision == null ? true : !!S.model.vision;
   if (S && S.target !== "laptop" && ["ON", "ASLEEP"].includes(S.model.state) && S.model.vision != null) return S.model.vision;
   const m = libFind(selected); return m ? m.vision : true;
 }
@@ -1460,7 +1518,12 @@ function renderModelDlg(){
     ${d.state === "downloading" || d.state === "starting" ? `<progress max="${d.total || 1}" value="${d.done}"></progress><span class="ms">${(d.done / 1073741824).toFixed(1)} / ${(d.total / 1073741824).toFixed(1)} GB</span><button data-cancel="${id}">cancel</button>`
       : d.state === "done" ? `<span style="color:var(--ok)">downloaded ✓, it's in the list above</span>` : `<span style="color:var(--crit)">${esc(d.error || d.state)}</span>`}</div>`).join("");
 }
-$("modelPick").onclick = () => { loadModels(); renderModelDlg(); $("modelDlg").showModal(); };
+$("modelPick").onclick = () => {
+  if (S && S.target === "laptop") { renderLapDlg(); $("lapDlg").showModal(); loadLaptop(); return; }
+  loadModels(); renderModelDlg(); $("modelDlg").showModal(); };
+$("ldClose").onclick = () => $("lapDlg").close();
+$("ldList").addEventListener("click", e => { const c = e.target.closest(".mcard"); if (c) pickLaptop(c.dataset.lid); });
+$("ldList").addEventListener("keydown", e => { const c = e.target.closest(".mcard"); if (c && e.key === "Enter") pickLaptop(c.dataset.lid); });
 $("mdClose").onclick = () => $("modelDlg").close();
 $("mdAuto").onchange = async e => { const r = await postJSON("/api/models/tune-settings", {auto: e.target.checked}); if (!r.ok) sys("couldn't save that: " + r.msg, true); loadModels(); };
 $("mdList").addEventListener("click", e => {
@@ -1516,6 +1579,8 @@ $("mdHf").addEventListener("click", async e => {
 $("mdDl").addEventListener("click", async e => { const b = e.target.closest("[data-cancel]"); if (b) { await postJSON("/api/models/cancel", {id: b.dataset.cancel}); loadModels(); } });
 $("mdOpen").onclick = () => postJSON("/api/models/open", {});
 $("mdRescan").onclick = loadModels;
+loadLaptop();
+setInterval(() => { if ($("lapDlg").open) loadLaptop(); }, 2000);
 setInterval(() => { if ($("modelDlg").open || (mlib && Object.values(mlib.downloads || {}).some(d => d.state === "downloading" || d.state === "starting"))) loadModels(); }, 1500);
 { const want = /(^|[#&])models/.test(location.hash); loadModels().then(() => { if (want) $("modelPick").click(); }); }
 function resolveModel(a){
