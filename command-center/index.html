@@ -860,6 +860,10 @@ body.remote #tags span[data-ws="2"]{display:none}
     <section class="pane"><div class="title">appearance</div><div id="themePick" class="memloc" style="margin-top:0"></div></section>
     <section class="pane"><div class="title">updates <i>· from github</i></div><div id="updBox">loading…</div></section>
     <section class="pane"><div class="title">llama.cpp engine <i>· official builds</i></div><div id="lluBox">loading…</div></section>
+    <section class="pane"><div class="title">uninstall</div>
+      <div class="hint">Removes the command center and everything it set up: llama.cpp, models, memories + chats (saved as a zip on the desktop first), settings, keys, shortcuts, Cline's and Tailscale's settings. Optionally also Python, Tailscale, VS Code + Cline and Git. A window lists it all with sizes and deletes nothing until you confirm. Also: <code>uninstall.bat</code> in the folder.</div>
+      <div class="memloc"><button id="uninBtn">open uninstaller…</button><span id="uninMsg" class="hint"></span></div>
+    </section>
     <section class="pane"><div class="title">web access <i>· optional, free</i></div><div id="webBox">loading…</div></section>
     <section class="pane"><div class="title">cloud &amp; web search <i>· optional</i></div><div id="cloudBox">loading…</div></section>
     <section class="pane" id="memListPane"><div class="title">memories <i id="memCount"></i></div>
@@ -2917,6 +2921,17 @@ async function applyUpd(){
   }
   $("updBody").insertAdjacentHTML("beforeend", `<div class="updWarn">The server hasn't come back. Close this window and open the command center again.</div>`);
 }
+/* ---------------- uninstall: two clicks, then uninstall.bat opens in its own window (which asks again) */
+(() => {
+  const b = $("uninBtn"); if (!b) return; let armed = 0;
+  b.onclick = async () => {
+    if (Date.now() - armed > 4000) { armed = Date.now(); b.textContent = "sure? click again"; setTimeout(() => { if (Date.now() - armed >= 4000) b.textContent = "open uninstaller…"; }, 4100); return; }
+    armed = 0; b.textContent = "open uninstaller…";
+    const r = await postJSON("/api/uninstall", {});
+    flash($("uninMsg"), r.ok ? r.msg : (r.msg || "couldn't open it"), !r.ok);
+  };
+})();
+
 /* ---------------- llama.cpp engine updates ----------------
    The server checks ggml-org/llama.cpp every 12 h. With auto-install on it downloads + checksum-verifies the newest
    build that's been out a day and swaps it in the next time no model is running (it never stops a running model).

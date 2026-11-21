@@ -290,6 +290,7 @@ Memory keeps working with any model. `start-llm.bat` still works from a terminal
 
 ```
 setup.bat / setup.ps1      first-time setup (safe to re-run)
+uninstall.bat / .ps1       removes it all again: app, models, memory, shortcuts, optionally the prerequisites
 start-llm.bat              model launcher (menu), port 8090; reads llm-config.bat
 start-standard.bat / start-uncensored.bat / check-model.bat
 start-command-center.bat   opens the app (the desktop shortcut does the same without a console)
@@ -333,6 +334,27 @@ docs\review-report.md      what the last review pass measured, fixed and left op
 - The web connector (off by default) only opens public web addresses, and only links that were in the conversation or
   in its own search results; it is capped at 6 calls per reply.
 - Your memories, chats and settings stay in files on your PC (the memory folder). Nothing is uploaded anywhere.
+
+## Uninstall
+
+**6:set → uninstall → open uninstaller…** (or double-click `uninstall.bat` in the folder). A window lists everything
+with its size and deletes nothing until you type `uninstall`:
+
+1. **everything the command center made**: the program, its settings, API key and logs, the browser and laptop VS Code
+   profiles, every llama.cpp build, the models, your memories and saved chats (zipped to the desktop first), the
+   desktop / start-menu / taskbar shortcuts. It also points your main Cline back at the provider it had before
+   (5:cline routing) and turns off phone access (`tailscale serve`).
+2. **all of that plus the prerequisites**: the pip packages setup added (numpy, anthropic), Python, Tailscale, VS Code +
+   the Cline extension + `~\.cline`, and Git (through winget). Other programs may use these, so they're off in option 1.
+3. **just free disk space**: models + llama.cpp builds only.
+4. **choose item by item**.
+
+Files of yours that happen to be in the folder are kept (it asks before deleting the folder with them in it). The
+NVIDIA driver, Edge, and the laptop's PAIR app are never touched. "Open both" worktrees (`<project>-laptop`) are listed
+separately and removed only if you pick them and they have no uncommitted changes.
+
+From a terminal: `uninstall.bat -All`, `-Everything`, `-ModelsOnly`, `-Only models,engine`, plus `-KeepMemory`,
+`-KeepModels`, `-NoExport`, `-Yes` (no questions) and `-DryRun` (only show what would go).
 
 ## Troubleshooting
 

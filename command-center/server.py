@@ -1174,6 +1174,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/api/code/forget":
             ok, msg = workspaces.forget_recent(str(data.get("path", "")), settings, save_settings)
             return self.send_json(200, {"ok": ok, "msg": msg})
+        if path == "/api/uninstall":
+            # opens uninstall.bat in its own console; it lists everything and asks before deleting (PC only: not in
+            # REMOTE_ALLOWED). The window outlives this server, which the uninstaller stops.
+            bat = os.path.join(os.path.dirname(HERE), "uninstall.bat")
+            if not os.path.exists(bat):
+                return self.send_json(404, {"ok": False, "msg": "uninstall.bat is missing: update the command center first"})
+            subprocess.Popen(["cmd.exe", "/c", "start", "command center uninstall", bat], cwd=os.environ.get("TEMP") or HERE,
+                             creationflags=0x08000000 | 0x00000008, close_fds=True)
+            return self.send_json(200, {"ok": True, "msg": "the uninstaller opened in a new window"})
         if path == "/api/web/serve":
             if data.get("action") not in ("on", "off"):
                 return self.send_json(400, {"error": "action must be on or off"})

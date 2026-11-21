@@ -12,6 +12,8 @@
 !sync.bat
 !setup.bat
 !setup.ps1
+!uninstall.bat
+!uninstall.ps1
 !docs/
 !docs/*.md
 !bench/
