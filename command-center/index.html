@@ -861,8 +861,8 @@ body.remote #tags span[data-ws="2"]{display:none}
     <section class="pane"><div class="title">updates <i>· from github</i></div><div id="updBox">loading…</div></section>
     <section class="pane"><div class="title">llama.cpp engine <i>· official builds</i></div><div id="lluBox">loading…</div></section>
     <section class="pane"><div class="title">uninstall</div>
-      <div class="hint">Removes the command center and everything it set up: llama.cpp, models, memories + chats (saved as a zip on the desktop first), settings, keys, shortcuts, Cline's and Tailscale's settings. Optionally also Python, Tailscale, VS Code + Cline and Git. A window lists it all with sizes and deletes nothing until you confirm. Also: <code>uninstall.bat</code> in the folder.</div>
-      <div class="memloc"><button id="uninBtn">open uninstaller…</button><span id="uninMsg" class="hint"></span></div>
+      <div class="hint">Tick what to remove. A window then lists your picks again and deletes nothing until you type <code>uninstall</code> there. Also: <code>uninstall.bat</code> in the folder.</div>
+      <div id="uninBox" class="hint">open 6:set to scan…</div>
     </section>
     <section class="pane"><div class="title">web access <i>· optional, free</i></div><div id="webBox">loading…</div></section>
     <section class="pane"><div class="title">cloud &amp; web search <i>· optional</i></div><div id="cloudBox">loading…</div></section>
@@ -2921,16 +2921,54 @@ async function applyUpd(){
   }
   $("updBody").insertAdjacentHTML("beforeend", `<div class="updWarn">The server hasn't come back. Close this window and open the command center again.</div>`);
 }
-/* ---------------- uninstall: two clicks, then uninstall.bat opens in its own window (which asks again) */
-(() => {
-  const b = $("uninBtn"); if (!b) return; let armed = 0;
-  b.onclick = async () => {
-    if (Date.now() - armed > 4000) { armed = Date.now(); b.textContent = "sure? click again"; setTimeout(() => { if (Date.now() - armed >= 4000) b.textContent = "open uninstaller…"; }, 4100); return; }
-    armed = 0; b.textContent = "open uninstaller…";
-    const r = await postJSON("/api/uninstall", {});
-    flash($("uninMsg"), r.ok ? r.msg : (r.msg || "couldn't open it"), !r.ok);
+/* ---------------- uninstall: checkboxes from GET /api/uninstall (uninstall.ps1 -Json: what's here + sizes).
+   "uninstall ticked" (two clicks) opens uninstall.bat -Only <ticked> in its own window, which asks once more. */
+let uninSt = null, uninPick = null, uninExport = true, uninArmed = 0, uninBusy = false;
+const UNIN_GROUPS = [["app", "made by the command center"], ["extra", "in your own projects"], ["prereq", "prerequisites · other programs may use these"]];
+const UNIN_PRESETS = {all: i => i.group === "app", everything: i => i.group !== "extra", models: i => i.key === "models" || i.key === "engine", none: () => false};
+function uninSize(b){ return !b ? "" : b >= 1073741824 ? (b / 1073741824).toFixed(1) + " GB" : b >= 1048576 ? Math.round(b / 1048576) + " MB" : Math.max(1, Math.round(b / 1024)) + " KB"; }
+async function refreshUnin(fresh){
+  if (uninBusy) return; uninBusy = true;
+  const box = $("uninBox"); if (box && !uninSt) box.textContent = "scanning what's installed (a few seconds)…";
+  try { uninSt = await (await fetch("/api/uninstall" + (fresh ? "?fresh=1" : ""), {cache: "no-store"})).json(); }
+  catch(e) { uninSt = {ok: false, error: "the server didn't answer", items: []}; }
+  uninBusy = false;
+  const keys = new Set(uninSt.items.map(i => i.key));
+  if (!uninPick) uninPick = new Set(uninSt.items.filter(UNIN_PRESETS.all).map(i => i.key));
+  else uninPick = new Set([...uninPick].filter(k => keys.has(k)));
+  renderUnin();
+}
+function renderUnin(){
+  const box = $("uninBox"); if (!box || !uninSt) return;
+  if (!uninSt.ok) { box.innerHTML = `<div class="updWarn">${esc(uninSt.error || "scan failed")}</div><div class="memloc"><button id="uninRescan">scan again</button></div>`; $("uninRescan").onclick = () => refreshUnin(true); return; }
+  const it = uninSt.items, picked = it.filter(i => uninPick.has(i.key));
+  const total = picked.reduce((a, i) => a + (i.size || 0), 0);
+  let html = `<div class="memloc" style="margin-top:4px">select: <button data-up="all" title="everything the command center made; keeps Python, Tailscale, VS Code, Git">app</button><button data-up="everything" title="the app and the prerequisites">everything</button><button data-up="models">models + llama.cpp</button><button data-up="none">none</button></div>`;
+  for (const [g, name] of UNIN_GROUPS) {
+    const rows = it.filter(i => i.group === g); if (!rows.length) continue;
+    html += `<div style="margin:8px 0 2px;color:var(--fg)">${esc(name)}</div>`;
+    for (const i of rows) html += `<label style="display:flex;gap:7px;align-items:flex-start;margin:3px 0;cursor:pointer"><input type="checkbox" data-uk="${esc(i.key)}" ${uninPick.has(i.key) ? "checked" : ""} style="margin-top:2px">
+      <span><span style="color:var(--fg)">${esc(i.label)}</span>${i.size ? ` <b>${uninSize(i.size)}</b>` : ""}${i.detail ? `<br><i class="hint">${esc(i.detail)}</i>` : ""}</span></label>`;
+  }
+  if (!it.length) html += `<div>nothing of the command center's is left here.</div>`;
+  const mem = uninPick.has("memory");
+  html += `${mem ? `<label class="hint" style="display:flex;align-items:center;gap:5px;margin:8px 0 0"><input type="checkbox" id="uninExp" ${uninExport ? "checked" : ""}>save memories + chats as a zip on the desktop first</label>` : ""}
+    ${uninPick.has("app") ? `<div class="hint" style="margin-top:6px">removing the program closes this window too.</div>` : ""}
+    <div class="memloc"><button id="uninGo" class="${picked.length ? "primary" : ""}" ${picked.length ? "" : "disabled"}>${Date.now() - uninArmed < 4000 ? "sure? click again" : `uninstall ${picked.length} ticked${total ? " · " + uninSize(total) : ""}…`}</button>
+      <button id="uninRescan" title="look again (sizes, what's installed)">rescan</button><span id="uninMsg" class="hint"></span></div>`;
+  box.innerHTML = html;
+  box.querySelectorAll("[data-up]").forEach(b => b.onclick = () => { uninPick = new Set(it.filter(UNIN_PRESETS[b.dataset.up]).map(i => i.key)); uninArmed = 0; renderUnin(); });
+  box.querySelectorAll("[data-uk]").forEach(c => c.onchange = () => { c.checked ? uninPick.add(c.dataset.uk) : uninPick.delete(c.dataset.uk); uninArmed = 0; renderUnin(); });
+  if ($("uninExp")) $("uninExp").onchange = e => { uninExport = e.target.checked; };
+  $("uninRescan").onclick = () => refreshUnin(true);
+  $("uninGo").onclick = async () => {
+    if (Date.now() - uninArmed >= 4000) { uninArmed = Date.now(); renderUnin(); setTimeout(() => { if (Date.now() - uninArmed >= 4000) renderUnin(); }, 4100); return; }
+    uninArmed = 0;
+    const r = await postJSON("/api/uninstall", {items: [...uninPick], export: uninExport});
+    renderUnin();
+    flash($("uninMsg"), r.ok ? r.msg + ": confirm there" : (r.msg || "couldn't open it"), !r.ok);
   };
-})();
+}
 
 /* ---------------- llama.cpp engine updates ----------------
    The server checks ggml-org/llama.cpp every 12 h. With auto-install on it downloads + checksum-verifies the newest
@@ -3129,7 +3167,7 @@ async function refreshWs(){
   try {
     if (ws === "2") renderCode(await (await fetch("/api/code", {cache:"no-store"})).json());
     if (ws === "3") renderWeb(await (await fetch("/api/web", {cache:"no-store"})).json());
-    if (ws === "6") { await refreshMem(); if (!cloudSt) refreshCloud(); if (!webSt) refreshWeb(); refreshUpd(); refreshLlu(); }
+    if (ws === "6") { await refreshMem(); if (!cloudSt) refreshCloud(); if (!webSt) refreshWeb(); refreshUpd(); refreshLlu(); if (!uninSt) refreshUnin(); }
     if (ws === "4") await refreshTree();
     if (ws === "5") renderCline(await (await fetch("/api/clinecc", {cache:"no-store"})).json());
   } catch (e) {}

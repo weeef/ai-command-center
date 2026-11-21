@@ -11,8 +11,9 @@
 #   -Only models,engine,...        just these items: app engine models memory shortcuts cline serve worktrees
 #                                  pip python tailscale vscode git
 #   -DryRun                        only show what would be removed
+#   -Json                          only print what's installed as JSON (the 6:set checkboxes use this)
 param([string[]]$Only, [switch]$All, [switch]$Everything, [switch]$ModelsOnly, [switch]$KeepMemory, [switch]$KeepModels,
-      [switch]$NoExport, [switch]$Yes, [switch]$DryRun)
+      [switch]$NoExport, [switch]$Yes, [switch]$DryRun, [switch]$Json)
 $ErrorActionPreference = "Continue"
 $Root = (Split-Path -Parent $MyInvocation.MyCommand.Path).TrimEnd("\")
 $CC = Join-Path $Root "command-center"
@@ -83,7 +84,8 @@ Write-Host "Local AI command center - uninstall" -ForegroundColor White
 Write-Host "Folder: $Root"
 if (-not (Test-Path (Join-Path $CC "server.py")) -and -not (Test-Path (Join-Path $Root "models"))) {
     Note "This doesn't look like a command center folder (no command-center\server.py or models\). Nothing to do."
-    if (-not $Yes) { Read-Host "   press Enter to close" | Out-Null }
+    if ($Json) { [Console]::Out.WriteLine('@@JSON@@{"error":"not a command center folder"}') }
+    elseif (-not $Yes) { Read-Host "   press Enter to close" | Out-Null }
     exit 1
 }
 
@@ -176,6 +178,13 @@ Add "vscode"    "VS Code + the Cline extension + Cline's data (~\.cline: task hi
 Add "git"       "Git" 0 $hasGit "prereq" "other programs may use it"
 
 $present = @($items.Values | Where-Object { $_.present })
+# the order Show numbers them in
+$order = @(foreach ($g in "app", "extra", "prereq") { $present | Where-Object { $_.group -eq $g } })
+if ($Json) {
+    $out = @($order | ForEach-Object { [pscustomobject]@{ key = $_.key; label = $_.label; size = $_.size; group = $_.group; detail = $_.detail } })
+    [Console]::Out.WriteLine("@@JSON@@" + (ConvertTo-Json -InputObject $out -Compress -Depth 3))
+    exit 0
+}
 function Show {
     $n = 0
     foreach ($g in @(@("app", "made by the command center"), @("extra", "in your own projects"), @("prereq", "prerequisites (other programs may use these)"))) {
@@ -216,11 +225,25 @@ else {
     Write-Host "   1. everything the command center made (keeps Python, Tailscale, VS Code, Git)"
     Write-Host "   2. all of it, prerequisites too"
     Write-Host "   3. just free disk space: models + llama.cpp"
-    Write-Host "   4. choose item by item"
+    Write-Host "   4. tick boxes yourself"
     Write-Host "   q. quit, change nothing"
     $c = Read-Host "   which? [1-4/q]"
     switch ($c) { "1" { Preset "all" } "2" { Preset "everything" } "3" { Preset "models" } "4" { Preset "none" } default { Write-Host "   nothing changed."; exit 0 } }
-    if ($c -eq "4") { foreach ($it in $present) { $it.on = Ask "$($it.label)$(if ($it.size) { ' (' + (Fmt $it.size) + ')' })?" ($it.group -eq "app") } }
+    if ($c -eq "4") {
+        # a tick list: type numbers to tick / untick, Enter when done
+        foreach ($it in $present) { $it.on = ($it.group -eq "app") }
+        while ($true) {
+            Show
+            $t = Read-Host "`n   type numbers to tick/untick (e.g. 3 5 9), a = all, n = none, Enter = done"
+            if (-not $t) { break }
+            if ($t -eq "a") { foreach ($it in $present) { $it.on = $true }; continue }
+            if ($t -eq "n") { foreach ($it in $present) { $it.on = $false }; continue }
+            foreach ($x in ($t -split "[\s,]+")) {
+                $i = 0
+                if ([int]::TryParse($x, [ref]$i) -and $i -ge 1 -and $i -le $order.Count) { $order[$i - 1].on = -not $order[$i - 1].on }
+            }
+        }
+    }
     if ($c -in @("1", "2") -and $items["memory"].present) {
         $items["memory"].on = Ask "Delete your memories and saved chats too?" $true
     }

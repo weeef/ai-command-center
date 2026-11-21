@@ -854,6 +854,41 @@ def chat_tools():
     return (own + rest) or None
 
 
+UNINSTALL_KEYS = ("app", "engine", "models", "memory", "shortcuts", "cline", "serve", "worktrees",
+                  "pip", "python", "tailscale", "vscode", "git")
+_unin = {"t": 0, "v": None, "lock": threading.Lock()}
+
+
+def qs_flag(raw_path, name):
+    q = raw_path.split("?", 1)[1] if "?" in raw_path else ""
+    return any(part.split("=", 1)[0] == name for part in q.split("&") if part)
+
+
+def uninstall_scan(fresh=False):
+    """What uninstall.ps1 would find (items + sizes) for the 6:set checkboxes. Takes a few seconds (winget), so the
+    result is kept for 2 minutes."""
+    with _unin["lock"]:
+        if _unin["v"] and not fresh and time.time() - _unin["t"] < 120:
+            return _unin["v"]
+        ps1 = os.path.join(os.path.dirname(HERE), "uninstall.ps1")
+        if not os.path.exists(ps1):
+            return {"ok": False, "error": "uninstall.ps1 is missing: update the command center first", "items": []}
+        try:
+            p = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1, "-Json"],
+                               capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180,
+                               creationflags=0x08000000, stdin=subprocess.DEVNULL)
+            line = next((l for l in p.stdout.splitlines() if l.startswith("@@JSON@@")), None)
+            data = json.loads(line[8:]) if line else None
+        except Exception as e:
+            return {"ok": False, "error": "scan failed: %s" % e, "items": []}
+        if isinstance(data, dict):
+            return {"ok": False, "error": data.get("error") or "scan failed", "items": []}
+        if not isinstance(data, list):
+            return {"ok": False, "error": "scan failed (no result)", "items": []}
+        _unin.update(t=time.time(), v={"ok": True, "items": data})
+        return _unin["v"]
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "command-center"
@@ -1036,6 +1071,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif path.startswith("/api/chats/"):
             c = chats.get_chat(path[len("/api/chats/"):])
             self.send_json(200 if c else 404, c or {"error": "no such chat"})
+        elif path == "/api/uninstall":
+            self.send_json(200, uninstall_scan(qs_flag(self.path, "fresh")))
         elif path == "/api/code":
             self.send_json(200, workspaces.code_info(settings, model_info(None), laptop_info(), mask_key(api_key())))
         elif path == "/api/web":
@@ -1175,13 +1212,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
             ok, msg = workspaces.forget_recent(str(data.get("path", "")), settings, save_settings)
             return self.send_json(200, {"ok": ok, "msg": msg})
         if path == "/api/uninstall":
-            # opens uninstall.bat in its own console; it lists everything and asks before deleting (PC only: not in
-            # REMOTE_ALLOWED). The window outlives this server, which the uninstaller stops.
+            # opens uninstall.bat in its own console with the ticked items (-Only); it shows them again and asks
+            # before deleting anything (PC only: not in REMOTE_ALLOWED). The window outlives this server, which the
+            # uninstaller stops. No items = its own menu.
             bat = os.path.join(os.path.dirname(HERE), "uninstall.bat")
             if not os.path.exists(bat):
                 return self.send_json(404, {"ok": False, "msg": "uninstall.bat is missing: update the command center first"})
-            subprocess.Popen(["cmd.exe", "/c", "start", "command center uninstall", bat], cwd=os.environ.get("TEMP") or HERE,
-                             creationflags=0x08000000 | 0x00000008, close_fds=True)
+            picked = [k for k in UNINSTALL_KEYS if k in (data.get("items") or [])]
+            if data.get("items") is not None and not picked:
+                return self.send_json(400, {"ok": False, "msg": "tick at least one thing to remove"})
+            args = ["cmd.exe", "/c", "start", "command center uninstall", bat]
+            if picked:
+                args += ["-Only", ",".join(picked)]
+            if data.get("export") is False:
+                args.append("-NoExport")
+            subprocess.Popen(args, cwd=os.environ.get("TEMP") or HERE, creationflags=0x08000000 | 0x00000008, close_fds=True)
             return self.send_json(200, {"ok": True, "msg": "the uninstaller opened in a new window"})
         if path == "/api/web/serve":
             if data.get("action") not in ("on", "off"):

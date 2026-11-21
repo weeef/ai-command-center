@@ -337,8 +337,9 @@ docs\review-report.md      what the last review pass measured, fixed and left op
 
 ## Uninstall
 
-**6:set → uninstall → open uninstaller…** (or double-click `uninstall.bat` in the folder). A window lists everything
-with its size and deletes nothing until you type `uninstall`:
+**6:set → uninstall** lists everything with its size as **checkboxes** (quick picks: *app*, *everything*, *models +
+llama.cpp*, *none*). **uninstall N ticked…** opens a window that shows your picks again and deletes nothing until you
+type `uninstall`. Or double-click `uninstall.bat` in the folder and choose:
 
 1. **everything the command center made**: the program, its settings, API key and logs, the browser and laptop VS Code
    profiles, every llama.cpp build, the models, your memories and saved chats (zipped to the desktop first), the
@@ -347,7 +348,7 @@ with its size and deletes nothing until you type `uninstall`:
 2. **all of that plus the prerequisites**: the pip packages setup added (numpy, anthropic), Python, Tailscale, VS Code +
    the Cline extension + `~\.cline`, and Git (through winget). Other programs may use these, so they're off in option 1.
 3. **just free disk space**: models + llama.cpp builds only.
-4. **choose item by item**.
+4. **tick boxes yourself**: type the numbers to tick / untick, Enter when done.
 
 Files of yours that happen to be in the folder are kept (it asks before deleting the folder with them in it). The
 NVIDIA driver, Edge, and the laptop's PAIR app are never touched. "Open both" worktrees (`<project>-laptop`) are listed
