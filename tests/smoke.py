@@ -771,13 +771,121 @@ def t_teamrun():
         fake.shutdown()
 
 
+def t_review():
+    """Review and merge: commit on the agent's branch, tests, diff, merge (never with your changes in the way, a
+    conflict leaves everything as it was), send back, discard, clean up (asks first, keeps unsaved work)."""
+    import team
+    repo = temp_repo("review repo")
+    g = lambda *a, cwd=repo: subprocess.run([workspaces.GIT, "-C", cwd, "-c", "user.name=t", "-c", "user.email=t@example.com"] + list(a),
+                                            capture_output=True, text=True)
+    os.makedirs(os.path.join(repo, "tests"))
+    with open(os.path.join(repo, "tests", "smoke.py"), "w") as f:
+        f.write("import os, sys\nprint('ran in', os.path.basename(os.getcwd()))\nsys.exit(1 if os.path.exists('BROKEN') else 0)\n")
+    g("add", "-A"); g("commit", "-q", "-m", "tests")
+    split = [{"agent": "pc", "title": "UI part", "goal": "", "owns": ["ui/", "BROKEN"]},
+             {"agent": "laptop", "title": "Server part", "goal": "", "owns": ["server/", "README.md"]}]
+    ok, msg, b = team.edit_board(repo, team.DEFAULT_AGENTS, "a feature", split)
+    for t in b["tasks"]:
+        team.prepare(repo, b, t, "vscode")
+        t["status"] = "done"
+    b["state"] = "review"
+    team.save_board(repo, b)
+    pc, lap = b["tasks"][0]["worktree"], b["tasks"][1]["worktree"]
+    with open(os.path.join(pc, "ui", "app.js"), "a") as f:
+        f.write("button()\n")
+    with open(os.path.join(pc, "ui", "new.js"), "w") as f:
+        f.write("export const x = 1\n")
+    ok, msg = team.commit_work(b["tasks"][0])
+    shown = g("show", "--stat", "--format=%s", "agent/pc/ui-part").stdout
+    check("review: the agent's work is committed on its own branch, without the brief files",
+          ok and "ui/new.js" in shown and ".cc-agent.md" not in shown and ".clinerules" not in shown and workspaces.is_clean(pc), (msg, shown))
+    check("review: the project's own test command is found", team.test_command(pc)[-1] == os.path.join("tests", "smoke.py"))
+
+    def wait_test(tid):
+        for _ in range(200):
+            x = next(t for t in team.load_board(repo)["tasks"] if t["id"] == tid).get("test") or {}
+            if x.get("state") not in (None, "running"):
+                return x
+            time.sleep(0.05)
+        return {}
+    team.run_tests(repo, "t1")
+    x = wait_test("t1")
+    check("review: tests run in the agent's worktree", x.get("state") == "passed" and "ran in pc" in x.get("tail", ""), x)
+    open(os.path.join(pc, "BROKEN"), "w").close()
+    team.run_tests(repo, "t1")
+    check("review: a failing test run is shown as failed", wait_test("t1").get("state") == "failed")
+    os.remove(os.path.join(pc, "BROKEN"))
+
+    d = team.diff(repo, "t1")
+    check("review: the diff has the change and the new file", d and "+button()" in d["diff"] and "ui/new.js" in d["diff"], (d or {}).get("stat"))
+    st, d2 = req("GET", "/api/team/diff?repo=%s&task=t1" % urllib_quote(repo))
+    check("review: GET /api/team/diff", st == 200 and d2["branch"] == "agent/pc/ui-part", st)
+
+    # your own checkout has an unsaved change: merge refuses and changes nothing
+    head = g("rev-parse", "HEAD").stdout.strip()
+    with open(os.path.join(repo, "README.md"), "a") as f:
+        f.write("my unsaved line\n")
+    ok, msg = team.merge(repo, "t1")
+    check("merge: refused while your checkout has uncommitted changes", not ok and "uncommitted" in msg
+          and g("rev-parse", "HEAD").stdout.strip() == head, msg)
+    g("checkout", "--", "README.md")
+    st, d = req("POST", "/api/team/merge", json.dumps({"repo": repo, "task": "t1"}))
+    log = g("log", "--format=%P|%s", "-1").stdout.strip()
+    check("merge: --no-ff into the base branch in your checkout", st == 200 and len(log.split("|")[0].split()) == 2
+          and "agent/pc/ui-part" in log and os.path.exists(os.path.join(repo, "ui", "new.js")), (d, log))
+    check("merge: the task is marked merged", team.load_board(repo)["tasks"][0]["status"] == "merged")
+
+    # a conflict: the laptop agent and you both changed README.md
+    with open(os.path.join(lap, "README.md"), "w") as f:
+        f.write("agent version\n")
+    with open(os.path.join(repo, "README.md"), "w") as f:
+        f.write("owner version\n")
+    g("commit", "-q", "-am", "owner edit")
+    head = g("rev-parse", "HEAD").stdout.strip()
+    ok, msg = team.merge(repo, "t2")
+    check("merge: a conflict is aborted and reported, nothing changes", not ok and "conflict in README.md" in msg
+          and g("rev-parse", "HEAD").stdout.strip() == head and workspaces.is_clean(repo), (msg, g("status", "--porcelain").stdout))
+
+    saved_clip, server.copy_to_clipboard = server.copy_to_clipboard, lambda t: True
+    try:
+        st, d = req("POST", "/api/team/sendback", json.dumps({"repo": repo, "task": "t2", "note": "keep the owner's README text"}))
+    finally:
+        server.copy_to_clipboard = saved_clip
+    br = open(os.path.join(lap, ".cc-agent.md"), encoding="utf-8").read()
+    check("send back: the note is in the agent's brief and it works again", st == 200 and "## Sent back by the owner" in br
+          and "keep the owner's README text" in br and team.load_board(repo)["tasks"][1]["status"] == "running", (d, br[:300]))
+    team.set_status(repo, "t2", "done")
+    with open(os.path.join(lap, "server", "wip.py"), "w") as f:
+        f.write("half done\n")
+    ok, msg = team.discard(repo, "t2")
+    check("discard: marked discarded, nothing deleted", ok and os.path.isdir(lap) and team.load_board(repo)["tasks"][1]["status"] == "discarded", msg)
+
+    st, d = req("POST", "/api/team/cleanup", json.dumps({"repo": repo}))
+    check("clean up: asks first and lists what it would do", st == 409 and {p["agent"] for p in d["plan"]} == {"pc", "laptop"}
+          and os.path.isdir(pc), d)
+    as_phone(True)
+    try:
+        for op in ("merge", "cleanup", "sendback", "discard", "test", "finish"):
+            st, _ = req("POST", "/api/team/" + op, json.dumps({"repo": repo, "task": "t1", "confirm": True}), **PHONE)
+            check("phone POST /api/team/%s refused" % op, st == 403, st)
+        st, _ = req("GET", "/api/team/diff?repo=%s&task=t1" % urllib_quote(repo), **PHONE)
+        check("phone: may read a diff", st == 200, st)
+    finally:
+        as_phone(False)
+    st, d = req("POST", "/api/team/cleanup", json.dumps({"repo": repo, "confirm": True}))
+    check("clean up: the merged agent's folder and branch go", st == 200 and not os.path.exists(pc)
+          and g("rev-parse", "--verify", "--quiet", "refs/heads/agent/pc/ui-part").returncode != 0, d)
+    check("clean up: a folder with uncommitted work stays, and so does discarded work's branch",
+          os.path.exists(os.path.join(lap, "server", "wip.py")) and g("rev-parse", "--verify", "--quiet", "refs/heads/agent/laptop/server-part").returncode == 0, d)
+
+
 def urllib_quote(s):
     import urllib.parse
     return urllib.parse.quote(s, safe="")
 
 
 GROUPS = {"web": t_web, "modules": t_modules, "smuggle": t_smuggle, "key": t_key, "guard": t_guard, "phone": t_phone, "tools": t_tools, "tuner": t_tuner, "laptop": t_laptop,
-          "worktree": t_worktree, "team": t_team, "board": t_board, "teamrun": t_teamrun}
+          "worktree": t_worktree, "team": t_team, "board": t_board, "teamrun": t_teamrun, "review": t_review}
 
 if __name__ == "__main__":
     want = sys.argv[1:] or list(GROUPS)

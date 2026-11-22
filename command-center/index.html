@@ -616,6 +616,18 @@ details.think .tbody{white-space:pre-wrap;max-height:260px;overflow-y:auto;font-
 .agrow .d{color:var(--dim);flex:1}
 .agrow button{font-size:11px;padding:0 6px}
 body.remote .teamact,body.remote .tact{display:none!important}
+.tbtns{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.tbtns button{font-size:11.5px}
+.ttest{margin-top:6px;font-size:12px}
+.ttest.passed{color:var(--ok)}.ttest.failed{color:var(--crit)}.ttest.running,.ttest.none{color:var(--dim)}
+.ttest pre{max-height:180px;overflow:auto;color:var(--dim);font-size:11px;white-space:pre-wrap;margin:4px 0 0}
+#teamDiffDlg{background:var(--bg);color:var(--fg);border:1px solid var(--border);padding:14px 16px;width:min(1100px,calc(100vw - 32px));max-height:calc(100vh - 48px);overflow:auto}
+#teamDiffDlg::backdrop{background:rgba(0,0,0,.6)}
+#tdStat{color:var(--dim);font-size:11.5px;margin:0 0 8px;white-space:pre-wrap}
+#tdBody{font-size:12px;margin:0;white-space:pre;overflow-x:auto}
+#tdBody .a{color:var(--ok)}#tdBody .d{color:var(--crit)}#tdBody .h{color:var(--accent2)}
+[data-theme="corpus"] #teamDiffDlg{border-radius:12px}
+[data-theme="corpus"] #tdBody,[data-theme="corpus"] #tdStat,[data-theme="corpus"] .ttest pre{font-family:var(--font)}
 @media (max-width:760px){#ws7 .col{width:100%;min-width:0}#ws7 .kvt{grid-template-columns:72px minmax(0,1fr) auto}
   .agp .stp span:last-child{display:none}.agp .stp{grid-template-columns:40px minmax(0,1fr)}
   .tsk{grid-template-columns:90px minmax(0,1fr) auto}.tsk .own,.tsk .gl{grid-column:1/-1;grid-row:auto}
@@ -934,6 +946,10 @@ body.remote #tags span[data-ws="2"]{display:none}
   </div>
   <div class="col" id="teamPanels"><section class="pane"><div class="title">agents at work</div><div class="hint">Plan a split on the left, check it, then start the team.</div></section></div>
 </main>
+<dialog id="teamDiffDlg" aria-labelledby="tdTitle">
+  <div class="mdhead"><div class="title" id="tdTitle">diff</div><span id="tdInfo" class="hint"></span><button id="tdClose" title="close (Esc)">✕</button></div>
+  <pre id="tdStat"></pre><pre id="tdBody"></pre>
+</dialog>
 <dialog id="modelDlg" aria-labelledby="mdTitle">
   <div class="mdhead"><div class="title" id="mdTitle">models</div><span id="mdHw"></span><button id="mdClose" title="close (Esc)">✕</button></div>
   <div id="mdWarn" hidden></div>
@@ -3216,6 +3232,7 @@ function renderTeamPanels(b, d){
       <div class="shead"><span class="dot ${TEAM_ST[t.status] || ""}"></span><span class="big">${esc(live)}</span>
         <span class="sub">${esc(t.title)}</span><span class="grow"></span>
         ${t.status === "running" ? `<button class="btn-main stop tact" data-tstop="${esc(t.id)}">stop</button>` : ""}</div>
+      ${teamTest(t.test)}
       <div class="kvt">
         <span class="k">works with</span><span class="v">${esc(t.client === "vscode" ? "Cline · VS Code" : "Claude Code · headless")} · ${esc(t.backend)}</span><span></span>
         <span class="k">files</span><span class="v">${files.length} changed${files.length ? ` · +${add} −${del}` : ""}</span><span></span>
@@ -3228,14 +3245,44 @@ function renderTeamPanels(b, d){
       ${files.length ? `<div class="flist">${files.slice(0, 40).map(f => `<span class="${(t.outside || []).includes(f.path) ? "out" : ""}">${esc(f.add === "new" ? "new" : "+" + f.add + " −" + f.del)} · ${esc(f.path)}</span>`).join("")}</div>` : ""}
       ${(t.notes || []).length ? `<div class="notes">${t.notes.slice(-5).map(n => `<div><b>${esc(n.by)}</b>: ${esc(n.text)}</div>`).join("")}</div>` : ""}
       <div class="steps2">${steps.length ? steps.map(teamStep).join("") : `<div class="hint">${t.client === "vscode" ? "No steps yet. In its VS Code, paste the starter prompt into Cline (it's on the clipboard)." : "No steps yet."}</div>`}</div>
+      ${teamButtons(t)}
     </section>`;
-  }).join("");
+  }).join("") + teamCleanupBox(b);
+}
+function teamTest(x){
+  if (!x) return "";
+  const what = {running: "testing…", passed: "tests passed", failed: "tests failed", none: "no tests found in this project"}[x.state] || x.state;
+  return `<div class="ttest ${esc(x.state)}">${esc(what)}${x.cmd ? ` · <code>${esc(x.cmd)}</code>` : ""}${x.secs != null ? ` · ${x.secs}s` : ""}
+    ${x.tail ? `<details ${x.state === "failed" ? "open" : ""}><summary class="hint">output</summary><pre>${esc(x.tail)}</pre></details>` : ""}</div>`;
+}
+function teamButtons(t){
+  const id = esc(t.id), fin = ["done", "stopped", "failed"].includes(t.status);
+  if (!t.worktree || ["merged", "discarded", "draft"].includes(t.status)) return "";
+  return `<div class="tbtns">
+    <button data-tdiff="${id}" title="everything this agent changed against the base commit">diff</button>
+    ${t.status === "running" && t.client === "vscode" ? `<button class="tact" data-tfin="${id}" title="Cline can't tell the command center it's done: say so here. Its work is committed on its branch and tested">finished</button>` : ""}
+    ${fin ? `<button class="tact" data-ttest="${id}" ${t.test && t.test.state === "running" ? "disabled" : ""}>run tests</button>
+      <button class="tact primary" data-tmerge="${id}" title="git merge --no-ff into the base branch, in your own checkout. Never pushed">merge</button>
+      <button class="tact" data-tback="${id}" title="the agent gets your note and works on it again">send back…</button>
+      <button class="tact" data-tdisc="${id}" title="drop this work (the branch stays until you clean up)">discard</button>` : ""}
+  </div>`;
+}
+function teamCleanupBox(b){
+  const c = b.cleanup || [];
+  if (!c.length) return "";
+  return `<section class="pane tact"><div class="title">clean up</div>
+    <div class="hint">${c.map(x => `${esc(x.agent)} (${esc(x.status)}): ${x.worktree ? esc(x.worktree) + (x.clean ? "" : " · has uncommitted changes, will be kept") : "folder already gone"}${x.branch_exists ? " · branch " + esc(x.branch) : ""}`).join("<br>")}</div>
+    <div class="memloc"><button id="teamClean">clean up…</button></div></section>`;
+}
+function teamDiffHtml(text){
+  return esc(text).split("\n").map(l => /^(\+\+\+|---|diff |index |@@)/.test(l) ? `<span class="h">${l}</span>` : l.startsWith("+") ? `<span class="a">${l}</span>` : l.startsWith("-") ? `<span class="d">${l}</span>` : l).join("\n");
 }
 async function teamPost(url, body){
   const r = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
   let j = {}; try { j = await r.json(); } catch(e){}
   return Object.assign({ok: r.ok && j.ok !== false, msg: j.msg || j.error || (r.ok ? "" : "HTTP " + r.status)}, j, {ok: r.ok && j.ok !== false});
 }
+$("tdClose").onclick = () => $("teamDiffDlg").close();
 $("ws7").addEventListener("input", e => { if (e.target.closest("#teamSplit")) teamDirty = true; });
 $("teamRepo").addEventListener("change", () => { store.set("rt.teamRepo", $("teamRepo").value.trim()); teamDirty = false; teamDraft = null; refreshTeam(); });
 $("teamRepo").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); $("teamLoad").click(); } });
@@ -3276,6 +3323,47 @@ $("ws7").addEventListener("click", async e => {
     if (!s.ok && s.needs_confirm && confirm(s.msg + "\n\nStart anyway?")) s = await teamPost("/api/team/start", {repo, confirm_cloud: true});
     teamBusy = false;
     sysToast(s.msg, !s.ok, 12000);
+    return refreshTeam();
+  }
+  const dfb = t.closest("[data-tdiff]");
+  if (dfb) {
+    const r = await fetch(`/api/team/diff?repo=${encodeURIComponent(repo)}&task=${encodeURIComponent(dfb.dataset.tdiff)}`, {cache: "no-store"});
+    const d = await r.json();
+    if (!r.ok) return sysToast(d.error || "no diff", true);
+    $("tdTitle").textContent = `diff · ${d.agent} · ${d.branch}`;
+    $("tdInfo").textContent = d.cut ? "(cut off: too long to show in full)" : "";
+    $("tdStat").textContent = d.stat || "no changes";
+    $("tdBody").innerHTML = teamDiffHtml(d.diff || "");
+    return $("teamDiffDlg").showModal();
+  }
+  const act = [["data-tfin", "finish"], ["data-ttest", "test"], ["data-tmerge", "merge"], ["data-tdisc", "discard"], ["data-tback", "sendback"]]
+    .map(([a, op]) => [t.closest("[" + a + "]"), op, a]).find(x => x[0]);
+  if (act) {
+    const [btn, op, a] = act, task = btn.getAttribute(a), tk = (teamData.board.tasks || []).find(x => x.id === task) || {};
+    const body = {repo, task};
+    if (op === "merge" && !confirm(`Merge ${tk.branch} into ${teamData.board.base || "the base branch"} in ${repo}?\n\nIt runs git merge --no-ff in your own checkout. Nothing is pushed.`)) return;
+    if (op === "discard" && !confirm(`Discard ${tk.agent}'s work? Its branch and folder stay until you clean up.`)) return;
+    if (op === "sendback") {
+      const note = prompt(`What should ${tk.agent} change? (it gets this note and works on it again)`);
+      if (!note || !note.trim()) return;
+      body.note = note;
+      if (tk.backend && tk.backend.startsWith("cloud:")) { if (!confirm(`${tk.agent} uses Claude in the cloud, which is billed to you. Send it back?`)) return; body.confirm_cloud = true; }
+    }
+    btn.disabled = true;
+    const r = await teamPost("/api/team/" + op, body);
+    sysToast(r.msg, !r.ok, 10000);
+    return refreshTeam();
+  }
+  if (t.closest("#teamClean")) {
+    const r = await teamPost("/api/team/cleanup", {repo});
+    const plan = r.plan || [];
+    if (!plan.length) return sysToast("nothing to clean up");
+    const lines = plan.map(x => `${x.agent} (${x.status}): ${x.worktree && x.clean ? "remove folder " + x.worktree : x.worktree ? "keep " + x.worktree + " (uncommitted changes)" : "no folder"}${x.branch_exists ? (x.status === "merged" ? ", delete merged branch " + x.branch : ", branch " + x.branch + " (discarded work)") : ""}`);
+    if (!confirm("Clean up?\n\n" + lines.join("\n") + "\n\nFolders with uncommitted changes are never removed.")) return;
+    const drop = plan.some(x => x.status === "discarded" && x.branch_exists) &&
+      confirm("Also delete the branches of discarded work? Their commits go with them. (Cancel keeps them.)");
+    const c = await teamPost("/api/team/cleanup", {repo, confirm: true, drop_discarded: drop});
+    sysToast(c.msg, !c.ok, 12000);
     return refreshTeam();
   }
   const stop = t.closest("[data-tstop]");

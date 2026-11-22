@@ -348,8 +348,12 @@ def brief(board, task):
              "You are agent **%s**, one of %d coding agents building one feature at the same time, each in its own "
              "copy of the repository. Your work is reviewed and merged afterwards." % (me, len(others) + 1), "",
              "## The feature", board.get("goal", ""), "",
-             "## Your part: %s" % task["title"], task.get("goal") or "", "",
-             "## Files you own",
+             "## Your part: %s" % task["title"], task.get("goal") or "", ""]
+    if task.get("feedback"):
+        lines += ["## Sent back by the owner",
+                  "The owner reviewed your work and sent it back. Do this now; your earlier work is still in this folder:"]
+        lines += ["- %s" % " ".join(str(f.get("text")).split()) for f in task["feedback"][-5:]] + [""]
+    lines += ["## Files you own",
              "Edit or create only these. Everything else belongs to another agent or stays as it is:"]
     lines += ["- `%s`" % p for p in task["owns"]]
     lines += ["", "## The other agents"]
@@ -642,6 +646,227 @@ def outside(files, owns):
     """Changed files the agent doesn't own."""
     return [f["path"] for f in files if not any(overlaps(f["path"], o) or (o.endswith("/") and f["path"].lower().startswith(o.lower()))
                                                  for o in owns)]
+
+
+# ---------------------------------------------------------------- review: commit, test, diff, merge, clean up
+def _git(cwd, *args, timeout=60):
+    return workspaces.run([workspaces.GIT, "-C", cwd, "-c", "core.quotepath=off"] + list(args), timeout=timeout)
+
+
+def commit_work(task, why=""):
+    """Commit whatever the agent left uncommitted, on its own branch in its own worktree (the brief files are
+    excluded, so they never go in). Returns (ok, message)."""
+    wt = task.get("worktree")
+    if not wt or not os.path.isdir(wt):
+        return False, "no worktree"
+    if workspaces.is_clean(wt):
+        return True, "nothing to commit"
+    code, out, err = _git(wt, "add", "-A")
+    if code != 0:
+        return False, "git add failed: " + (err or out).strip()[:200]
+    msg = "%s: %s%s" % (task["agent"], task["title"], (" (" + why + ")") if why else "")
+    code, out, err = _git(wt, "-c", "user.name=agent " + task["agent"], "-c", "user.email=agent@command-center.local",
+                          "commit", "-q", "--no-verify", "-m", msg)
+    if code != 0:
+        return False, "git commit failed: " + (err or out).strip()[:200]
+    _changed.pop(wt, None)
+    return True, "committed"
+
+
+def test_command(wt):
+    """The project's own tests, as a fixed command (nothing here comes from the browser), or None."""
+    py = shutil.which("python") or shutil.which("py")
+    if os.path.isfile(os.path.join(wt, "tests", "smoke.py")) and py:
+        return [py, os.path.join("tests", "smoke.py")]
+    has_pytest = any(os.path.isfile(os.path.join(wt, f)) for f in ("pytest.ini", "conftest.py", "tox.ini"))
+    if not has_pytest and os.path.isfile(os.path.join(wt, "pyproject.toml")):
+        with open(os.path.join(wt, "pyproject.toml"), encoding="utf-8", errors="replace") as f:
+            has_pytest = "[tool.pytest" in f.read()
+    if not has_pytest:
+        for d in ("tests", "test"):
+            p = os.path.join(wt, d)
+            if os.path.isdir(p) and any(n.startswith("test_") and n.endswith(".py") for n in os.listdir(p)):
+                has_pytest = True
+    if has_pytest and py:
+        return [py, "-m", "pytest", "-q"]
+    pj = fsutil.read_json(os.path.join(wt, "package.json"))
+    npm = shutil.which("npm")
+    if isinstance(pj, dict) and isinstance(pj.get("scripts"), dict) and pj["scripts"].get("test") and npm:
+        return [npm, "test"]
+    return None
+
+
+_test_lock = threading.Lock()   # one test run at a time: projects' tests often use fixed ports
+
+
+def run_tests(repo, task_id, timeout=900):
+    """Run the project's tests in the agent's worktree, in the background; the result goes into the board."""
+    b = load_board(repo)
+    t = next((x for x in (b or {}).get("tasks", []) if x["id"] == task_id), None)
+    if not t or not t.get("worktree") or not os.path.isdir(t["worktree"]):
+        return False, "no worktree to test"
+    cmd = test_command(t["worktree"])
+    if not cmd:
+        set_status(repo, task_id, t["status"], test={"state": "none", "t": time.time(), "msg": "no tests found in this project"})
+        return True, "no tests found in this project"
+    label = " ".join(os.path.basename(c) if i == 0 else c for i, c in enumerate(cmd))
+    set_status(repo, task_id, t["status"], test={"state": "running", "cmd": label, "t": time.time()})
+
+    def go():
+        with _test_lock:
+            t0 = time.time()
+            try:
+                p = subprocess.run(cmd, cwd=t["worktree"], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                   timeout=timeout, creationflags=NOWIN, stdin=subprocess.DEVNULL)
+                ok, out = p.returncode == 0, (p.stdout or "") + (p.stderr or "")
+            except subprocess.TimeoutExpired:
+                ok, out = False, "timed out after %d s" % timeout
+            except OSError as e:
+                ok, out = False, "couldn't run: %s" % e
+        cur = next((x for x in (load_board(repo) or {}).get("tasks", []) if x["id"] == task_id), None)
+        if cur:
+            set_status(repo, task_id, cur["status"], test={"state": "passed" if ok else "failed", "cmd": label, "t": time.time(),
+                                                            "secs": round(time.time() - t0, 1), "tail": out.strip()[-3000:]})
+    threading.Thread(target=go, daemon=True).start()
+    return True, "testing: " + label
+
+
+def diff(repo, task_id, limit=400000):
+    """The agent's whole change against the base commit (committed and not), for review."""
+    b = load_board(repo)
+    t = next((x for x in (b or {}).get("tasks", []) if x["id"] == task_id), None)
+    if not t or not t.get("worktree") or not os.path.isdir(t["worktree"]) or not b.get("base_sha"):
+        return None
+    wt = t["worktree"]
+    _, stat, _ = _git(wt, "diff", "--stat", b["base_sha"], "--")
+    _, out, _ = _git(wt, "diff", b["base_sha"], "--", timeout=60)
+    _, new, _ = _git(wt, "ls-files", "--others", "--exclude-standard")
+    for f in [l for l in new.splitlines() if l.strip()][:50]:
+        p = os.path.join(wt, f)
+        try:
+            if os.path.getsize(p) > 200000:
+                out += "\n+++ new file %s (too big to show)\n" % f
+                continue
+            with open(p, encoding="utf-8", errors="replace") as fh:
+                out += "\n+++ new file %s (not committed yet)\n" % f + "".join("+" + l for l in fh.readlines())
+        except OSError:
+            continue
+    return {"task": task_id, "agent": t["agent"], "branch": t.get("branch"), "stat": stat.strip(),
+            "diff": out[:limit], "cut": len(out) > limit}
+
+
+def merge(repo, task_id):
+    """Merge one agent's branch into the base branch in your own checkout: --no-ff, never forced, never pushed.
+    Refuses when your checkout has uncommitted changes or isn't on the base branch; a conflict is aborted and
+    reported, leaving everything as it was. -> (ok, message)."""
+    b = load_board(repo)
+    t = next((x for x in (b or {}).get("tasks", []) if x["id"] == task_id), None)
+    if not t:
+        return False, "no such task"
+    if t.get("status") not in ("done", "stopped", "failed"):
+        return False, "%s is %s: merge it when it's finished" % (t["agent"], t.get("status"))
+    if not t.get("branch") or not t.get("worktree"):
+        return False, "this task never started"
+    ok, msg = commit_work(t, "left uncommitted, committed at merge")
+    if not ok:
+        return False, msg
+    _, cur, _ = _git(repo, "branch", "--show-current")
+    if b.get("base") and cur.strip() != b["base"]:
+        return False, "your checkout is on %s, not %s: switch back to %s first" % (cur.strip() or "a detached HEAD", b["base"], b["base"])
+    code, st, _ = _git(repo, "status", "--porcelain", "--untracked-files=no")
+    if code != 0 or st.strip():
+        return False, "your checkout (%s) has uncommitted changes: commit or stash them first" % repo
+    _, ahead, _ = _git(repo, "rev-list", "--count", "HEAD.." + t["branch"])
+    if ahead.strip() == "0":
+        set_status(repo, task_id, "merged", merged=time.time(), message="nothing new to merge")
+        return True, "%s had nothing new to merge" % t["agent"]
+    code, out, err = _git(repo, "-c", "user.name=command center", "-c", "user.email=agent@command-center.local",
+                          "merge", "--no-ff", "--no-edit", "-m", "Merge %s: %s" % (t["branch"], t["title"]), t["branch"], timeout=120)
+    if code != 0:
+        _, conf, _ = _git(repo, "diff", "--name-only", "--diff-filter=U")
+        _git(repo, "merge", "--abort")
+        files = [l for l in conf.splitlines() if l.strip()]
+        return False, ("merge conflict in %s: nothing was changed. Send it back with a note, or merge by hand" % ", ".join(files[:8])
+                       if files else "git merge failed: " + (err or out).strip()[:300])
+    _, sha, _ = _git(repo, "rev-parse", "--short", "HEAD")
+    set_status(repo, task_id, "merged", merged=time.time(), message="merged into %s as %s" % (b.get("base") or "HEAD", sha.strip()))
+    return True, "merged %s into %s (%s). Nothing was pushed" % (t["branch"], b.get("base") or "HEAD", sha.strip())
+
+
+def send_back(repo, task_id, note):
+    """The owner's note goes into the brief and the task runs again."""
+    note = str(note or "").strip()[:MAX_NOTE]
+    if not note:
+        return False, "write what should change", None
+    with _board_lock:
+        b = load_board(repo)
+        t = next((x for x in (b or {}).get("tasks", []) if x["id"] == task_id), None)
+        if not t or t.get("status") not in ("done", "stopped", "failed"):
+            return False, "only a finished, stopped or failed task can be sent back", None
+        t.setdefault("feedback", []).append({"t": time.time(), "text": note})
+        t.update(status="running", finished=None, message=None, test=None, started=time.time())
+        b["state"] = "running"
+        save_board(repo, b)
+    return True, "sent back to %s" % t["agent"], b
+
+
+def discard(repo, task_id):
+    b = load_board(repo)
+    t = next((x for x in (b or {}).get("tasks", []) if x["id"] == task_id), None)
+    if not t or t.get("status") not in ("done", "stopped", "failed", "draft"):
+        return False, "stop it first" if t else "no such task"
+    set_status(repo, task_id, "discarded", message="discarded: its branch and folder stay until you clean up")
+    return True, "discarded %s's work (the branch %s is kept until you clean up)" % (t["agent"], t.get("branch"))
+
+
+def cleanup_plan(repo):
+    """What clean-up would do: worktrees of merged or discarded tasks (only if they have no uncommitted work) and
+    their branches (a merged branch is deleted with git branch -d, which refuses unmerged work; a discarded one
+    only when you also tick it, since its commits go with it)."""
+    b = load_board(repo)
+    out = []
+    for t in (b or {}).get("tasks", []):
+        if t.get("status") not in ("merged", "discarded"):
+            continue
+        wt = t.get("worktree")
+        have_wt = bool(wt and os.path.isdir(wt))
+        out.append({"task": t["id"], "agent": t["agent"], "status": t["status"], "worktree": wt if have_wt else None,
+                    "clean": workspaces.is_clean(wt) if have_wt else True, "branch": t.get("branch"),
+                    "branch_exists": workspaces._branch_exists(repo, t["branch"]) if t.get("branch") else False})
+    return out
+
+
+def cleanup(repo, drop_discarded=False):
+    done, kept = [], []
+    b = load_board(repo)
+    for c in cleanup_plan(repo):
+        if c["worktree"]:
+            ok, msg = workspaces.remove_worktree(repo, c["worktree"])
+            (done if ok else kept).append(msg)
+            if not ok:
+                continue
+        if c["branch_exists"]:
+            if c["status"] == "merged":
+                code, out, err = _git(repo, "branch", "-d", c["branch"])
+                (done if code == 0 else kept).append(("deleted branch " + c["branch"]) if code == 0 else
+                                                     "kept branch %s: %s" % (c["branch"], (err or out).strip()[:150]))
+            elif drop_discarded:
+                code, out, err = _git(repo, "branch", "-D", c["branch"])
+                (done if code == 0 else kept).append(("deleted branch " + c["branch"]) if code == 0 else
+                                                     "kept branch %s: %s" % (c["branch"], (err or out).strip()[:150]))
+            else:
+                kept.append("kept branch %s (discarded work; tick the box to delete it)" % c["branch"])
+    ag = workspaces.agents_dir(repo)
+    try:
+        if os.path.isdir(ag) and not os.listdir(ag):
+            os.rmdir(ag)
+    except OSError:
+        pass
+    if b and all(t.get("status") in ("merged", "discarded") for t in b["tasks"]):
+        b = load_board(repo)
+        b["state"] = "done"
+        save_board(repo, b)
+    return done, kept
 
 
 _sync_t = {}

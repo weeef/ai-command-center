@@ -1084,6 +1084,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_json(200, dict(team.public(settings), remote=self.remote, repo=repo,
                                      repos=[r for r in settings.get("team_repos") or [] if os.path.isdir(r)],
                                      board=team_view(repo) if repo else None))
+        elif path == "/api/team/diff":
+            qs = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            repo = team_repo((qs.get("repo") or [""])[0])
+            d = team.diff(repo, (qs.get("task") or [""])[0]) if repo else None
+            self.send_json(200 if d else 404, d or {"error": "no such task, or it has no worktree"})
         elif path == "/api/uninstall":
             self.send_json(200, uninstall_scan(qs_flag(self.path, "fresh")))
         elif path == "/api/code":
@@ -1246,6 +1251,28 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 ok, msg, b, extra = team_start(repo, data.get("confirm_cloud") is True)
                 return self.send_json(200 if ok else 409, dict({"ok": ok, "msg": msg, "board": b}, **extra))
             ok, msg = team_stop(repo, str(data.get("task") or ""))
+            return self.send_json(200 if ok else 409, {"ok": ok, "msg": msg})
+        if path in ("/api/team/finish", "/api/team/test", "/api/team/merge", "/api/team/sendback",
+                    "/api/team/discard", "/api/team/cleanup"):
+            repo = team_repo(data.get("repo"))
+            if not repo:
+                return self.send_json(400, {"ok": False, "msg": "pick a folder that is a git repo with at least one commit"})
+            tid, op = str(data.get("task") or ""), path.rsplit("/", 1)[1]
+            if op == "finish":
+                ok, msg = team_finish(repo, tid)
+            elif op == "test":
+                ok, msg = team.run_tests(repo, tid)
+            elif op == "merge":
+                ok, msg = team.merge(repo, tid)
+            elif op == "sendback":
+                ok, msg = team_send_back(repo, tid, data.get("note"), data.get("confirm_cloud") is True)
+            elif op == "discard":
+                ok, msg = team.discard(repo, tid)
+            else:
+                if data.get("confirm") is not True:   # the page asks first, listing exactly what goes
+                    return self.send_json(409, {"ok": False, "msg": "confirm first", "plan": team.cleanup_plan(repo)})
+                done, kept = team.cleanup(repo, data.get("drop_discarded") is True)
+                ok, msg = True, "; ".join(done + kept) or "nothing to clean up"
             return self.send_json(200 if ok else 409, {"ok": ok, "msg": msg})
         if path == "/api/team/agents":
             ok, msg, clean = team.save_agents(settings, save_settings, data.get("agents"))
@@ -1969,6 +1996,7 @@ def team_view(repo):
             touched.setdefault(f["path"].lower(), []).append(t["agent"])
     b["shared_files"] = {p: who for p, who in touched.items() if len(who) > 1}
     b["active"] = os.path.normcase(settings.get("team_active") or "") == os.path.normcase(repo)
+    b["cleanup"] = team.cleanup_plan(repo)
     return b
 
 
@@ -2033,8 +2061,7 @@ def team_start(repo, confirm_cloud=False):
                 notes.append("main Cline isn't routed through the command center (5:cline), so pc's steps won't show here")
         else:
             cloud_run = a["backend"].startswith("cloud:")
-            ok, m = team.start_claude(repo, t, base_url=None if cloud_run else "http://127.0.0.1:%d/agent/%s" % (PORT, a["name"]),
-                                      token=secrets.token_urlsafe(24), api_key=cloud.key("anthropic") if cloud_run else None)
+            ok, m = team_run_claude(repo, t, a)
         if not ok:
             team.set_status(repo, t["id"], "failed", message=m, finished=time.time())
             notes.append("%s: %s" % (t["agent"], m))
@@ -2042,6 +2069,58 @@ def team_start(repo, confirm_cloud=False):
         copy_to_clipboard(team.STARTER)
         notes.insert(0, "VS Code opens on each agent's folder: paste the starter prompt (it's on the clipboard) into its Cline")
     return True, "the team is working" + ("; " + "; ".join(notes) if notes else ""), team.load_board(repo), {}
+
+
+def team_run_claude(repo, t, a):
+    cloud_run = a["backend"].startswith("cloud:")
+    return team.start_claude(repo, t, base_url=None if cloud_run else "http://127.0.0.1:%d/agent/%s" % (PORT, a["name"]),
+                             token=secrets.token_urlsafe(24), api_key=cloud.key("anthropic") if cloud_run else None,
+                             on_exit=lambda tid: team_after(repo, tid))
+
+
+def team_after(repo, task_id):
+    """A task is finished: commit what the agent left on its branch, then run the project's tests there."""
+    t = next((x for x in (team.load_board(repo) or {}).get("tasks", []) if x["id"] == task_id), None)
+    if not t or t.get("status") not in ("done", "failed", "stopped"):
+        return
+    ok, msg = team.commit_work(t)
+    if not ok:
+        team.set_status(repo, task_id, t["status"], message=(t.get("message") or "") + " · " + msg)
+    if t["status"] == "done":
+        team.run_tests(repo, task_id)
+
+
+def team_finish(repo, task_id):
+    """You say a VS Code agent is done (Cline can't tell the command center itself)."""
+    b = team.load_board(repo)
+    t = next((x for x in (b or {}).get("tasks", []) if x["id"] == task_id), None)
+    if not t or t.get("status") not in ("running", "stopped"):
+        return False, "only a running or stopped task can be marked finished"
+    if team.running(t["agent"]):
+        return False, "%s is still working: stop it first" % t["agent"]
+    team.set_status(repo, task_id, "done", finished=time.time(), message="marked finished")
+    team_after(repo, task_id)
+    return True, "%s's work is committed on %s; testing it" % (t["agent"], t.get("branch"))
+
+
+def team_send_back(repo, task_id, note, confirm_cloud=False):
+    t0 = next((x for x in (team.load_board(repo) or {}).get("tasks", []) if x["id"] == task_id), None)
+    a = next((x for x in team.agents(settings) if t0 and x["name"] == t0["agent"]), None) or \
+        {"client": "vscode", "backend": (t0 or {}).get("agent", "pc"), "name": (t0 or {}).get("agent", "pc")}
+    if a["backend"].startswith("cloud:") and not confirm_cloud:
+        return False, "%s uses Claude in the cloud, which is billed to you: confirm to send it back" % a["name"]
+    ok, msg, b = team.send_back(repo, task_id, note)
+    if not ok:
+        return False, msg
+    t = next(x for x in b["tasks"] if x["id"] == task_id)
+    team.write_brief(b, t, a["client"])
+    if a["client"] == "vscode":
+        copy_to_clipboard("The owner sent your task back with a note: read .cc-agent.md again (section \"Sent back by the owner\") and do it.")
+        return True, msg + ": the prompt for its Cline is on the clipboard"
+    ok, m = team_run_claude(repo, t, a)
+    if not ok:
+        team.set_status(repo, task_id, "failed", message=m)
+    return ok, msg + ("; Claude Code is working on it again" if ok else ": " + m)
 
 
 def team_stop(repo, task_id):

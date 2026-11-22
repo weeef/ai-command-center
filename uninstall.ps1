@@ -138,15 +138,25 @@ if (-not $ts -and (Test-Path "C:\Program Files\Tailscale\tailscale.exe")) { $ts 
 $serveOurs = $false
 if ($ts) { $sv = & $ts serve status --json 2>$null | Out-String; $serveOurs = (Has $sv "127.0.0.1:8099") -or (Has $sv "127.0.0.1:8090") }
 
-# "open both" worktrees: <project>-laptop on branch cline-laptop
+# "open both" worktrees (<project>-laptop on branch cline-laptop) and agent-team worktrees (<project>-agents\<agent>)
 $worktrees = @()
 $git = (Get-Command git -ErrorAction SilentlyContinue).Source
-if ($git -and $settings -and $settings.recent_projects) {
-    foreach ($p in @($settings.recent_projects)) {
-        $pp = if ($p -is [string]) { $p } else { $p.path }
-        if (-not $pp) { continue }
-        $wt = $pp.TrimEnd("\", "/") + "-laptop"
-        if (Test-Path -LiteralPath (Join-Path $wt ".git")) { $worktrees += [pscustomobject]@{ repo = $pp; wt = $wt } }
+if ($git -and $settings) {
+    $projects = @()
+    foreach ($p in @($settings.recent_projects) + @($settings.team_repos)) {
+        $pp = if ($p -is [string]) { $p } elseif ($p) { $p.path } else { $null }
+        if ($pp -and ($projects -notcontains $pp.TrimEnd("\", "/"))) { $projects += $pp.TrimEnd("\", "/") }
+    }
+    foreach ($pp in $projects) {
+        $cands = @($pp + "-laptop")
+        $ag = $pp + "-agents"
+        if (Test-Path -LiteralPath $ag) { $cands += @(Get-ChildItem -LiteralPath $ag -Directory -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }) }
+        foreach ($wt in $cands) {
+            # a worktree has a .git FILE pointing back at the repo; anything else in there is left alone
+            if ((Test-Path -LiteralPath (Join-Path $wt ".git") -PathType Leaf) -and ($worktrees.wt -notcontains $wt)) {
+                $worktrees += [pscustomobject]@{ repo = $pp; wt = $wt }
+            }
+        }
     }
 }
 
@@ -170,7 +180,7 @@ Add "memory"    "Memories + saved chats" (SizeOf $memPaths) (@($memPaths | Where
 Add "shortcuts" "Shortcuts (desktop / start menu / taskbar): $($shortcuts.Count)" 0 ($shortcuts.Count -gt 0) "app" (($shortcuts | ForEach-Object { Split-Path -Leaf (Split-Path $_) }) -join ", ")
 Add "cline"     "Point your main Cline back at its original provider (it's set to $clineNow)" 0 ($clineOurs) "app" $clineGs
 Add "serve"     "Turn off phone access (tailscale serve -> the command center)" 0 $serveOurs "app" ""
-Add "worktrees" "Laptop git worktrees from 'open both' ($($worktrees.Count)); only clean ones are removed" 0 ($worktrees.Count -gt 0) "extra" (($worktrees | ForEach-Object { $_.wt }) -join ", ")
+Add "worktrees" "Git worktrees from 'open both' and the agent team ($($worktrees.Count)); only clean ones are removed" 0 ($worktrees.Count -gt 0) "extra" (($worktrees | ForEach-Object { $_.wt }) -join ", ")
 Add "pip"       "Python packages setup installed: $($pyPkgs -join ', ')" 0 ($pyPkgs.Count -gt 0) "prereq" "pip --user"
 Add "python"    "Python ($($pyIds -join ', '))" 0 ($pyIds.Count -gt 0) "prereq" "other programs may use it"
 Add "tailscale" "Tailscale (signs this PC out of your tailnet)" 0 $hasTs "prereq" ""
@@ -356,11 +366,15 @@ if ($on["shortcuts"]) {
 
 # ------------------------------------------------------------------ 7. worktrees in your projects
 if ($on["worktrees"]) {
-    Step "Laptop worktrees"
+    Step "Worktrees"
     foreach ($w in $worktrees) {
         & $git -C $w.repo worktree remove $w.wt 2>&1 | Out-Null
-        if ($LASTEXITCODE -eq 0) { Ok "removed $($w.wt) (branch cline-laptop is kept in $($w.repo))" }
+        if ($LASTEXITCODE -eq 0) { Ok "removed $($w.wt) (its branch is kept in $($w.repo))" }
         else { Note "left $($w.wt): it has uncommitted changes (git -C `"$($w.repo)`" worktree remove --force `"$($w.wt)`" to drop them)" }
+        $parent = Split-Path -Parent $w.wt
+        if ($parent -like "*-agents" -and (Test-Path -LiteralPath $parent) -and -not (Get-ChildItem -LiteralPath $parent -Force)) {
+            Remove-Item -LiteralPath $parent -Force; Ok "removed the empty $parent"
+        }
     }
 }
 
