@@ -33,6 +33,8 @@ import updater  # noqa: E402  (new versions from GitHub, installed when you say 
 import llamaup  # noqa: E402  (llama.cpp engine updates)
 import team  # noqa: E402  (agent team: registry, worktrees, task board)
 import urllib.parse  # noqa: E402
+import hmac  # noqa: E402
+import secrets  # noqa: E402
 import collections  # noqa: E402
 import re  # noqa: E402
 
@@ -1081,7 +1083,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             repo = team_repo((qs.get("repo") or [""])[0] or (settings.get("team_repos") or [""])[0])
             self.send_json(200, dict(team.public(settings), remote=self.remote, repo=repo,
                                      repos=[r for r in settings.get("team_repos") or [] if os.path.isdir(r)],
-                                     board=team.load_board(repo) if repo else None))
+                                     board=team_view(repo) if repo else None))
         elif path == "/api/uninstall":
             self.send_json(200, uninstall_scan(qs_flag(self.path, "fresh")))
         elif path == "/api/code":
@@ -1136,6 +1138,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.memory_post(path[len("/api/memory/"):], data)
         if path.startswith("/api/models/"):
             return self.models_post(path[len("/api/models/"):], data)
+        if path.startswith("/agent/"):
+            return self.agent_messages(path, data)
         if path.startswith("/cline/") and path.endswith("/v1/chat/completions"):
             return self.cline_chat(path.split("/")[2], data)
         if path.startswith("/api/llama-update/"):
@@ -1234,6 +1238,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if ok:
                 remember_team_repo(repo)
             return self.send_json(200 if ok else 400, {"ok": ok, "msg": msg, "board": b, "repo": repo})
+        if path in ("/api/team/start", "/api/team/stop"):
+            repo = team_repo(data.get("repo"))
+            if not repo:
+                return self.send_json(400, {"ok": False, "msg": "pick a folder that is a git repo with at least one commit"})
+            if path == "/api/team/start":
+                ok, msg, b, extra = team_start(repo, data.get("confirm_cloud") is True)
+                return self.send_json(200 if ok else 409, dict({"ok": ok, "msg": msg, "board": b}, **extra))
+            ok, msg = team_stop(repo, str(data.get("task") or ""))
+            return self.send_json(200 if ok else 409, {"ok": ok, "msg": msg})
         if path == "/api/team/agents":
             ok, msg, clean = team.save_agents(settings, save_settings, data.get("agents"))
             return self.send_json(200 if ok else 400, {"ok": ok, "msg": msg, "agents": clean})
@@ -1559,15 +1572,48 @@ class Handler(http.server.BaseHTTPRequestHandler):
             entry = prev
         else:
             cline_log.append(entry)
-        if which == "laptop":
+        # agent team: a stopped agent's next step is refused (that is how Cline in VS Code is stopped from here);
+        # a working agent's steps go into its panel in 7:team
+        tt, on_done = team_task(which), None
+        if tt and tt[1].get("status") == "stopped":
+            entry["status"] = "stopped"
+            return self.send_json(409, {"error": {"message": "Stopped by the command center (7:team). Start the task again there."}})
+        if tt:
+            on_done = lambda e, tail, r=tt[0], tid=tt[1]["id"]: team.record_step(r, tid, team_step(e, tail))
+        backend = next((a["backend"] for a in team.agents(settings) if a["name"] == which), which)
+        if backend == "laptop":
             mid = laptop_info()["id"]
             if not mid:
                 entry["status"] = "laptop offline"
                 return self.send_json(502, {"error": {"message": "no laptop model listed by PAIR. Is the laptop on?"}})
             data["model"] = mid
-            return self.proxy_chat(json.dumps(data).encode(), PAIR, {}, info, entry)
+            return self.proxy_chat(json.dumps(data).encode(), PAIR, {}, info, entry, on_done=on_done)
         strip_images(data)
-        return self.proxy_chat(json.dumps(data).encode(), LLAMA, {"Authorization": "Bearer " + api_key()}, info, entry)
+        return self.proxy_chat(json.dumps(data).encode(), LLAMA, {"Authorization": "Bearer " + api_key()}, info, entry,
+                               on_done=on_done)
+
+    def agent_messages(self, path, data):
+        """Claude Code (a headless team agent) on a local model: Anthropic-format requests, forwarded to llama-server's
+        /v1/messages (or the laptop's) with the API key added here. Only the process this server started for that
+        agent may use it: it carries a token made for that one run."""
+        parts = path.split("/")    # "", "agent", <name>, "v1", "messages"[, "count_tokens"]
+        name, upath = (parts[2] if len(parts) > 2 else ""), "/" + "/".join(parts[3:])
+        L = team.LIVE.get(name)
+        given = (self.headers.get("x-api-key") or self.headers.get("Authorization", "").replace("Bearer ", "", 1)).strip()
+        if (upath not in ("/v1/messages", "/v1/messages/count_tokens") or not L or not L.get("token")
+                or not hmac.compare_digest(given.encode(), str(L["token"]).encode()) or not team.running(name)):
+            return self.send_json(403, {"type": "error", "error": {"type": "permission_error", "message": "not a running team agent"}})
+        tt = team_task(name)
+        if tt and tt[1].get("status") == "stopped":
+            return self.send_json(409, {"type": "error", "error": {"type": "invalid_request_error", "message": "stopped by the command center"}})
+        backend = next((a["backend"] for a in team.agents(settings) if a["name"] == name), "pc")
+        if backend == "laptop":
+            mid = laptop_info()["id"]
+            if not mid:
+                return self.send_json(502, {"type": "error", "error": {"type": "api_error", "message": "the laptop's model is off"}})
+            data["model"] = mid
+            return self.proxy_chat(json.dumps(data).encode(), PAIR, {}, upath=upath)
+        return self.proxy_chat(json.dumps(data).encode(), LLAMA, {"Authorization": "Bearer " + api_key()}, upath=upath)
 
     def cline_models(self, which):
         if which not in ("pc", "laptop"):
@@ -1696,11 +1742,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send_json(200, {"ok": bool(n), "msg": "added %d memories%s" % (n, ", tidying them up in the background" if n and M.learn_on else "")})
         return self.send_json(404, {"error": "not found"})
 
-    def proxy_chat(self, body, upstream, auth, mem_info=None, entry=None):
+    def proxy_chat(self, body, upstream, auth, mem_info=None, entry=None, upath="/v1/chat/completions", on_done=None):
+        """Forward one model request and stream the answer back. `entry` (a 5:cline row) and `on_done(entry or {},
+        tail)` see the last 16 KB of the reply, where the token counts and the tool call are."""
         global active_streams
         up = http.client.HTTPConnection(*upstream, timeout=900)
+        if on_done is not None and entry is None:
+            entry = {}
         try:
-            up.request("POST", "/v1/chat/completions", body, {
+            up.request("POST", upath, body, {
                 "Content-Type": "application/json", "Accept": "text/event-stream", **auth})
             resp = up.getresponse()
         except OSError as e:
@@ -1755,6 +1805,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             up.close()
             if entry is not None:
                 entry.update(status=resp.status, secs=round(time.time() - t0, 1), **stream_stats(tail))
+            if on_done is not None:
+                try:
+                    on_done(entry, tail)
+                except Exception:
+                    log_error("team step")
             with lock:
                 active_streams -= 1
             touch()
@@ -1832,6 +1887,175 @@ def llm_json(messages, schema, max_tokens, backend=None, empty=None, timeout=240
     return None
 
 
+def team_task(agent):
+    """(repo, task) for the agent's task in the active team, if it is running or was stopped; else None."""
+    repo = settings.get("team_active")
+    b = team.load_board(repo) if repo else None
+    if not b or b.get("state") not in ("running", "review"):
+        return None
+    t = next((x for x in b["tasks"] if x["agent"] == agent and x.get("status") in ("running", "stopped")), None)
+    return (repo, t) if t else None
+
+
+CLINE_TOOLS = ("write_to_file", "replace_in_file", "read_file", "execute_command", "list_files", "search_files",
+               "list_code_definition_names", "attempt_completion", "ask_followup_question", "plan_mode_respond",
+               "browser_action", "use_mcp_tool", "access_mcp_resource", "new_task", "web_fetch")
+
+
+def cline_tool(tail):
+    """Which tool a Cline step ended with, and on what (a path or a command), from the end of the streamed reply.
+    Cline either writes XML tags in its text or uses native tool calls; both are read."""
+    text, calls = "", ""
+    for line in tail.split(b"\n"):
+        line = line.strip()
+        if not line.startswith(b"data:") or line.endswith(b"[DONE]"):
+            continue
+        try:
+            j = json.loads(line[5:])
+        except ValueError:
+            continue
+        d = ((j.get("choices") or [{}])[0] or {}).get("delta") or {}
+        text += d.get("content") or ""
+        for tc in d.get("tool_calls") or []:
+            f = tc.get("function") or {}
+            calls += (f.get("name") or "") + "\x00" + (f.get("arguments") or "")
+    if calls:
+        name = calls.split("\x00", 1)[0] or "tool"
+        m = re.search(r'"(?:path|absolutePath|command)"\s*:\s*"((?:[^"\\]|\\.)*)"', calls)
+        target = ""
+        if m:
+            try:
+                target = json.loads('"%s"' % m.group(1))
+            except ValueError:
+                target = m.group(1)
+        return name, target[:160]
+    found = list(re.finditer(r"<(%s)>" % "|".join(CLINE_TOOLS), text))
+    if not found:
+        return ("reply" if text.strip() else None), ""
+    rest = text[found[-1].end():]
+    m = re.search(r"<(?:path|command)>\s*(.*?)\s*</(?:path|command)>", rest, re.S)
+    return found[-1].group(1), (m.group(1)[:160] if m else "")
+
+
+def team_step(entry, tail):
+    tool, target = cline_tool(tail)
+    return {"tool": tool, "target": target, "prompt": entry.get("prompt"), "cached": entry.get("cached"),
+            "out": entry.get("out"), "secs": entry.get("secs"),
+            "error": None if entry.get("status") in (200, None) else str(entry.get("status"))}
+
+
+def team_view(repo):
+    """The board for 7:team with what's live: changed files, files outside what the agent owns, and whether a
+    headless agent is still running (one marked running whose process is gone was cut off by a restart)."""
+    reg = {a["name"]: a for a in team.agents(settings)}
+    b = team.sync(repo, {n: a["client"] for n, a in reg.items()}) if repo else None
+    if not b:
+        return None
+    for t in b["tasks"]:
+        a = reg.get(t["agent"]) or {"client": "vscode", "backend": t["agent"]}
+        if a["client"] == "claude-code" and t.get("status") == "running" and team.live(t["agent"])["proc"] is None:
+            # marked running, but this copy of the server never started it: a restart cut it off
+            team.set_status(repo, t["id"], "stopped", message="the command center restarted while this agent worked")
+            t["status"] = "stopped"
+        files = team.changed_files(t, b.get("base_sha"))
+        t["files"] = files[:200]
+        t["outside"] = team.outside(files, t["owns"])
+        t["client"], t["backend"] = a["client"], a["backend"]
+        t["alive"] = team.running(t["agent"]) if a["client"] == "claude-code" else (
+            t.get("status") == "running" and time.time() - (t.get("last_step") or 0) < 90)
+    touched = {}
+    for t in b["tasks"]:
+        for f in t["files"]:
+            touched.setdefault(f["path"].lower(), []).append(t["agent"])
+    b["shared_files"] = {p: who for p, who in touched.items() if len(who) > 1}
+    b["active"] = os.path.normcase(settings.get("team_active") or "") == os.path.normcase(repo)
+    return b
+
+
+def team_start(repo, confirm_cloud=False):
+    """Every task gets its agent's worktree and brief, then its client: VS Code windows open on the worktrees (the
+    starter prompt goes on the clipboard, since Cline can't be handed a task from outside), and Claude Code runs
+    headless. -> (ok, message, board, extra)."""
+    b = team.load_board(repo)
+    if not b or not b.get("tasks"):
+        return False, "plan or write a split first", b, {}
+    if b.get("state") != "draft":
+        return False, "this split has already started: stop or review it first", b, {}
+    regl = team.agents(settings)
+    reg = {a["name"]: a for a in regl}
+    ok, msg, _, _ = team.check_tasks(b["tasks"], regl)
+    if not ok:
+        return False, msg, b, {}
+    act = settings.get("team_active")
+    if act and os.path.normcase(act) != os.path.normcase(repo) and (team.load_board(act) or {}).get("state") == "running":
+        return False, "another team is still working in %s: stop it first" % act, b, {}
+    cloud_agents = [t["agent"] for t in b["tasks"] if reg[t["agent"]]["backend"].startswith("cloud:")]
+    if cloud_agents and not confirm_cloud:
+        return False, "%s uses Claude in the cloud, which is billed to you: confirm to start" % ", ".join(cloud_agents), b, {"needs_confirm": cloud_agents}
+    cl = team.clients()
+    pc_on = model_info(None)["state"] in ("ON", "ASLEEP")
+    lap = laptop_info()
+    for t in b["tasks"]:
+        a = reg[t["agent"]]
+        if a["client"] == "claude-code" and not team.claude_bin():
+            return False, "%s needs Claude Code, which isn't installed" % t["agent"], b, {}
+        if a["client"] == "vscode" and not (cl["vscode"]["installed"] if a["name"] == "pc" else cl["vscode"]["laptop_setup"]):
+            return False, "%s needs %s" % (t["agent"], "VS Code" if a["name"] == "pc" else "start-vscode-laptop.bat"), b, {}
+        if a["backend"] == "pc" and not pc_on:
+            return False, "%s works with this PC's model, which is off: turn it on in 1:llm first" % t["agent"], b, {}
+        if a["backend"] == "laptop" and not lap.get("id"):
+            return False, "%s works with the laptop's model, which PAIR doesn't list: is the laptop on?" % t["agent"], b, {}
+    notes = []
+    for t in b["tasks"]:
+        ok, msg = team.prepare(repo, b, t, reg[t["agent"]]["client"])
+        if not ok:
+            team.save_board(repo, b)   # worktrees made so far are recorded; nothing is started
+            return False, "%s: %s" % (t["agent"], msg), b, {}
+        if msg != "ready":
+            notes.append("%s: %s" % (t["agent"], msg))
+    now = time.time()
+    b["state"], b["started"] = "running", now
+    for t in b["tasks"]:
+        t.update(status="running", started=now, finished=None, message=None, steps=[], stats={}, last_step=None)
+    team.save_board(repo, b)
+    for t in b["tasks"]:   # again, now that every agent's status says running
+        team.write_brief(b, t, reg[t["agent"]]["client"])
+    settings["team_active"] = repo
+    save_settings()
+    vscode = False
+    for t in b["tasks"]:
+        a = reg[t["agent"]]
+        if a["client"] == "vscode":
+            vscode = True
+            ok, m = workspaces.open_code(a["name"], t["worktree"], settings, save_settings,
+                                         lap.get("id") if a["name"] == "laptop" else None)
+            if a["name"] == "pc" and not workspaces.ROUTE["pc"]:
+                notes.append("main Cline isn't routed through the command center (5:cline), so pc's steps won't show here")
+        else:
+            cloud_run = a["backend"].startswith("cloud:")
+            ok, m = team.start_claude(repo, t, base_url=None if cloud_run else "http://127.0.0.1:%d/agent/%s" % (PORT, a["name"]),
+                                      token=secrets.token_urlsafe(24), api_key=cloud.key("anthropic") if cloud_run else None)
+        if not ok:
+            team.set_status(repo, t["id"], "failed", message=m, finished=time.time())
+            notes.append("%s: %s" % (t["agent"], m))
+    if vscode:
+        copy_to_clipboard(team.STARTER)
+        notes.insert(0, "VS Code opens on each agent's folder: paste the starter prompt (it's on the clipboard) into its Cline")
+    return True, "the team is working" + ("; " + "; ".join(notes) if notes else ""), team.load_board(repo), {}
+
+
+def team_stop(repo, task_id):
+    b = team.load_board(repo)
+    t = next((x for x in (b or {}).get("tasks", []) if x["id"] == task_id), None)
+    if not t:
+        return False, "no such task"
+    if t.get("status") != "running":
+        return False, "%s isn't running" % t["agent"]
+    team.set_status(repo, task_id, "stopped", finished=time.time(), message="stopped from 7:team")
+    killed = team.stop(t["agent"])
+    return True, ("stopped %s" % t["agent"]) if killed else ("%s is stopped: Cline gets an error on its next step" % t["agent"])
+
+
 def team_repo(path):
     """The repo a team request is about: an existing folder inside a git repo with a commit, else None.
     The browser only ever names a folder; git decides what the repo is."""
@@ -1900,7 +2124,7 @@ def idle_watch():
     import or a move of the memory folder, which would be cut off half-done."""
     while True:
         time.sleep(5)
-        if active_streams > 0 or memory.M.job.get("running") or memory.M.moving or tuner.S["running"]:
+        if active_streams > 0 or memory.M.job.get("running") or memory.M.moving or tuner.S["running"] or team.busy():
             touch()
         elif time.time() - last_request > IDLE_EXIT:
             memory.M.shutdown()  # stops the embedding server too

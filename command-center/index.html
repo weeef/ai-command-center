@@ -584,6 +584,45 @@ details.think .tbody{white-space:pre-wrap;max-height:260px;overflow-y:auto;font-
 .clrow .st.ok{color:var(--ok)}.clrow .st.bad{color:var(--crit)}.clrow .st.run{color:var(--accent2)}
 [data-theme="corpus"] .clrow .when,[data-theme="corpus"] .clrow .meta,[data-theme="corpus"] .clrow .st{font-family:var(--font)}
 @media (max-width:760px){#tags span[data-ws="5"]{display:none}}
+/* 7:team */
+#ws7 .col{overflow-y:auto}
+#teamGoalPane{flex:0 0 auto}
+#teamGoal,.tsk textarea,.tsk input,.tsk select,#teamAgents input,#teamAgents select,.memloc select{background:var(--bg2);color:var(--fg);border:1px solid var(--border);font:inherit;padding:5px 8px;outline:none}
+#teamGoal{width:100%;margin-top:8px;resize:vertical}
+#teamGoal:focus,.tsk textarea:focus,.tsk input:focus{border-color:var(--accent)}
+.tsk{display:grid;grid-template-columns:110px 1fr auto;gap:6px;padding:8px 0;border-bottom:1px solid var(--bg3)}
+.tsk textarea{grid-column:1/-1;resize:vertical;min-height:34px;font-size:12px}
+.tsk .own{grid-column:1/2;grid-row:2/3;min-height:60px}
+.tsk .gl{grid-column:2/4;grid-row:2/3;min-height:60px}
+.tsk .x{color:var(--dim);border-color:transparent;background:none}
+.tsk .x:hover{color:var(--crit)}
+.tsk.ro{grid-template-columns:auto 1fr}
+.tsk.ro .owns{grid-column:1/-1;color:var(--dim);font-size:11.5px}
+.tsk.ro .owns code{color:var(--fg)}
+.tprob{border-left:2px solid var(--crit);color:var(--crit);padding:4px 10px;margin:8px 0;background:var(--bg2)}
+.agp .steps2{max-height:240px;overflow-y:auto;font-size:11.5px;border-top:1px solid var(--bg3);margin-top:8px}
+#ws7 .kvt{grid-template-columns:96px minmax(0,1fr) auto}
+#ws7 .pane{min-width:0}
+.agp .stp{display:grid;grid-template-columns:40px minmax(0,1fr) auto;gap:8px;padding:2px 0;color:var(--dim);white-space:nowrap}
+.agp .stp b{color:var(--fg);font-weight:normal;overflow:hidden;text-overflow:ellipsis}
+.agp .stp.err b{color:var(--crit)}
+.agp .flist{font-size:11.5px;color:var(--dim);max-height:110px;overflow-y:auto;margin-top:4px}
+.agp .flist span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.agp .flist .out{color:var(--warn)}
+.agp .notes{font-size:12px;margin-top:6px}
+.agp .notes div{border-left:2px solid var(--accent2);padding-left:8px;margin:3px 0}
+.agrow{display:flex;align-items:center;gap:8px;padding:3px 0;border-bottom:1px dashed var(--bg3)}
+.agrow .n{font-weight:bold;min-width:70px}
+.agrow .d{color:var(--dim);flex:1}
+.agrow button{font-size:11px;padding:0 6px}
+body.remote .teamact,body.remote .tact{display:none!important}
+@media (max-width:760px){#ws7 .col{width:100%;min-width:0}#ws7 .kvt{grid-template-columns:72px minmax(0,1fr) auto}
+  .agp .stp span:last-child{display:none}.agp .stp{grid-template-columns:40px minmax(0,1fr)}
+  .tsk{grid-template-columns:90px minmax(0,1fr) auto}.tsk .own,.tsk .gl{grid-column:1/-1;grid-row:auto}
+  #ws7 .memloc select{max-width:100%}#ws7 .openrow input{min-width:0}}
+[data-theme="corpus"] #teamGoal,[data-theme="corpus"] .tsk textarea,[data-theme="corpus"] .tsk input,[data-theme="corpus"] .tsk select,
+[data-theme="corpus"] #teamAgents input,[data-theme="corpus"] #teamAgents select{border-radius:6px}
+[data-theme="corpus"] .agp .stp,[data-theme="corpus"] .agp .flist,[data-theme="corpus"] .tsk.ro .owns{font-family:var(--font)}
 body.remote #tags span[data-ws="5"]{display:none}
 .memloc input[type=checkbox]{flex:none;margin:0}
 .memloc label{white-space:nowrap}
@@ -681,6 +720,7 @@ body.remote #tags span[data-ws="2"]{display:none}
     <span data-ws="4" role="tab" tabindex="0" title="the memory tree: everything the models remember (Alt+4)">4:mem</span>
     <span data-ws="5" role="tab" tabindex="0" title="Cline through the command center: memory + request log (Alt+5)">5:cline</span>
     <span data-ws="6" role="tab" tabindex="0" title="settings: memory, location, import, appearance (Alt+6)">6:set</span>
+    <span data-ws="7" role="tab" tabindex="0" title="agent team: several coding agents on one feature at once (Alt+7)">7:team</span>
   </div>
   <div id="state" class="st-OFF">OFF</div>
   <div class="sep">│</div>
@@ -872,6 +912,27 @@ body.remote #tags span[data-ws="2"]{display:none}
       <div id="memList"></div>
     </section>
   </div>
+</main>
+<!-- 7:team ─ several coding agents on one feature, each in its own worktree -->
+<main id="ws7" class="ws" hidden>
+  <div class="col">
+    <section class="pane" id="teamGoalPane"><div class="title">team <i id="teamInfo"></i></div>
+      <div class="teamact">
+        <div class="openrow"><span class="ps">❯</span>
+          <input id="teamRepo" list="teamRepos" spellcheck="false" autocomplete="off" placeholder="project folder (a git repo), e.g. D:\projects\my-app">
+          <datalist id="teamRepos"></datalist><button id="teamLoad">load</button></div>
+        <textarea id="teamGoal" rows="3" maxlength="4000" placeholder="what should the team build? one feature, in a few sentences"></textarea>
+        <div class="memloc"><select id="teamPlanner" title="who splits the goal into tasks">
+            <option value="">planner: strongest that's on</option><option value="pc">planner: this pc's model</option>
+            <option value="laptop">planner: the laptop's model</option><option value="cloud">planner: cloud</option></select>
+          <label class="hint" title="the goal, the repo's file list and the start of its README are sent to your cloud provider (billed)"><input type="checkbox" id="teamCloud"> may use cloud</label>
+          <button id="teamPlan" class="primary">plan</button></div>
+      </div>
+      <div id="teamSplit"></div>
+    </section>
+    <section class="pane" id="teamAgentsPane"><div class="title">agents <i>· who can work</i></div><div id="teamAgents">loading…</div></section>
+  </div>
+  <div class="col" id="teamPanels"><section class="pane"><div class="title">agents at work</div><div class="hint">Plan a split on the left, check it, then start the team.</div></section></div>
 </main>
 <dialog id="modelDlg" aria-labelledby="mdTitle">
   <div class="mdhead"><div class="title" id="mdTitle">models</div><span id="mdHw"></span><button id="mdClose" title="close (Esc)">✕</button></div>
@@ -3067,6 +3128,167 @@ function renderCline(d){
     return `<div class="clrow"><span class="when">${new Date(e.t * 1000).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"})}</span><span class="task" title="${esc(e.task)}">${esc(e.task || "(no task text)")}</span>${st}<span class="meta">${esc(meta)}</span></div>`;
   }).join("") : `<div class="hint" style="padding:12px 4px">No Cline tasks through the command center yet. Route a VS Code above, then give Cline a task.</div>`;
 }
+
+/* ---------------- 7:team ----------------
+   One goal, split by a planner into one task per agent, each agent in its own git worktree
+   (<repo>-agents\<agent>, branch agent/<agent>/<task>). The board lives in the repo's .git folder. The phone sees
+   all of it but none of the buttons (the server refuses those from the phone anyway). */
+let teamData = null, teamDirty = false, teamBusy = false, teamDraft = null;
+const TEAM_ST = {draft: "", running: "on", stopped: "warn", done: "on", failed: "crit", merged: "on", discarded: ""};
+function teamRepoPath(){ return ($("teamRepo").value || "").trim() || store.get("rt.teamRepo") || ""; }
+async function refreshTeam(){
+  const r = teamRepoPath();
+  const d = await (await fetch("/api/team" + (r ? "?repo=" + encodeURIComponent(r) : ""), {cache: "no-store"})).json();
+  renderTeam(d);
+}
+function teamFmt(n){ n = +n || 0; return n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "k" : String(n); }
+function renderTeam(d){
+  teamData = d;
+  const b = d.board, repoIn = $("teamRepo");
+  if (d.repo && !repoIn.value && document.activeElement !== repoIn) { repoIn.value = d.repo; store.set("rt.teamRepo", d.repo); }
+  $("teamRepos").innerHTML = (d.repos || []).map(p => `<option value="${esc(p)}">`).join("");
+  $("teamInfo").textContent = b ? `· ${b.state}${b.base ? " · base " + b.base : ""}${b.base_sha ? " @" + b.base_sha.slice(0, 7) : ""}` : (d.repo ? "· no plan yet" : "");
+  if (b && !teamDirty && document.activeElement !== $("teamGoal")) $("teamGoal").value = b.goal || "";
+  $("teamPlan").disabled = !!(b && b.state === "running");
+  $("teamPlan").title = b && b.state === "running" ? "the team is working: stop it or review it first" : "split the goal into one task per agent";
+  renderTeamAgents(d);
+  if (!teamDirty) renderTeamSplit(teamDraft || b, d);
+  renderTeamPanels(b, d);
+}
+function renderTeamAgents(d){
+  const cl = d.clients || {}, cc = cl["claude-code"] || {};
+  const label = {pc: "this pc's model", laptop: "the laptop's model", "cloud:anthropic": "Claude (cloud, billed)"};
+  $("teamAgents").innerHTML = d.agents.map(a => `<div class="agrow"><span class="n">${esc(a.name)}</span>
+      <span class="d">${a.client === "vscode" ? "Cline in " + (a.name === "pc" ? "your main VS Code" : "the laptop VS Code") : "Claude Code, headless"} · ${esc(label[a.backend] || a.backend)}</span>
+      ${d.agents.length > 1 ? `<button class="x tact" data-agdel="${esc(a.name)}" title="remove this agent">×</button>` : ""}</div>`).join("") +
+    `<div class="memloc tact"><input id="agName" maxlength="20" placeholder="name, e.g. cc1" style="flex:0 1 120px">
+       <select id="agBackend"><option value="pc">this pc's model</option><option value="laptop">the laptop's model</option><option value="cloud:anthropic">Claude (cloud, billed)</option></select>
+       <button id="agAdd" ${cc.installed ? "" : "disabled"}>+ Claude Code agent</button></div>
+     <div class="hint">${cc.installed ? `Claude Code ${esc(cc.version || "")} is installed: it runs headless in its worktree, on the model you pick. A cloud agent asks before every start.` : "Claude Code isn't installed, so only the two VS Code agents are available."}
+       VS Code agents are your main VS Code (<b>pc</b>) and the laptop VS Code (<b>laptop</b>).</div>`;
+}
+function renderTeamSplit(b, d){
+  const box = $("teamSplit"), names = d.agents.map(a => a.name);
+  if (!b || !b.tasks || !b.tasks.length) { box.innerHTML = `<div class="hint" style="margin-top:8px">Write the goal and press <b>plan</b>, or <button class="tact" id="teamBlank">write the split yourself</button>.</div>`; return; }
+  const ro = remote || (b.state && b.state !== "draft");
+  if (ro) {
+    box.innerHTML = `<div class="sect">split</div>` + b.tasks.map(t => `<div class="tsk ro"><b>${esc(t.agent)}</b><span>${esc(t.title)}</span>
+      <div class="owns">owns ${t.owns.map(p => `<code>${esc(p)}</code>`).join(", ")}</div></div>`).join("");
+    return;
+  }
+  const opt = cur => names.map(n => `<option ${n === cur ? "selected" : ""}>${esc(n)}</option>`).join("");
+  box.innerHTML = `<div class="sect">split${b.planner ? ` <i class="hint">by ${esc(b.planner.model || b.planner.backend)}</i>` : ""}</div>
+    ${b.problem ? `<div class="tprob">${esc(b.problem)}</div>` : ""}
+    ${b.tasks.map((t, i) => `<div class="tsk" data-i="${i}">
+      <select class="ag" title="agent">${opt(t.agent)}</select>
+      <input class="ti" value="${esc(t.title)}" maxlength="120" placeholder="title">
+      <button class="x" data-tdel="${i}" title="remove this task">×</button>
+      <textarea class="own" placeholder="files and folders it owns, one per line (folders end in /)">${esc((t.owns || []).join("\n"))}</textarea>
+      <textarea class="gl" placeholder="what exactly to build">${esc(t.goal || "")}</textarea></div>`).join("")}
+    <div class="memloc"><button id="teamAddTask" ${b.tasks.length >= names.length ? "disabled" : ""}>+ task</button><span class="grow" style="flex:1"></span>
+      <button id="teamSave">save split</button><button id="teamStart" class="primary" ${teamBusy ? "disabled" : ""}>start team</button></div>
+    <div class="hint">One task per agent. Owned paths can't overlap: that's what keeps the merge clean. Each agent works in <code>${esc((d.repo || "repo") + "-agents\\<agent>")}</code>.</div>`;
+}
+function teamSplitFromForm(){
+  return [...document.querySelectorAll("#teamSplit .tsk:not(.ro)")].map(r => ({
+    agent: r.querySelector(".ag").value, title: r.querySelector(".ti").value,
+    owns: r.querySelector(".own").value.split("\n").map(x => x.trim()).filter(Boolean), goal: r.querySelector(".gl").value}));
+}
+function teamStep(s){
+  const tm = new Date((s.t || 0) * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", hourCycle: "h23"});
+  const what = s.tool === "result" ? "finished" + (s.cost != null ? ` · $${(+s.cost).toFixed(3)}` : "") : `${s.tool || "step"}${s.target ? " " + s.target : ""}`;
+  const tok = s.prompt ? `${teamFmt(s.prompt)} in${s.cached ? ` · ${Math.round(100 * s.cached / s.prompt)}% cached` : ""} · ${teamFmt(s.out)} out` : "";
+  return `<div class="stp ${s.error ? "err" : ""}"><span>${tm}</span><b title="${esc(what)}">${esc(what)}${s.error ? " · " + esc(s.error) : ""}</b><span>${tok}</span></div>`;
+}
+function renderTeamPanels(b, d){
+  const col = $("teamPanels");
+  if (!b || b.state === "draft" || !b.tasks.some(t => t.worktree)) {
+    col.innerHTML = `<section class="pane"><div class="title">agents at work</div><div class="hint">${b && b.state === "draft" ? "Check the split, then <b>start team</b>." : "Plan a split on the left, check it, then start the team."}</div></section>`;
+    return;
+  }
+  const shared = b.shared_files || {};
+  col.innerHTML = b.tasks.map(t => {
+    const s = t.stats || {}, files = t.files || [], steps = (t.steps || []).slice(-25).reverse();
+    const add = files.reduce((a, f) => a + (+f.add || 0), 0), del = files.reduce((a, f) => a + (+f.del || 0), 0);
+    const mine = files.filter(f => shared[f.path.toLowerCase()]);
+    const live = t.status === "running" ? (t.alive ? "working" : t.client === "vscode" ? "waiting for Cline" : "starting") : t.status;
+    return `<section class="pane agp"><div class="title">${esc(t.agent)} <i>· ${esc(t.branch || "")}</i></div>
+      <div class="shead"><span class="dot ${TEAM_ST[t.status] || ""}"></span><span class="big">${esc(live)}</span>
+        <span class="sub">${esc(t.title)}</span><span class="grow"></span>
+        ${t.status === "running" ? `<button class="btn-main stop tact" data-tstop="${esc(t.id)}">stop</button>` : ""}</div>
+      <div class="kvt">
+        <span class="k">works with</span><span class="v">${esc(t.client === "vscode" ? "Cline · VS Code" : "Claude Code · headless")} · ${esc(t.backend)}</span><span></span>
+        <span class="k">files</span><span class="v">${files.length} changed${files.length ? ` · +${add} −${del}` : ""}</span><span></span>
+        <span class="k">tokens</span><span class="v">${s.steps ? `${s.steps} steps · ${teamFmt(s.prompt)} in${s.prompt ? ` (${Math.round(100 * (s.cached || 0) / s.prompt)}% cached)` : ""} · ${teamFmt(s.out)} out${s.cost != null ? ` · $${s.cost}` : ""}` : "–"}</span><span></span>
+        <span class="k">folder</span><span class="v" title="${esc(t.worktree || "")}">${esc(t.worktree || "–")}</span><span></span>
+      </div>
+      ${t.message ? `<div class="note ${t.status === "done" ? "ok" : ""}">${esc(t.message)}</div>` : ""}
+      ${t.outside && t.outside.length ? `<div class="note">changed files it doesn't own: ${t.outside.map(esc).join(", ")}</div>` : ""}
+      ${mine.length ? `<div class="note">also changed by another agent: ${mine.map(f => esc(f.path) + " (" + esc(shared[f.path.toLowerCase()].join(", ")) + ")").join(", ")}</div>` : ""}
+      ${files.length ? `<div class="flist">${files.slice(0, 40).map(f => `<span class="${(t.outside || []).includes(f.path) ? "out" : ""}">${esc(f.add === "new" ? "new" : "+" + f.add + " −" + f.del)} · ${esc(f.path)}</span>`).join("")}</div>` : ""}
+      ${(t.notes || []).length ? `<div class="notes">${t.notes.slice(-5).map(n => `<div><b>${esc(n.by)}</b>: ${esc(n.text)}</div>`).join("")}</div>` : ""}
+      <div class="steps2">${steps.length ? steps.map(teamStep).join("") : `<div class="hint">${t.client === "vscode" ? "No steps yet. In its VS Code, paste the starter prompt into Cline (it's on the clipboard)." : "No steps yet."}</div>`}</div>
+    </section>`;
+  }).join("");
+}
+async function teamPost(url, body){
+  const r = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  let j = {}; try { j = await r.json(); } catch(e){}
+  return Object.assign({ok: r.ok && j.ok !== false, msg: j.msg || j.error || (r.ok ? "" : "HTTP " + r.status)}, j, {ok: r.ok && j.ok !== false});
+}
+$("ws7").addEventListener("input", e => { if (e.target.closest("#teamSplit")) teamDirty = true; });
+$("teamRepo").addEventListener("change", () => { store.set("rt.teamRepo", $("teamRepo").value.trim()); teamDirty = false; teamDraft = null; refreshTeam(); });
+$("teamRepo").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); $("teamLoad").click(); } });
+$("ws7").addEventListener("click", async e => {
+  const t = e.target, repo = teamRepoPath();
+  if (t.closest("#teamLoad")) { store.set("rt.teamRepo", repo); teamDirty = false; teamDraft = null; return refreshTeam(); }
+  if (t.closest("#teamPlan")) {
+    const goal = $("teamGoal").value.trim();
+    if (!repo || !goal) return sysToast(!repo ? "pick the project folder first" : "say what the team should build", true);
+    const b = t.closest("#teamPlan"); b.disabled = true; b.textContent = "planning…";
+    const r = await teamPost("/api/team/plan", {repo, goal, planner: $("teamPlanner").value || null, use_cloud: $("teamCloud").checked});
+    b.disabled = false; b.textContent = "plan";
+    sysToast(r.msg, !r.ok, 8000);
+    teamDirty = false; teamDraft = r.ok ? null : r.board;   // a split that needs a fix stays on screen to be fixed
+    if (r.repo) { $("teamRepo").value = r.repo; store.set("rt.teamRepo", r.repo); }
+    if (teamDraft) { renderTeamSplit(teamDraft, teamData); teamDirty = true; }
+    return refreshTeam();
+  }
+  if (t.closest("#teamBlank")) {
+    teamDraft = {state: "draft", tasks: teamData.agents.slice(0, 2).map(a => ({agent: a.name, title: "", owns: [], goal: ""}))};
+    renderTeamSplit(teamDraft, teamData); teamDirty = true; return;
+  }
+  if (t.closest("#teamAddTask")) {
+    const cur = teamSplitFromForm(), free = teamData.agents.map(a => a.name).find(n => !cur.some(x => x.agent === n));
+    teamDraft = {state: "draft", tasks: cur.concat([{agent: free, title: "", owns: [], goal: ""}])};
+    renderTeamSplit(teamDraft, teamData); teamDirty = true; return;
+  }
+  const del = t.closest("[data-tdel]");
+  if (del) { const cur = teamSplitFromForm(); cur.splice(+del.dataset.tdel, 1); teamDraft = {state: "draft", tasks: cur}; renderTeamSplit(teamDraft, teamData); teamDirty = true; return; }
+  if (t.closest("#teamSave") || t.closest("#teamStart")) {
+    const start = !!t.closest("#teamStart");
+    const r = await teamPost("/api/team/board", {repo, goal: $("teamGoal").value, tasks: teamSplitFromForm()});
+    if (!r.ok) return sysToast(r.msg, true, 8000);
+    teamDirty = false; teamDraft = null;
+    if (!start) { sysToast("split saved"); return refreshTeam(); }
+    teamBusy = true;
+    let s = await teamPost("/api/team/start", {repo});
+    if (!s.ok && s.needs_confirm && confirm(s.msg + "\n\nStart anyway?")) s = await teamPost("/api/team/start", {repo, confirm_cloud: true});
+    teamBusy = false;
+    sysToast(s.msg, !s.ok, 12000);
+    return refreshTeam();
+  }
+  const stop = t.closest("[data-tstop]");
+  if (stop) { const r = await teamPost("/api/team/stop", {repo, task: stop.dataset.tstop}); sysToast(r.msg, !r.ok, 6000); return refreshTeam(); }
+  if (t.closest("#agAdd")) {
+    const name = $("agName").value.trim().toLowerCase(), backend = $("agBackend").value;
+    const r = await teamPost("/api/team/agents", {agents: teamData.agents.concat([{name, backend, client: "claude-code"}])});
+    sysToast(r.msg, !r.ok); return refreshTeam();
+  }
+  const ad = t.closest("[data-agdel]");
+  if (ad) { const r = await teamPost("/api/team/agents", {agents: teamData.agents.filter(a => a.name !== ad.dataset.agdel)}); sysToast(r.msg, !r.ok); return refreshTeam(); }
+});
+
 $("ws5").addEventListener("click", async e => {
   const b = e.target.closest("[data-cl]");
   if (b) {
@@ -3145,13 +3367,13 @@ fitScale();
 let ws = "1", wsTimer = 0;
 let remote = false;
 function showWs(n){
-  n = String(n); if (!["1","2","3","4","5","6","s"].includes(n)) n = "1";
+  n = String(n); if (!["1","2","3","4","5","6","7","s"].includes(n)) n = "1";
   if (phone.matches || remote) { if (n === "2") n = phone.matches ? "s" : "1"; if (n === "5") n = "1"; }  // VS Code lives on the PC
   if (!phone.matches && n === "s") n = "1";
   ws = n; store.set("rt.ws", n);
   document.body.classList.toggle("sysview", n === "s");
   document.querySelectorAll("#tags span").forEach(t => { const on = t.dataset.ws === n; t.classList.toggle("on", on); t.setAttribute("aria-selected", on); });
-  for (const k of ["1","2","3","4","5","6"]) $("ws" + k).hidden = k !== (n === "s" ? "1" : n);
+  for (const k of ["1","2","3","4","5","6","7"]) $("ws" + k).hidden = k !== (n === "s" ? "1" : n);
   if (n === "4") requestAnimationFrame(renderTree);
   if (n === "4" && !brain.pts) buildBrain();
   clearTimeout(wsTimer);
@@ -3170,6 +3392,7 @@ async function refreshWs(){
     if (ws === "6") { await refreshMem(); if (!cloudSt) refreshCloud(); if (!webSt) refreshWeb(); refreshUpd(); refreshLlu(); if (!uninSt) refreshUnin(); }
     if (ws === "4") await refreshTree();
     if (ws === "5") renderCline(await (await fetch("/api/clinecc", {cache:"no-store"})).json());
+    if (ws === "7") await refreshTeam();
   } catch (e) {}
   if (ws !== "1") wsTimer = setTimeout(refreshWs, document.hidden ? 15000 : 4000);
 }
@@ -3177,7 +3400,7 @@ document.querySelectorAll("#tags span").forEach(t => {
   t.onclick = () => showWs(t.dataset.ws);
   t.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showWs(t.dataset.ws); } };
 });
-addEventListener("keydown", e => { if (e.altKey && !e.ctrlKey && ["1","2","3","4","5","6"].includes(e.key)) { e.preventDefault(); showWs(e.key); } });
+addEventListener("keydown", e => { if (e.altKey && !e.ctrlKey && ["1","2","3","4","5","6","7"].includes(e.key)) { e.preventDefault(); showWs(e.key); } });
 function setRemote(r){ if (r === remote) return; remote = r; document.body.classList.toggle("remote", r); if (r && ws === "2") showWs("1"); }
 
 async function postJSON(url, obj){
@@ -3319,7 +3542,7 @@ renderBrain(false);
 requestAnimationFrame(brainLoop);
 loadCline();
 poll();
-showWs((location.hash.match(/ws=([1-6])/) || [])[1] || store.get("rt.ws") || "1");
+showWs((location.hash.match(/ws=([1-7])/) || [])[1] || store.get("rt.ws") || "1");
 sys("command center · /help for commands");
 ta.focus();
 </script>

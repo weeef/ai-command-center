@@ -619,13 +619,165 @@ def t_board():
             server.settings["team_repos"] = repos_was
 
 
+FAKE_CLAUDE = r'''
+import json, os, sys, urllib.request, urllib.error
+base, tok = os.environ["ANTHROPIC_BASE_URL"], os.environ["ANTHROPIC_AUTH_TOKEN"]
+def ask(token):
+    r = urllib.request.Request(base + "/v1/messages", json.dumps({"model": "local", "max_tokens": 5, "messages": []}).encode(),
+                               {"Content-Type": "application/json", "x-api-key": token})
+    try:
+        return urllib.request.urlopen(r, timeout=20).status
+    except urllib.error.HTTPError as e:
+        return e.code
+codes = [ask("wrong-token"), ask(tok)]
+with open("server/proxy-codes.txt", "w") as f:
+    f.write(json.dumps(codes))
+brief = open(".cc-agent.md", encoding="utf-8").read()
+with open(".cc-agent.md", "a", encoding="utf-8") as f:
+    f.write("- cc1: the export route is GET /api/export\n")
+with open("server/export.py", "w") as f:
+    f.write("def export(): return []\n")
+ev = {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Write", "input": {"file_path": "server/export.py"}}],
+                                       "usage": {"input_tokens": 100, "cache_read_input_tokens": 900, "output_tokens": 40}}}
+print(json.dumps(ev), flush=True)
+print(json.dumps({"type": "result", "is_error": False, "result": "done: " + str("Export API" in brief)}), flush=True)
+'''
+
+
+def t_teamrun():
+    """Starting a team, live steps from Cline and Claude Code, the Claude Code proxy's token, stop."""
+    import team
+    repo = temp_repo("run repo")
+    fake_dir = os.path.join(TMP, "fake claude")
+    os.makedirs(fake_dir, exist_ok=True)
+    with open(os.path.join(fake_dir, "fake_claude.py"), "w") as f:
+        f.write(FAKE_CLAUDE)
+    got = []
+
+    class Model(http.server.BaseHTTPRequestHandler):   # stands in for llama-server on :8090
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):
+            got.append((self.path, self.headers.get("Authorization"), json.loads(self.rfile.read(int(self.headers["Content-Length"])))))
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            for d in ({"content": "I'll add the button.\n<write_to_file>\n<path>ui/app.js</path>\n<content>x"}, {"content": "</content>\n</write_to_file>"}):
+                self.wfile.write(b"data: " + json.dumps({"choices": [{"delta": d}]}).encode() + b"\n\n")
+            self.wfile.write(b'data: {"choices":[{"delta":{}}],"timings":{"prompt_n":50,"cache_n":950,"predicted_n":30}}\n\ndata: [DONE]\n\n')
+
+    fake = http.server.ThreadingHTTPServer(("127.0.0.1", PORT - 1), Model)
+    threading.Thread(target=fake.serve_forever, daemon=True).start()
+    saved = {k: server.settings.get(k) for k in ("agents", "team_active", "team_repos", "recent_projects")}
+    real = (server.LLAMA, server.model_info, server.laptop_info, server.save_settings, server.copy_to_clipboard,
+            workspaces.open_code, team.claude_bin, team.claude_command, server.api_key)
+    opened, clip = [], []
+    server.LLAMA = ("127.0.0.1", PORT - 1)
+    server.model_info = lambda *a: {"state": "ON", "name": "PC model"}
+    server.laptop_info = lambda *a, **k: {"state": "OFF", "id": None}
+    server.save_settings = lambda: None
+    server.copy_to_clipboard = lambda t: clip.append(t) or True
+    server.api_key = lambda: "test-key"
+    workspaces.open_code = lambda which, path, *a, **k: opened.append((which, path)) or (True, "opening")
+    team.claude_bin = lambda: sys.executable
+    team.claude_command = lambda exe: [exe, "-I", os.path.join(fake_dir, "fake_claude.py")]
+    server.settings["agents"] = [{"name": "pc", "backend": "pc", "client": "vscode"},
+                                 {"name": "cc1", "backend": "pc", "client": "claude-code"},
+                                 {"name": "cc2", "backend": "cloud:anthropic", "client": "claude-code"}]
+    split = [{"agent": "pc", "title": "Export button", "goal": "a button", "owns": ["ui/"]},
+             {"agent": "cc1", "title": "Export API", "goal": "GET /api/export", "owns": ["server/"]}]
+    try:
+        st, d = req("POST", "/api/team/board", json.dumps({"repo": repo, "goal": "export", "tasks": split + [
+            {"agent": "cc2", "title": "Docs", "goal": "", "owns": ["README.md"]}]}))
+        st, d = req("POST", "/api/team/start", json.dumps({"repo": repo}))
+        check("start: a cloud agent needs a confirmation first, and nothing starts", st == 409 and d.get("needs_confirm") == ["cc2"]
+              and not opened and not os.path.isdir(repo + "-agents"), d)
+        st, d = req("POST", "/api/team/board", json.dumps({"repo": repo, "goal": "export", "tasks": split}))
+        st, d = req("POST", "/api/team/start", json.dumps({"repo": repo}), Origin="https://evil.example")
+        check("start: refused from another origin", st == 403, st)
+        st, d = req("POST", "/api/team/start", json.dumps({"repo": repo}))
+        b = d.get("board") or {}
+        pc = os.path.join(repo + "-agents", "pc")
+        check("start: every agent gets its own worktree on its task branch", st == 200 and [t["worktree"] for t in b["tasks"]]
+              == [pc, os.path.join(repo + "-agents", "cc1")] and b["state"] == "running", d)
+        check("start: VS Code opens on the pc agent's worktree, the starter prompt goes on the clipboard",
+              opened == [("pc", pc)] and clip == [team.STARTER], (opened, clip))
+        br = open(os.path.join(pc, ".cc-agent.md"), encoding="utf-8").read()
+        check("start: the brief and the Cline rule are in the worktree", "Export button" in br and "**cc1** (running)" in br
+              and os.path.exists(os.path.join(pc, ".clinerules", "cc-team.md")), br[:200])
+        stt = subprocess.run([workspaces.GIT, "-C", pc, "status", "--porcelain"], capture_output=True, text=True).stdout
+        check("start: git doesn't see the brief files", stt.strip() == "", stt)
+        st, d = req("POST", "/api/team/start", json.dumps({"repo": repo}))
+        check("start: a running team can't be started twice", st == 409, d)
+
+        # Cline in the pc agent's VS Code takes one step through the command center
+        st, raw = req("POST", "/cline/pc/v1/chat/completions", json.dumps({"messages": [{"role": "user", "content": "<task>go</task>"}], "stream": True}))
+        for _ in range(50):   # the step is recorded just after the reply's last byte
+            tb = team.load_board(repo)["tasks"][0]
+            if tb.get("steps"):
+                break
+            time.sleep(0.05)
+        step = (tb.get("steps") or [{}])[-1]
+        check("cline: the step reaches the model with the key added", st == 200 and got and got[-1][1] == "Bearer test-key", st)
+        check("cline: the step shows in the agent's panel (tool, file, tokens, cache)",
+              step.get("tool") == "write_to_file" and step.get("target") == "ui/app.js" and step.get("prompt") == 1000
+              and step.get("cached") == 950 and tb["stats"]["steps"] == 1, step)
+
+        # the headless agent: its process ran, used the proxy, wrote a file and a handoff note
+        for _ in range(100):
+            t2 = team.load_board(repo)["tasks"][1]
+            if t2["status"] != "running":
+                break
+            time.sleep(0.1)
+        cc = os.path.join(repo + "-agents", "cc1")
+        pf = os.path.join(cc, "server", "proxy-codes.txt")
+        codes = json.loads(open(pf).read()) if os.path.exists(pf) else None
+        check("claude-code: finished, and its stream became steps", t2["status"] == "done" and t2["stats"].get("prompt") == 1000
+              and t2["steps"][0]["target"] == "server/export.py" and "done: True" in (t2.get("message") or ""), t2)
+        check("claude-code: the proxy refuses a wrong token and forwards the right one to /v1/messages",
+              codes == [403, 200] and any(p == "/v1/messages" and a == "Bearer test-key" for p, a, _ in got), (codes, [g[:2] for g in got]))
+        st, d = req("POST", "/agent/cc1/v1/messages", json.dumps({"messages": []}), x_api_key="anything")
+        check("claude-code: after the run the route is closed", st == 403, st)
+        st, d = req("GET", "/api/team?repo=" + urllib_quote(repo))
+        v = {t["agent"]: t for t in d["board"]["tasks"]}
+        check("view: changed files per agent", any(f["path"] == "server/export.py" for f in v["cc1"]["files"]) and not v["cc1"]["outside"], v["cc1"].get("files"))
+        check("view: the handoff note went to the board", any(n["text"] == "the export route is GET /api/export" for n in v["cc1"]["notes"]), v["cc1"]["notes"])
+        br = open(os.path.join(pc, ".cc-agent.md"), encoding="utf-8").read()
+        check("view: and into the other agent's brief", "- cc1: the export route is GET /api/export" in br and "**cc1** (done)" in br, br[-400:])
+
+        as_phone(True)
+        try:
+            st, _ = req("POST", "/api/team/stop", json.dumps({"repo": repo, "task": "t1"}), **PHONE)
+            check("phone: can't stop an agent", st == 403, st)
+            st, _ = req("POST", "/agent/cc1/v1/messages", "{}", **PHONE)
+            check("phone: no way into the agent proxy", st == 403, st)
+        finally:
+            as_phone(False)
+        st, d = req("POST", "/api/team/stop", json.dumps({"repo": repo, "task": "t1"}))
+        check("stop: the VS Code agent is marked stopped", st == 200 and team.load_board(repo)["tasks"][0]["status"] == "stopped", d)
+        n = len(got)
+        st, d = req("POST", "/cline/pc/v1/chat/completions", json.dumps({"messages": [{"role": "user", "content": "<task>go</task>"}], "stream": True}))
+        check("stop: its next Cline step is refused and never reaches the model", st == 409 and len(got) == n, (st, d))
+        check("stop: everything finished -> the board is up for review", team.load_board(repo)["state"] == "review")
+    finally:
+        (server.LLAMA, server.model_info, server.laptop_info, server.save_settings, server.copy_to_clipboard,
+         workspaces.open_code, team.claude_bin, team.claude_command, server.api_key) = real
+        for k, v in saved.items():
+            if v is None:
+                server.settings.pop(k, None)
+            else:
+                server.settings[k] = v
+        fake.shutdown()
+
+
 def urllib_quote(s):
     import urllib.parse
     return urllib.parse.quote(s, safe="")
 
 
 GROUPS = {"web": t_web, "modules": t_modules, "smuggle": t_smuggle, "key": t_key, "guard": t_guard, "phone": t_phone, "tools": t_tools, "tuner": t_tuner, "laptop": t_laptop,
-          "worktree": t_worktree, "team": t_team, "board": t_board}
+          "worktree": t_worktree, "team": t_team, "board": t_board, "teamrun": t_teamrun}
 
 if __name__ == "__main__":
     want = sys.argv[1:] or list(GROUPS)

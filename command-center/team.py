@@ -367,6 +367,321 @@ def brief(board, task):
     return "\n".join(lines) + "\n"
 
 
+STARTER = "Read the file .cc-agent.md in this folder: it is your task in a team of coding agents. Do it."
+
+
+def claude_bin():
+    """The Claude Code program itself (the npm package ships a native claude.exe; the claude.cmd next to it is only a
+    wrapper, and starting it would put cmd.exe in between)."""
+    w = claude_exe()
+    if not w:
+        return None
+    exe = os.path.join(os.path.dirname(w), "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe")
+    return exe if os.path.isfile(exe) else None
+
+
+def exclude(repo, names):
+    """Keep the command center's files out of git in every worktree of the repo (.git/info/exclude is shared)."""
+    g = git_dir(repo)
+    if not g:
+        return
+    p = os.path.join(g, "info", "exclude")
+    try:
+        with open(p, encoding="utf-8", errors="replace") as f:
+            have = f.read()
+    except OSError:
+        have = ""
+    add = ["/" + n for n in names if "/" + n not in have.splitlines()]
+    if add:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(("" if not have or have.endswith("\n") else "\n") + "# command center agent team\n" + "\n".join(add) + "\n")
+
+
+def _write_if_changed(path, text):
+    try:
+        with open(path, encoding="utf-8") as f:
+            if f.read() == text:
+                return False
+    except OSError:
+        pass
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+    return True
+
+
+def write_brief(board, task, client):
+    """The brief in the agent's worktree: .cc-agent.md, plus .clinerules/cc-team.md for Cline (which reads that folder
+    into every task by itself). Returns a note if the Cline rule couldn't be written."""
+    wt = task.get("worktree")
+    if not wt or not os.path.isdir(wt):
+        return "no worktree"
+    text = brief(board, task)
+    _write_if_changed(os.path.join(wt, BRIEF_FILE), text)
+    if client == "vscode":
+        rules = os.path.join(wt, ".clinerules")
+        if os.path.isfile(rules):   # the project keeps its Cline rules in one file: leave it alone
+            return ".clinerules is a file in this repo, so the brief is only in .cc-agent.md: tell Cline to read it"
+        _write_if_changed(os.path.join(wt, *CLINE_RULE.split("/")),
+                          "# Agent team\n\nYou are working as part of an agent team. Your task, the files you own and the "
+                          "other agents' status are in `.cc-agent.md` in the project root: read it before anything else "
+                          "and follow it.\n")
+    return None
+
+
+def prepare(repo, board, task, client):
+    """The agent's own worktree on its task branch, with its brief written. -> (ok, message)."""
+    ok, wt, _ = workspaces.agent_worktree(repo, task["agent"], task["slug"], board.get("base_sha"))
+    if not ok:
+        return False, wt
+    task["worktree"] = wt
+    exclude(repo, [BRIEF_FILE, CLINE_RULE])
+    return True, write_brief(board, task, client) or "ready"
+
+
+# ---------------------------------------------------------------- live state (this process only)
+LIVE = {}            # agent -> {"proc", "token", "repo", "task", "steps": [...], "last", "result", "log"}
+_live_lock = threading.Lock()
+MAX_STEPS = 60
+
+
+def live(agent):
+    with _live_lock:
+        return LIVE.setdefault(agent, {"proc": None, "token": None, "repo": None, "task": None, "steps": [], "last": 0,
+                                       "result": None})
+
+
+def running(agent):
+    """Is a headless agent's process still going?"""
+    p = live(agent)["proc"]
+    return p is not None and p.poll() is None
+
+
+def busy():
+    return any(running(a) for a in list(LIVE))
+
+
+def record_step(repo, task_id, step):
+    """One step of an agent (a model request it made) into the board: the newest steps and running totals."""
+    step = {k: v for k, v in step.items() if v not in (None, "")}
+    step.setdefault("t", time.time())
+    with _board_lock:
+        b = load_board(repo)
+        t = next((x for x in (b or {}).get("tasks", []) if x["id"] == task_id), None)
+        if not t:
+            return
+        t["steps"] = (t.get("steps") or [])[-(MAX_STEPS - 1):] + [step]
+        s = t.setdefault("stats", {"steps": 0, "prompt": 0, "cached": 0, "out": 0})
+        s["steps"] = s.get("steps", 0) + 1
+        for k in ("prompt", "cached", "out"):
+            s[k] = s.get(k, 0) + int(step.get(k) or 0)
+        if step.get("cost") is not None:
+            s["cost"] = round(s.get("cost", 0) + float(step["cost"]), 4)
+        t["last_step"] = step["t"]
+        save_board(repo, b)
+
+
+def set_status(repo, task_id, status, **extra):
+    with _board_lock:
+        b = load_board(repo)
+        t = next((x for x in (b or {}).get("tasks", []) if x["id"] == task_id), None)
+        if not t:
+            return None
+        t["status"] = status
+        t.update(extra)
+        live_states = [x["status"] for x in b["tasks"]]
+        if all(s in ("done", "failed", "stopped", "merged", "discarded") for s in live_states):
+            b["state"] = "review"
+        save_board(repo, b)
+        return b
+
+
+CLAUDE_ALLOW = ["Read", "Edit", "Write", "MultiEdit", "Glob", "Grep", "TodoWrite",
+                "Bash(python *)", "Bash(py *)", "Bash(pytest *)", "Bash(npm test*)", "Bash(npm run *)",
+                "Bash(git status*)", "Bash(git diff*)", "Bash(git log*)", "Bash(git add *)", "Bash(git commit *)"]
+CLAUDE_DENY = ["Bash(git push*)", "Bash(git merge*)", "Bash(git switch*)", "Bash(git checkout*)", "Bash(git reset*)",
+               "Bash(git rebase*)", "Bash(git branch*)", "Bash(git worktree*)", "Bash(git clean*)", "WebFetch", "WebSearch"]
+
+
+def claude_command(exe):
+    """A fixed command line: nothing in it comes from the browser or the goal (the task is in .cc-agent.md)."""
+    return ([exe, "-p", STARTER, "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits",
+             "--permission-prompts", "none", "--strict-mcp-config", "--no-session-persistence",
+             "--allowedTools"] + CLAUDE_ALLOW + ["--disallowedTools"] + CLAUDE_DENY)
+
+
+def claude_env(base_url=None, token=None, api_key=None):
+    """Claude Code's environment. Local: it talks to the command center's /agent/<name> route with a token made for
+    this one run. Cloud: your Claude key from 6:set (or, without one, your own Claude Code login)."""
+    env = {k: v for k, v in os.environ.items() if not k.upper().startswith(("ANTHROPIC_", "CLAUDE_CODE_USE_"))}
+    env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+    if base_url:
+        env.update(ANTHROPIC_BASE_URL=base_url, ANTHROPIC_AUTH_TOKEN=token, ANTHROPIC_MODEL="local",
+                   ANTHROPIC_DEFAULT_HAIKU_MODEL="local", ANTHROPIC_DEFAULT_SONNET_MODEL="local",
+                   ANTHROPIC_DEFAULT_OPUS_MODEL="local", ANTHROPIC_SMALL_FAST_MODEL="local")
+    elif api_key:
+        env["ANTHROPIC_API_KEY"] = api_key
+    return env
+
+
+def _step_from_claude(ev):
+    """A stream-json event from Claude Code -> a step, or None."""
+    if ev.get("type") == "assistant":
+        msg = ev.get("message") or {}
+        tools = [c for c in msg.get("content") or [] if isinstance(c, dict) and c.get("type") == "tool_use"]
+        u = msg.get("usage") or {}
+        tool = tools[0] if tools else None
+        inp = (tool or {}).get("input") or {}
+        target = inp.get("file_path") or inp.get("path") or inp.get("pattern") or inp.get("command") or ""
+        return {"tool": tool.get("name") if tool else "reply", "target": str(target)[:160],
+                "prompt": (u.get("input_tokens") or 0) + (u.get("cache_read_input_tokens") or 0),
+                "cached": u.get("cache_read_input_tokens") or 0, "out": u.get("output_tokens") or 0}
+    return None
+
+
+def start_claude(repo, task, base_url=None, token=None, api_key=None, on_exit=None):
+    """Run Claude Code headless in the agent's worktree. Its stream of events becomes the step log."""
+    exe = claude_bin()
+    if not exe:
+        return False, "Claude Code isn't installed (npm install -g @anthropic-ai/claude-code)"
+    wt, agent = task["worktree"], task["agent"]
+    logdir = os.path.join(git_dir(repo), "cc-team", "logs")
+    os.makedirs(logdir, exist_ok=True)
+    err = open(os.path.join(logdir, agent + ".log"), "w", encoding="utf-8", errors="replace")
+    try:
+        p = subprocess.Popen(claude_command(exe), cwd=wt, env=claude_env(base_url, token, api_key),
+                             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=err,
+                             creationflags=NOWIN | 0x00000200)
+    except OSError as e:
+        err.close()
+        return False, "couldn't start Claude Code: %s" % e
+    L = live(agent)
+    L.update(proc=p, token=token, repo=repo, task=task["id"], result=None, last=time.time())
+
+    def read():
+        result = None
+        try:
+            for raw in p.stdout:
+                try:
+                    ev = json.loads(raw.decode("utf-8", "replace"))
+                except ValueError:
+                    continue
+                if not isinstance(ev, dict):
+                    continue
+                st = _step_from_claude(ev)
+                if st:
+                    L["last"] = time.time()
+                    record_step(repo, task["id"], st)
+                if ev.get("type") == "result":
+                    result = ev
+                    if ev.get("total_cost_usd") is not None:
+                        record_step(repo, task["id"], {"tool": "result", "cost": ev.get("total_cost_usd"),
+                                                       "target": str(ev.get("result") or "")[:160]})
+        except (OSError, ValueError):
+            pass
+        rc = p.wait()
+        err.close()
+        L["result"] = result
+        b = load_board(repo)
+        t = next((x for x in (b or {}).get("tasks", []) if x["id"] == task["id"]), None)
+        if t and t.get("status") == "running":
+            ok = rc == 0 and result is not None and not result.get("is_error")
+            set_status(repo, task["id"], "done" if ok else "failed", finished=time.time(),
+                       message=(str((result or {}).get("result") or "")[:600] if ok else
+                                "Claude Code stopped (exit %s): %s" % (rc, str((result or {}).get("result") or tail(os.path.join(logdir, agent + ".log")))[:400])))
+        if on_exit:
+            on_exit(task["id"])
+
+    threading.Thread(target=read, daemon=True).start()
+    return True, "Claude Code is working on it"
+
+
+def tail(path, n=6):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return " | ".join(l.strip() for l in f.readlines()[-n:] if l.strip())
+    except OSError:
+        return ""
+
+
+def stop(agent):
+    """Stop a headless agent (its whole process tree). Cline in VS Code is stopped by the proxy refusing its next step."""
+    p = live(agent)["proc"]
+    if p is not None and p.poll() is None:
+        subprocess.run(["taskkill", "/PID", str(p.pid), "/T", "/F"], capture_output=True, timeout=20, creationflags=NOWIN)
+        return True
+    return False
+
+
+# ---------------------------------------------------------------- what changed in each worktree
+_changed = {}
+
+
+def changed_files(task, base_sha, max_age=5):
+    """Files the agent changed against the base commit (committed or not), plus new files. Cached a few seconds."""
+    wt = task.get("worktree")
+    if not wt or not base_sha or not os.path.isdir(wt):
+        return []
+    hit = _changed.get(wt)
+    if hit and time.time() - hit[0] < max_age:
+        return hit[1]
+    files = []
+    _, out, _ = workspaces.run([workspaces.GIT, "-C", wt, "diff", "--numstat", base_sha, "--"], timeout=30)
+    for l in out.splitlines():
+        parts = l.split("\t")
+        if len(parts) == 3:
+            files.append({"path": parts[2], "add": parts[0], "del": parts[1]})
+    _, out, _ = workspaces.run([workspaces.GIT, "-C", wt, "ls-files", "--others", "--exclude-standard"], timeout=30)
+    files += [{"path": l.strip(), "add": "new", "del": "0"} for l in out.splitlines() if l.strip()]
+    _changed[wt] = (time.time(), files)
+    return files
+
+
+def outside(files, owns):
+    """Changed files the agent doesn't own."""
+    return [f["path"] for f in files if not any(overlaps(f["path"], o) or (o.endswith("/") and f["path"].lower().startswith(o.lower()))
+                                                 for o in owns)]
+
+
+_sync_t = {}
+
+
+def sync(repo, clients_by_agent, every=4):
+    """Pass handoff notes along: read what each working agent appended to its brief, add it to the board, and
+    rewrite every working agent's brief (its view of the others' status and notes). At most every few seconds."""
+    if time.time() - _sync_t.get(repo, 0) < every:
+        return load_board(repo)
+    _sync_t[repo] = time.time()
+    with _board_lock:
+        b = load_board(repo)
+        if not b or b.get("state") not in ("running", "review"):
+            return b
+        changed = False
+        for t in b["tasks"]:
+            wt = t.get("worktree")
+            if t.get("status") not in ("running", "done", "stopped") or not wt:
+                continue
+            try:
+                with open(os.path.join(wt, BRIEF_FILE), encoding="utf-8", errors="replace") as f:
+                    text = f.read()
+            except OSError:
+                continue
+            mine = [n["text"] for n in t.get("notes") or [] if n.get("by") == t["agent"]]
+            for note in new_notes(text, t["agent"], mine + [n["text"] for x in b["tasks"] for n in x.get("notes") or []]):
+                t.setdefault("notes", []).append({"t": time.time(), "by": t["agent"], "text": note})
+                changed = True
+        if changed:
+            save_board(repo, b)
+        for t in b["tasks"]:
+            if t.get("status") == "running" and t.get("worktree"):
+                try:
+                    write_brief(b, t, clients_by_agent.get(t["agent"], "vscode"))
+                except OSError:
+                    pass
+        return b
+
+
 def new_notes(text, agent, known):
     """Handoff lines an agent added to its brief since the last read: '- <agent>: text' anywhere below
     '## Handoff notes' (agents often append at the very end of the file rather than inside the section)."""
