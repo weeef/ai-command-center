@@ -31,6 +31,7 @@ import cloud  # noqa: E402  (optional web search / stronger cloud model as tools
 import webtool  # noqa: E402  (the web connector: free search + page reading as tools)
 import updater  # noqa: E402  (new versions from GitHub, installed when you say so)
 import llamaup  # noqa: E402  (llama.cpp engine updates)
+import team  # noqa: E402  (agent team: registry, worktrees, task board)
 import urllib.parse  # noqa: E402
 import collections  # noqa: E402
 import re  # noqa: E402
@@ -678,7 +679,7 @@ def laptop_action(action, model=None):
 
 
 _stats = {"t": 0, "v": None}
-_BUILD_FILES = ("index.html", "server.py", "models.py", "workspaces.py", "tokens.py", "chats.py", "memory.py", "importers.py", "cloud.py", "updater.py", "llamaup.py", "fsutil.py", "tuner.py", "webtool.py")
+_BUILD_FILES = ("index.html", "server.py", "models.py", "workspaces.py", "tokens.py", "chats.py", "memory.py", "importers.py", "cloud.py", "updater.py", "llamaup.py", "fsutil.py", "tuner.py", "webtool.py", "team.py")
 UP = None  # updater.Updater, made in main()
 LU = None  # llamaup.LlamaUpdater, made in main()
 
@@ -940,16 +941,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
     # Everything is PC-only unless it is listed here, so a route added later is never open to the phone by accident.
     # From the phone: chat, saved chats, memory, model on/off, run-on target and stats.
     REMOTE_ALLOWED = ("/", "/index.html", "/fonts", "/api/ping", "/api/stats", "/api/memory", "/api/models", "/api/model",
-                      "/api/tokens", "/api/chats", "/api/web", "/api/target", "/v1/chat/completions")
+                      "/api/tokens", "/api/chats", "/api/web", "/api/target", "/api/team", "/v1/chat/completions")
     # ...except these, inside the allowed groups: moving or importing memory, downloading models, and phone access
     # itself (turning that off from the phone would lock the phone out).
     REMOTE_BLOCKED = ("/api/web/serve", "/api/memory/location", "/api/memory/import", "/api/memory/import-file",
                       "/api/models/hf", "/api/models/download", "/api/models/cancel", "/api/models/open")
+    # ...and these the phone may only read: it can watch the agent team, never start, stop, merge or clean up
+    # (any POST below them, including routes added later, is PC-only).
+    REMOTE_READONLY = ("/api/team",)
 
     def remote_blocked(self, path):
         def within(group):
             return any(path == p or path.startswith(p + "/") for p in group)
-        if self.remote and (not within(self.REMOTE_ALLOWED) or within(self.REMOTE_BLOCKED)):
+        if self.remote and (not within(self.REMOTE_ALLOWED) or within(self.REMOTE_BLOCKED)
+                            or (self.command != "GET" and within(self.REMOTE_READONLY))):
             self.send_json(403, {"error": "only available on the PC"})
             return True
         return False
@@ -1071,6 +1076,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif path.startswith("/api/chats/"):
             c = chats.get_chat(path[len("/api/chats/"):])
             self.send_json(200 if c else 404, c or {"error": "no such chat"})
+        elif path == "/api/team":
+            self.send_json(200, dict(team.public(settings), remote=self.remote))
         elif path == "/api/uninstall":
             self.send_json(200, uninstall_scan(qs_flag(self.path, "fresh")))
         elif path == "/api/code":
@@ -1208,6 +1215,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/api/code/both":
             ok, msg = workspaces.open_both(data.get("path") or "", settings, save_settings)
             return self.send_json(200 if ok else 400, {"ok": ok, "msg": msg})
+        if path == "/api/team/agents":
+            ok, msg, clean = team.save_agents(settings, save_settings, data.get("agents"))
+            return self.send_json(200 if ok else 400, {"ok": ok, "msg": msg, "agents": clean})
         if path == "/api/code/forget":
             ok, msg = workspaces.forget_recent(str(data.get("path", "")), settings, save_settings)
             return self.send_json(200, {"ok": ok, "msg": msg})

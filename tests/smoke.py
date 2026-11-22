@@ -414,7 +414,107 @@ def t_laptop():
             server.settings["laptop_pick"] = pick
 
 
-GROUPS = {"web": t_web, "modules": t_modules, "smuggle": t_smuggle, "key": t_key, "guard": t_guard, "phone": t_phone, "tools": t_tools, "tuner": t_tuner, "laptop": t_laptop}
+def t_worktree():
+    """The worktree helper, in a throw-away repo whose folder name has a space and an & in it."""
+    git = workspaces.GIT
+    base = os.path.join(TMP, "wt test")
+    repo = os.path.join(base, "my app&co")
+    os.makedirs(repo)
+    g = lambda *a, cwd=repo: subprocess.run([git, "-C", cwd, "-c", "user.name=t", "-c", "user.email=t@example.com"] + list(a),
+                                            capture_output=True, text=True)
+    g("init", "-q", "-b", "main")
+    ok, msg, _ = workspaces.agent_worktree(repo, "pc", "first")
+    check("worktree: a repo with no commits is refused", not ok and "no commits" in msg, msg)
+    with open(os.path.join(repo, "a.txt"), "w") as f:
+        f.write("a\n")
+    g("add", "a.txt"); g("commit", "-q", "-m", "one")
+    head = g("rev-parse", "HEAD").stdout.strip()
+
+    ok, wt, created = workspaces.laptop_worktree(repo)
+    check("worktree: the laptop worktree is still <repo>-laptop on cline-laptop",
+          ok and created and wt == repo + "-laptop" and g("branch", "--show-current", cwd=wt).stdout.strip() == "cline-laptop", (ok, wt))
+    check("worktree: the laptop worktree is reused", workspaces.laptop_worktree(repo) == (True, wt, False))
+
+    ok, pc, created = workspaces.agent_worktree(repo, "pc", "export-api", head)
+    check("worktree: an agent gets <repo>-agents\\<agent> on agent/<agent>/<task>",
+          ok and created and pc == os.path.join(repo + "-agents", "pc")
+          and g("branch", "--show-current", cwd=pc).stdout.strip() == "agent/pc/export-api", (ok, pc))
+    ok, lap, _ = workspaces.agent_worktree(repo, "laptop", "export-ui", head)
+    check("worktree: two agents never share a folder", ok and lap != pc and os.path.isdir(lap), lap)
+    check("worktree: the same task reuses the folder", workspaces.agent_worktree(repo, "pc", "export-api") == (True, pc, False))
+
+    with open(os.path.join(pc, "b.txt"), "w") as f:
+        f.write("work in progress\n")
+    ok, msg, _ = workspaces.agent_worktree(repo, "pc", "next-task")
+    check("worktree: a folder with uncommitted work isn't switched to a new task", not ok and "uncommitted" in msg, msg)
+    ok, msg = workspaces.remove_worktree(repo, pc)
+    check("worktree: a folder with uncommitted work isn't removed", not ok and os.path.exists(os.path.join(pc, "b.txt")), msg)
+    os.remove(os.path.join(pc, "b.txt"))
+    ok, again, created = workspaces.agent_worktree(repo, "pc", "next-task")
+    check("worktree: a clean folder moves on to the next task's branch",
+          ok and again == pc and created and g("branch", "--show-current", cwd=pc).stdout.strip() == "agent/pc/next-task", (ok, again))
+
+    os.makedirs(os.path.join(repo + "-agents", "stranger"))
+    ok, msg, _ = workspaces.agent_worktree(repo, "stranger", "x")
+    check("worktree: a folder that isn't a worktree is left alone", not ok and "isn't a worktree" in msg, msg)
+    for bad in (("..", "x"), ("pc", "../x"), ("PC", "x"), ("pc", "a b"), ("pc", "")):
+        ok, msg, _ = workspaces.agent_worktree(repo, *bad)
+        check("worktree: name %r / task %r refused" % bad, not ok and not os.path.exists(os.path.join(repo + "-agents", bad[0], bad[1] or "_")), msg)
+    check("worktree: removing the repo itself is refused", not workspaces.remove_worktree(repo, repo)[0])
+    ok, msg = workspaces.remove_worktree(repo, lap)
+    check("worktree: a clean agent folder is removed and its branch kept",
+          ok and not os.path.exists(lap) and g("rev-parse", "--verify", "--quiet", "refs/heads/agent/laptop/export-ui").returncode == 0, msg)
+
+
+def t_team():
+    """The agent registry and who may change it."""
+    import team
+    ok, _, a = team.check_agents([{"name": "pc", "backend": "pc", "client": "vscode", "cmd": "calc.exe"},
+                                  {"name": "cc1", "backend": "cloud:anthropic", "client": "claude-code"}])
+    check("team: a valid registry is kept, unknown keys dropped", ok and a[0] == {"name": "pc", "backend": "pc", "client": "vscode"}, a)
+    for bad, why in (([], "empty"), ([{"name": "pc", "backend": "pc", "client": "vscode"}] * 2, "duplicate"),
+                     ([{"name": "x y", "backend": "pc", "client": "claude-code"}], "bad name"),
+                     ([{"name": "a", "backend": "http://evil", "client": "claude-code"}], "unknown backend"),
+                     ([{"name": "a", "backend": "pc", "client": "cmd /c calc"}], "unknown client"),
+                     ([{"name": "third", "backend": "pc", "client": "vscode"}], "a third VS Code"),
+                     ([{"name": "pc", "backend": "cloud:anthropic", "client": "vscode"}], "cloud in VS Code"),
+                     ([{"name": "a%d" % i, "backend": "pc", "client": "claude-code"} for i in range(9)], "too many")):
+        check("team: registry refused (%s)" % why, not team.check_agents(bad)[0])
+    check("team: no registry means the two VS Code agents", [x["name"] for x in team.agents({})] == ["pc", "laptop"])
+    check("team: a broken registry falls back to the default", [x["name"] for x in team.agents({"agents": "junk"})] == ["pc", "laptop"])
+
+    st, d = req("GET", "/api/team")
+    check("team: GET /api/team lists agents and installed clients", st == 200 and d["agents"] and "claude-code" in d["clients"], st)
+    saved, save = server.settings.get("agents"), server.save_settings
+    server.save_settings = lambda: None
+    try:
+        body = json.dumps({"agents": [{"name": "pc", "backend": "pc", "client": "vscode"}]})
+        st, _ = req("POST", "/api/team/agents", body, Origin="https://evil.example")
+        check("team: saving the registry from another origin refused", st == 403, st)
+        st, d = req("POST", "/api/team/agents", body)
+        check("team: saving the registry from the PC works", st == 200 and d["ok"] and server.settings["agents"] == d["agents"], d)
+        st, d = req("POST", "/api/team/agents", json.dumps({"agents": [{"name": "pc", "backend": "x", "client": "vscode"}]}))
+        check("team: an invalid registry is refused and nothing changes", st == 400 and len(server.settings["agents"]) == 1, d)
+        as_phone(True)
+        try:
+            st, _ = req("GET", "/api/team", **PHONE)
+            check("phone: may watch the team", st == 200, st)
+            for p in ("/api/team/agents", "/api/team/plan", "/api/team/start", "/api/team/stop", "/api/team/merge",
+                      "/api/team/sendback", "/api/team/discard", "/api/team/cleanup", "/api/team/next-thing"):
+                st, _ = req("POST", p, body, **PHONE)
+                check("phone POST %s refused" % p, st == 403, st)
+        finally:
+            as_phone(False)
+    finally:
+        server.save_settings = save
+        if saved is None:
+            server.settings.pop("agents", None)
+        else:
+            server.settings["agents"] = saved
+
+
+GROUPS = {"web": t_web, "modules": t_modules, "smuggle": t_smuggle, "key": t_key, "guard": t_guard, "phone": t_phone, "tools": t_tools, "tuner": t_tuner, "laptop": t_laptop,
+          "worktree": t_worktree, "team": t_team}
 
 if __name__ == "__main__":
     want = sys.argv[1:] or list(GROUPS)

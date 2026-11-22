@@ -9,6 +9,7 @@ plus a folder path that must be an existing directory.
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -217,25 +218,116 @@ def open_code(which, path, settings, save, laptop_model_id=None):
         (" (laptop setup)" if which == "laptop" else "")
 
 
-def laptop_worktree(repo):
-    """Make sure the repo has a sibling worktree "<repo>-laptop" on branch cline-laptop. Returns (ok, path_or_error, created)."""
-    wt = os.path.join(os.path.dirname(repo), os.path.basename(repo) + "-laptop")
+def git_root(path):
+    """The top folder of the git repo that contains `path`, or None."""
+    code, out, _ = run([GIT, "-C", path, "rev-parse", "--show-toplevel"])
+    return os.path.normpath(out.strip()) if code == 0 and out.strip() else None
+
+
+def worktrees(repo):
+    """{normcased path: branch name or None} for every worktree of the repo (the repo itself included)."""
     _, out, _ = run([GIT, "-C", repo, "worktree", "list", "--porcelain"])
-    known = [l[9:].strip().replace("/", "\\").lower() for l in out.splitlines() if l.startswith("worktree ")]
-    if wt.lower() in known and os.path.isdir(wt):
+    res, cur = {}, None
+    for l in out.splitlines():
+        if l.startswith("worktree "):
+            cur = os.path.normcase(os.path.normpath(l[9:].strip()))
+            res[cur] = None
+        elif cur and l.startswith("branch "):
+            res[cur] = l[7:].strip().replace("refs/heads/", "", 1)
+    return res
+
+
+def is_clean(path):
+    """No uncommitted changes and no untracked files (ignored files don't count)."""
+    code, out, _ = run([GIT, "-C", path, "status", "--porcelain"])
+    return code == 0 and not out.strip()
+
+
+def _branch_exists(repo, branch):
+    return run([GIT, "-C", repo, "rev-parse", "--verify", "--quiet", "refs/heads/" + branch])[0] == 0
+
+
+def ensure_worktree(repo, wt, branch, base=None):
+    """Make sure `wt` is a worktree of `repo`. A new one gets `branch` (made from `base`, default HEAD, if it doesn't
+    exist yet). An existing worktree is returned as it is. A folder at `wt` that isn't one of this repo's worktrees
+    is never touched. Returns (ok, path_or_error, created)."""
+    if os.path.normcase(os.path.normpath(wt)) in worktrees(repo) and os.path.isdir(wt):
         return True, wt, False
     if os.path.exists(wt):
-        return False, wt + " already exists and isn't a worktree of this repo - move it or open the two separately", False
+        return False, wt + " already exists and isn't a worktree of this repo - move it or pick another folder", False
     run([GIT, "-C", repo, "worktree", "prune"])
-    code, _, _ = run([GIT, "-C", repo, "rev-parse", "--verify", "--quiet", "HEAD"])
-    if code != 0:
+    if run([GIT, "-C", repo, "rev-parse", "--verify", "--quiet", "HEAD"])[0] != 0:
         return False, "this repo has no commits yet - make a first commit, then try again", False
-    code, _, _ = run([GIT, "-C", repo, "rev-parse", "--verify", "--quiet", "refs/heads/" + LAPTOP_BRANCH])
-    args = [GIT, "-C", repo, "worktree", "add", wt] + ([LAPTOP_BRANCH] if code == 0 else ["-b", LAPTOP_BRANCH])
+    if _branch_exists(repo, branch):
+        args = [GIT, "-C", repo, "worktree", "add", wt, branch]
+    else:
+        args = [GIT, "-C", repo, "worktree", "add", "-b", branch, wt] + ([base] if base else [])
     code, out, err = run(args, timeout=60)
     if code != 0:
         return False, "git worktree failed: " + (err or out).strip()[:250], False
     return True, wt, True
+
+
+def laptop_worktree(repo):
+    """Make sure the repo has a sibling worktree "<repo>-laptop" on branch cline-laptop. Returns (ok, path_or_error, created)."""
+    return ensure_worktree(repo, os.path.join(os.path.dirname(repo), os.path.basename(repo) + "-laptop"), LAPTOP_BRANCH)
+
+
+AGENT_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,19}")
+TASK_SLUG = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
+
+
+def agents_dir(repo):
+    """Where agent worktrees live: a sibling folder "<repo>-agents", one subfolder per agent."""
+    return os.path.join(os.path.dirname(repo), os.path.basename(repo) + "-agents")
+
+
+def agent_branch(agent, slug):
+    return "agent/%s/%s" % (agent, slug)
+
+
+def agent_worktree(repo, agent, slug, base=None):
+    """One worktree per agent, "<repo>-agents\\<agent>", on branch agent/<agent>/<slug> made from `base` (a commit;
+    default HEAD). The same agent's next task reuses the folder (so its VS Code window stays valid) and switches it
+    to the new branch, but only when it has no uncommitted work. Returns (ok, path_or_error, created)."""
+    if not AGENT_NAME.fullmatch(agent or "") or not TASK_SLUG.fullmatch(slug or ""):
+        return False, "agent names and task slugs are lower-case letters, digits and dashes", False
+    wt, branch = os.path.join(agents_dir(repo), agent), agent_branch(agent, slug)
+    have = worktrees(repo)
+    key = os.path.normcase(os.path.normpath(wt))
+    if key in have and os.path.isdir(wt):
+        if have[key] == branch:
+            return True, wt, False
+        if not is_clean(wt):
+            return False, "%s has uncommitted changes (branch %s): commit or discard them first" % (wt, have[key]), False
+        if _branch_exists(repo, branch):
+            args = [GIT, "-C", wt, "switch", branch]
+        else:
+            args = [GIT, "-C", wt, "switch", "-c", branch] + ([base] if base else [])
+        code, out, err = run(args, timeout=60)
+        if code != 0:
+            return False, "git switch failed: " + (err or out).strip()[:250], False
+        return True, wt, True
+    if not os.path.isdir(agents_dir(repo)):
+        if os.path.exists(agents_dir(repo)):
+            return False, agents_dir(repo) + " is a file, not a folder", False
+        os.makedirs(agents_dir(repo))
+    return ensure_worktree(repo, wt, branch, base)
+
+
+def remove_worktree(repo, wt):
+    """Remove a worktree only if it has no uncommitted changes or untracked files (never --force).
+    The branch is kept. Returns (ok, message)."""
+    if os.path.normcase(os.path.normpath(wt)) not in worktrees(repo):
+        return False, "%s isn't a worktree of this repo" % wt
+    if os.path.normcase(os.path.normpath(wt)) == os.path.normcase(os.path.normpath(repo)):
+        return False, "that's the repo itself"
+    if not is_clean(wt):
+        return False, "%s has uncommitted changes, so it was left alone" % wt
+    code, out, err = run([GIT, "-C", repo, "worktree", "remove", wt], timeout=60)
+    if code != 0:
+        return False, "git worktree remove failed: " + (err or out).strip()[:250]
+    return True, "removed " + wt
 
 
 def open_both(path, settings, save):
@@ -245,10 +337,9 @@ def open_both(path, settings, save):
         return False, "that folder doesn't exist: " + path
     if not os.path.exists(GIT):
         return False, "git wasn't found"
-    code, out, _ = run([GIT, "-C", path, "rev-parse", "--show-toplevel"])
-    if code != 0:
+    repo = git_root(path)
+    if not repo:
         return False, "not a git repo - run `git init` and commit once, so each agent can get its own copy"
-    repo = os.path.normpath(out.strip())
     ok, wt, created = laptop_worktree(repo)
     if not ok:
         return False, wt
