@@ -337,7 +337,8 @@ def start_model(m):
         if done:
             sys.stderr and print(time.ctime(), done, file=sys.stderr)
     ctx, mode = model_ctx(m), model_mode(m)
-    launch["proc"] = models.launch(m, ctx, mode, tuner.best(m, ctx, mode))   # with the measured settings, if any
+    # with the measured settings, if any; two slots only if you turned that on (two agents writing at once)
+    launch["proc"] = models.launch(m, ctx, mode, tuner.best(m, ctx, mode), 2 if settings.get("slots") == 2 else 1)
 
 
 def tune_then_start(m):
@@ -401,7 +402,7 @@ def models_state():
     hw = models.hardware()
     lib = [dict(models.describe(m, model_ctx(m), hw, model_mode(m)), tuned=tuner.summary(m, model_ctx(m), model_mode(m), hw))
            for m in models.scan()]
-    return {"hardware": hw, "models": lib, "auto_tune": bool(settings.get("auto_tune", True)),
+    return {"hardware": hw, "models": lib, "auto_tune": bool(settings.get("auto_tune", True)), "slots": 2 if settings.get("slots") == 2 else 1,
             "tuning": tuner.S["model"] if tuner.S["running"] else None, "llama": os.path.exists(models.LLAMA_EXE), "folder": models.MODELS_DIR,
             "downloads": {k: v for k, v in models.downloads.items() if v["state"] != "cancelled"}}
 
@@ -947,7 +948,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
     # ...except these, inside the allowed groups: moving or importing memory, downloading models, and phone access
     # itself (turning that off from the phone would lock the phone out).
     REMOTE_BLOCKED = ("/api/web/serve", "/api/memory/location", "/api/memory/import", "/api/memory/import-file",
-                      "/api/models/hf", "/api/models/download", "/api/models/cancel", "/api/models/open")
+                      "/api/models/hf", "/api/models/download", "/api/models/cancel", "/api/models/open",
+                      "/api/models/slots")
     # ...and these the phone may only read: it can watch the agent team, never start, stop, merge or clean up
     # (any POST below them, including routes added later, is PC-only).
     REMOTE_READONLY = ("/api/team",)
@@ -1634,6 +1636,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if tt and tt[1].get("status") == "stopped":
             return self.send_json(409, {"type": "error", "error": {"type": "invalid_request_error", "message": "stopped by the command center"}})
         backend = next((a["backend"] for a in team.agents(settings) if a["name"] == name), "pc")
+        if os.environ.get("CC_TEAM_DEBUG"):   # the request's shape only (keys, roles, block types), never its text
+            shape = {"keys": sorted(data), "system": type(data.get("system")).__name__,
+                     "messages": [[m.get("role"), [b.get("type") for b in m["content"]] if isinstance(m.get("content"), list)
+                                   else type(m.get("content")).__name__] for m in data.get("messages") or [] if isinstance(m, dict)]}
+            fsutil.append_log(os.path.join(HERE, "team-debug.log"), json.dumps(shape) + "\n")
+        anthropic_to_local(data)
         if backend == "laptop":
             mid = laptop_info()["id"]
             if not mid:
@@ -1707,6 +1715,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             settings.setdefault("model_prefs", {})[m["id"]] = pref
             save_settings()
             return self.send_json(200, {"ok": True, "model": models.describe(m, model_ctx(m), None, model_mode(m))})
+        if op == "slots":   # takes effect the next time the model starts
+            if data.get("slots") not in (1, 2):
+                return self.send_json(400, {"error": "slots must be 1 or 2"})
+            settings["slots"] = data["slots"]
+            save_settings()
+            return self.send_json(200, {"ok": True, "slots": settings["slots"]})
         if op == "tune-settings":
             settings["auto_tune"] = bool(data.get("auto"))
             save_settings()
@@ -1914,6 +1928,39 @@ def llm_json(messages, schema, max_tokens, backend=None, empty=None, timeout=240
     return None
 
 
+CLAUDE_MIN_CTX = 65536
+
+
+def anthropic_to_local(data):
+    """Make a Claude Code request digestible for llama-server's /v1/messages. Claude Code (2.1.330) puts messages with
+    role "system" between the user and assistant turns; llama.cpp passes them on as system messages, and Qwen's chat
+    template refuses any system message that isn't the first one (HTTP 500 "System message must be at the
+    beginning", seen 2026-11-22). Their text goes into the neighbouring user turn instead, wrapped in
+    <system-reminder>, rather than into the top-level system prompt: text that changes per request at the very start
+    would make the model server re-read the whole prompt every step. Changes `data` in place."""
+    msgs = data.get("messages")
+    if not isinstance(msgs, list) or not any(isinstance(m, dict) and m.get("role") == "system" for m in msgs):
+        return data
+
+    def blocks(c):
+        if isinstance(c, str):
+            return [{"type": "text", "text": c}]
+        return [b for b in c if isinstance(b, dict)] if isinstance(c, list) else []
+    out = []
+    for m in msgs:
+        if not isinstance(m, dict):
+            continue
+        if m.get("role") == "system":
+            text = "\n".join(b.get("text", "") for b in blocks(m.get("content")) if b.get("type") == "text")
+            m = {"role": "user", "content": [{"type": "text", "text": "<system-reminder>\n%s\n</system-reminder>" % text}]}
+        if out and out[-1].get("role") == "user" and m.get("role") == "user":
+            out[-1] = dict(out[-1], content=blocks(out[-1].get("content")) + blocks(m.get("content")))
+        else:
+            out.append(m)
+    data["messages"] = out
+    return data
+
+
 def team_task(agent):
     """(repo, task) for the agent's task in the active team, if it is running or was stopped; else None."""
     repo = settings.get("team_active")
@@ -2031,6 +2078,14 @@ def team_start(repo, confirm_cloud=False):
             return False, "%s needs %s" % (t["agent"], "VS Code" if a["name"] == "pc" else "start-vscode-laptop.bat"), b, {}
         if a["backend"] == "pc" and not pc_on:
             return False, "%s works with this PC's model, which is off: turn it on in 1:llm first" % t["agent"], b, {}
+        if a["client"] == "claude-code" and not a["backend"].startswith("cloud:"):
+            # Claude Code's own instructions and tool list are ~27-32k tokens: at 32K it fails with "Prompt is too
+            # long" after a few steps (live run, 2026-11-22). Say so now instead of after minutes of work.
+            ctx = (model_info(None) if a["backend"] == "pc" else lap).get("ctx") or 0
+            if ctx and ctx < CLAUDE_MIN_CTX:
+                return False, ("%s runs Claude Code, which needs at least %dK of context; %s's model runs with %dK. Raise "
+                               "the context in the model picker (▾ model), or give this task to a Cline agent"
+                               % (t["agent"], CLAUDE_MIN_CTX // 1024, "this PC" if a["backend"] == "pc" else "the laptop", ctx // 1024)), b, {}
         if a["backend"] == "laptop" and not lap.get("id"):
             return False, "%s works with the laptop's model, which PAIR doesn't list: is the laptop on?" % t["agent"], b, {}
     notes = []
@@ -2183,6 +2238,17 @@ def team_plan(repo, goal, pick=None, use_cloud=False):
             label = {"backend": who, "model": info.get("name")}
             if plan is None:
                 tried.append("%s: no answer" % who)
+            elif plan.get("tasks") and not team.check_tasks(plan["tasks"], reg)[0]:
+                # local models sometimes break a rule (seen: both tasks for one agent); one retry with the reason.
+                # Not for cloud: that would be a second billed call.
+                why = team.check_tasks(plan["tasks"], reg)[1]
+                again = llm_json(msgs + [{"role": "assistant", "content": json.dumps(plan)},
+                                         {"role": "user", "content": "That split breaks a rule: %s. Remember: at most one task "
+                                          "per agent, agents are %s, and no path may be inside another task's path. Return "
+                                          "the whole corrected split as JSON." % (why, ", ".join(a["name"] for a in reg))}],
+                                 team.PLAN_SCHEMA, 3000, backend=who, empty={}, timeout=420)
+                if again and again.get("tasks"):
+                    plan = again
         if plan and plan.get("tasks"):
             ok, msg, b = team.edit_board(repo, reg, goal, plan["tasks"], planner=label)
             if ok:

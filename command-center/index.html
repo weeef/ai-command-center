@@ -954,6 +954,7 @@ body.remote #tags span[data-ws="2"]{display:none}
   <div class="mdhead"><div class="title" id="mdTitle">models</div><span id="mdHw"></span><button id="mdClose" title="close (Esc)">✕</button></div>
   <div id="mdWarn" hidden></div>
   <label class="ms mdauto" title="The first time a model is turned on, a few trial runs measure which settings are fastest on this PC (a few minutes). The result is saved and used on every later load."><input type="checkbox" id="mdAuto"> optimise each model for this PC the first time it loads</label>
+  <label class="ms mdauto" title="Two server slots, each with the full context. Measured on a 16 GB card: two agents writing at the same time go 40-60% faster together, each one alone is slower, reading long prompts is no faster, and it costs 0.8-1.2 GB more VRAM. Worth it only when two agents (7:team) use this PC's model at once. Takes effect the next time the model starts."><input type="checkbox" id="mdSlots"> two agents at once on this PC's model (2 slots, +~1 GB VRAM, from the next start)</label>
   <div id="mdList"></div>
   <div class="sect">add a model</div>
   <div class="mdadd">
@@ -1579,6 +1580,7 @@ function renderModelDlg(){
   const hw = mlib.hardware;
   $("mdHw").textContent = (hw.gpu ? `${hw.gpu} · ${hw.vram_gb} GB VRAM` : "no NVIDIA GPU found") + ` · ${hw.ram_gb} GB RAM · ${hw.cores} cores`;
   $("mdAuto").checked = !!mlib.auto_tune;
+  $("mdSlots").checked = mlib.slots === 2;
   $("mdWarn").hidden = mlib.llama; $("mdWarn").textContent = "llama.cpp isn't installed yet: run setup.bat in the repo folder first.";
   const running = S && S.target !== "laptop" && S.model.state !== "OFF" ? S.model.key : null;
   $("mdList").innerHTML = mlib.models.length ? mlib.models.map(m => {
@@ -1606,6 +1608,7 @@ $("ldClose").onclick = () => $("lapDlg").close();
 $("ldList").addEventListener("click", e => { const c = e.target.closest(".mcard"); if (c) pickLaptop(c.dataset.lid); });
 $("ldList").addEventListener("keydown", e => { const c = e.target.closest(".mcard"); if (c && e.key === "Enter") pickLaptop(c.dataset.lid); });
 $("mdClose").onclick = () => $("modelDlg").close();
+$("mdSlots").onchange = async e => { const r = await postJSON("/api/models/slots", {slots: e.target.checked ? 2 : 1}); sys(r.ok ? (e.target.checked ? "two slots from the next model start (turn the model off and on to use it now)" : "one slot from the next model start") : "couldn't save that: " + r.msg, !r.ok); loadModels(); };
 $("mdAuto").onchange = async e => { const r = await postJSON("/api/models/tune-settings", {auto: e.target.checked}); if (!r.ok) sys("couldn't save that: " + r.msg, true); loadModels(); };
 $("mdList").addEventListener("click", e => {
   const tb = e.target.closest("[data-tune]");

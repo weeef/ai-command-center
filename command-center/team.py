@@ -86,7 +86,7 @@ def clients():
         return _cli["v"]
     v = {"vscode": {"installed": os.path.exists(workspaces.CODE_CMD), "laptop_setup": os.path.exists(workspaces.LAPTOP_BAT)},
          "claude-code": {"installed": False, "version": None}}
-    exe = claude_exe()
+    exe = claude_bin()
     if exe:
         try:
             p = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=20, creationflags=NOWIN,
@@ -440,7 +440,9 @@ def prepare(repo, board, task, client):
     if not ok:
         return False, wt
     task["worktree"] = wt
-    exclude(repo, [BRIEF_FILE, CLINE_RULE])
+    # Python's bytecode caches appear as soon as an agent runs the code; in a repo without a .gitignore they would be
+    # committed with its work and flagged as files it doesn't own (seen in the live run). Local exclude only.
+    exclude(repo, [BRIEF_FILE, CLINE_RULE, "**/__pycache__/", "**/*.pyc"])
     return True, write_brief(board, task, client) or "ready"
 
 
@@ -529,19 +531,28 @@ def claude_env(base_url=None, token=None, api_key=None):
     return env
 
 
-def _step_from_claude(ev):
-    """A stream-json event from Claude Code -> a step, or None."""
-    if ev.get("type") == "assistant":
-        msg = ev.get("message") or {}
-        tools = [c for c in msg.get("content") or [] if isinstance(c, dict) and c.get("type") == "tool_use"]
-        u = msg.get("usage") or {}
-        tool = tools[0] if tools else None
-        inp = (tool or {}).get("input") or {}
-        target = inp.get("file_path") or inp.get("path") or inp.get("pattern") or inp.get("command") or ""
-        return {"tool": tool.get("name") if tool else "reply", "target": str(target)[:160],
-                "prompt": (u.get("input_tokens") or 0) + (u.get("cache_read_input_tokens") or 0),
-                "cached": u.get("cache_read_input_tokens") or 0, "out": u.get("output_tokens") or 0}
-    return None
+def _step_from_claude(ev, seen, wt=""):
+    """A stream-json event from Claude Code -> a step, or None. Claude Code emits one event per content block of a
+    model reply, each carrying the same usage: the tokens count once per reply (message id), and a later block of
+    the same reply only adds its tool call. Paths inside the worktree are shown relative to it."""
+    if ev.get("type") != "assistant":
+        return None
+    msg = ev.get("message") or {}
+    tools = [c for c in msg.get("content") or [] if isinstance(c, dict) and c.get("type") == "tool_use"]
+    tool = tools[0] if tools else None
+    first = msg.get("id") not in seen
+    if msg.get("id"):
+        seen.add(msg["id"])
+    if not first and not tool:
+        return None
+    inp = (tool or {}).get("input") or {}
+    target = str(inp.get("file_path") or inp.get("path") or inp.get("pattern") or inp.get("command") or "")
+    if wt and target.lower().startswith(wt.lower()):
+        target = target[len(wt):].lstrip("\\/") or "."
+    u = (msg.get("usage") or {}) if first else {}
+    return {"tool": tool.get("name") if tool else "reply", "target": target[:160],
+            "prompt": (u.get("input_tokens") or 0) + (u.get("cache_read_input_tokens") or 0),
+            "cached": u.get("cache_read_input_tokens") or 0, "out": u.get("output_tokens") or 0}
 
 
 def start_claude(repo, task, base_url=None, token=None, api_key=None, on_exit=None):
@@ -564,7 +575,7 @@ def start_claude(repo, task, base_url=None, token=None, api_key=None, on_exit=No
     L.update(proc=p, token=token, repo=repo, task=task["id"], result=None, last=time.time())
 
     def read():
-        result = None
+        result, seen, outs = None, set(), 0
         try:
             for raw in p.stdout:
                 try:
@@ -573,15 +584,19 @@ def start_claude(repo, task, base_url=None, token=None, api_key=None, on_exit=No
                     continue
                 if not isinstance(ev, dict):
                     continue
-                st = _step_from_claude(ev)
+                st = _step_from_claude(ev, seen, wt)
                 if st:
                     L["last"] = time.time()
+                    outs += st["out"]
                     record_step(repo, task["id"], st)
                 if ev.get("type") == "result":
                     result = ev
-                    if ev.get("total_cost_usd") is not None:
-                        record_step(repo, task["id"], {"tool": "result", "cost": ev.get("total_cost_usd"),
-                                                       "target": str(ev.get("result") or "")[:160]})
+                    fin = {"tool": "result", "target": str(ev.get("result") or "")[:160]}
+                    if not outs:   # the per-reply usage had no output count: take the run's total
+                        fin["out"] = (ev.get("usage") or {}).get("output_tokens") or 0
+                    if api_key or not base_url:   # a real bill; on a local model Claude Code's price is made up
+                        fin["cost"] = ev.get("total_cost_usd")
+                    record_step(repo, task["id"], fin)
         except (OSError, ValueError):
             pass
         rc = p.wait()

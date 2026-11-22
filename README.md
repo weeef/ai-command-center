@@ -40,9 +40,10 @@ That's it. Everything below is optional.
 | **3:web** | Phone access over Tailscale: one button to turn it on, the address to open on your phone, your devices. |
 | **4:mem** | Your memories as a **brain**: every memory is a neuron in its topic's region (about you = frontal lobe, preferences = prefrontal, how-tos = motor strip, projects = parietal, people + events = temporal, facts = occipital, other = cerebellum). Bigger = recalled more often, ring = pinned. Synapses join memories with related meaning; signals travel along them and a neuron fires when the model recalls it. Click a neuron to read/edit/pin/forget it; switch to **tree** for a radial tree by topic. Scroll to zoom, drag to move. |
 | **5:cline** | Route Cline through the command center so it gets memory too, plus a log of every Cline task (steps, memories used, tokens, cache hit rate). |
+| **7:team** | An **agent team**: give one goal, a planner splits it into one task per coding agent with the files each one owns, every agent works in its own git worktree at the same time, and you review each branch (diff, tests) and merge it. See *Agent team*. |
 | **6:set** | Memory on/off and auto-learning, the memory folder (move it to another drive), import from ChatGPT/Claude, export, the searchable memory list, the theme, and **cloud & web search** (API keys for Claude / ChatGPT / Gemini). |
 
-Keyboard: **Alt+1 … Alt+6** switch tabs. In chat: **Enter** sends, **Shift+Enter** new line, `/help` lists commands
+Keyboard: **Alt+1 … Alt+7** switch tabs. In chat: **Enter** sends, **Shift+Enter** new line, `/help` lists commands
 (`/new`, `/chats`, `/remember …`, `/on`, `/off`, `/theme`, …). **history** (top right of the chat) reopens old chats.
 
 ---
@@ -113,6 +114,30 @@ One file and one task were measured, and run-to-run noise is about ±4 tok/s on 
 count, pinning to the V-cache cores, process priority, polling, an f16 KV cache and a smaller context made no
 difference; `-ub 4096` read prompts ~30% faster but needs VRAM that is already tight. With a desktop using 2.8 GB,
 `MOE 23` leaves under 1 GB of VRAM spare, so use 24 if other GPU apps are open.
+
+### Two agents on one model (`--parallel`)
+
+**model picker → two agents at once** gives this PC's model two slots (`-np 2 -c 2×ctx --kv-unified-per-slot ctx`)
+from its next start. It's off by default. Measured on 2026-11-22 with `bench\bench.py --tasks agents` (two Cline-style
+agents, each with its own ~15-20k-token project context: a first request, a file rewrite, then ~300 words of free
+writing, all in the same conversation; RTX 5080, llama.cpp b12590, ngram-mod speculation, 1.7 GB of VRAM used by
+the desktop):
+
+| model | slots | both writing at once: together | each agent | reading both first prompts | later turns cached | peak VRAM |
+|---|---|---|---|---|---|---|
+| Qwen3.6 35B-A3B Q4, `MOE 23`, 64K per agent | 1 (take turns) | 68 tok/s | 77 / 68 tok/s | 13.5 s | 99.8% | 13.5 GB |
+| | **2** | **97 tok/s (+42%)** | 52 / 54 tok/s | 13.5 s | 99.8% | 14.3 GB |
+| Qwen3.8 27B IQ3_S, 32K per agent, without MTP | 1 (take turns) | 52 tok/s | 55 / 54 tok/s | 17.9 s | 99.8% | 14.6 GB |
+| | **2** | **84 tok/s (+63%)** | 44 / 44 tok/s | 18.8 s | 99.8% | 15.7 GB |
+
+- **The prompt cache holds either way.** With one slot the agent that waits gets its conversation back from
+  `--cache-ram` (it doesn't have to read its 15-20k tokens again), so taking turns costs waiting time, not re-reading.
+- **Two slots only help while both agents write at the same time.** Reading long prompts is no faster (the GPU is
+  already busy), and each agent alone is slower than it would be with the model to itself.
+- **It costs 0.8-1.2 GB of VRAM.** Qwen3.8 27B with two 32K slots peaked at 15.7 GB of 16.3, which is too close
+  with other GPU apps open. Two 16K slots are not an option: a Cline-sized prompt (19k tokens) didn't fit.
+- Turn it on when two agents in **7:team** use this PC's model at once. With one agent on this PC and one on the
+  laptop (the default team), leave it off.
 
 ### Optimise any model automatically
 
@@ -213,7 +238,58 @@ Install [VS Code](https://code.visualstudio.com/) and the **Cline** extension. I
 
 If a second PC runs NVIDIA's Personal AI Router (PAIR), the command center can use its model: **run on → laptop** in
 1:llm. `start-vscode-laptop.bat` opens a separate VS Code whose Cline uses the laptop, and **2:code → open · both**
-puts the two agents on separate git worktrees of the same repo so they can work side by side.
+puts the two agents on separate git worktrees of the same repo so they can work side by side. **7:team** turns that
+into a coordinated team (next section).
+
+## Agent team (optional)
+
+Several coding agents build one feature at the same time, each in its own copy of the project, and you merge what
+they made. Open **7:team** (Alt+7):
+
+1. **Pick the project** (any folder inside a git repo with at least one commit) and **write the goal** in a few
+   sentences.
+2. **plan**: a planner splits it into one task per agent and says which files and folders each agent **owns**. It
+   uses the strongest model that's on: cloud only if you tick *may use cloud* (the goal, the repo's file list and the
+   start of its README are sent; billed), then this PC's model, then the laptop's. You can also write the split
+   yourself. **Edit it** before anything starts: no two agents may own the same file, which is what keeps the
+   merge clean; the app refuses a split that overlaps.
+3. **start team**. Every agent gets its own git worktree, `<project>-agents\<agent>`, on a branch
+   `agent/<agent>/<task>` made from the commit you're on, plus a brief, `.cc-agent.md`: its task, the files it owns,
+   what the other agents are doing, and handoff notes. The brief files never reach git (`.git\info\exclude`).
+   - **Cline in VS Code** agents (*pc* = your main VS Code, *laptop* = the laptop VS Code) open on their worktree.
+     Cline can't be handed a task from outside, so the one-line starter prompt is put on the clipboard: paste it
+     into each Cline. For the live log, route the main Cline through the command center (5:cline).
+   - **Claude Code** agents (add them under *agents* in 7:team, if Claude Code is installed) run headless: no
+     window, the command center starts `claude` in the worktree and reads its progress. On *this PC's* or *the
+     laptop's* model they talk to llama-server's Anthropic-compatible endpoint through the command center
+     (`/agent/<name>/v1/messages`, with a token made for that one run). On *Claude (cloud)* they use your Claude key
+     from 6:set, or your own Claude Code login, and **every start asks first**, since it's billed.
+     On a local model Claude Code needs **at least 64K of context** (its own instructions and tools are ~30k tokens);
+     the team won't start one on a smaller context. Raise it in the model picker.
+     They may edit files and run python / pytest / npm test / git status, diff, add, commit; never push, merge,
+     switch branches or browse the web.
+4. **Watch**: one panel per agent with its status, each step (tool and file, tokens, how much of the prompt came
+   from the cache), the files it changed, files it changed **outside** what it owns, files **another agent** also
+   changed, and handoff notes. An agent that needs something from another one writes `- <its name>: …` under
+   *Handoff notes* in its brief; the command center passes it on to the others' briefs. **stop** ends a headless
+   agent; for Cline it refuses its next request.
+5. **Review**: when an agent is done (Claude Code finishes by itself; for Cline press **finished**), whatever it left
+   uncommitted is committed on its branch and the project's tests run in its worktree (`tests\smoke.py`, else
+   `pytest`, else `npm test`). Then per agent: **diff** against the starting commit, **run tests**, **merge**,
+   **send back…** with a note (it goes into the brief and the agent works on it again), or **discard**.
+   - **merge** is `git merge --no-ff` into the branch you started from, in your own checkout. It refuses while your
+     checkout has uncommitted changes or is on another branch; a conflict is aborted and named, leaving everything
+     as it was. Nothing is ever auto-merged, forced or pushed.
+6. **clean up…** lists exactly what goes and asks first: worktrees of merged or discarded tasks are removed only if
+   they have no uncommitted changes, merged branches are deleted with `git branch -d` (which refuses unmerged
+   work), discarded branches only if you tick that too. The uninstaller also lists `<project>-agents` worktrees.
+
+The board (tasks, owners, status, steps, notes, test results) is `.git\cc-team\board.json` inside the project:
+shared by all its worktrees, never committed. The phone can watch 7:team but not plan, start, stop, merge or clean
+up. One team runs at a time; each agent has one task at a time.
+
+**Two agents on one GPU.** Two agents can use this PC's model at once. With one server slot (the default, `-np 1`)
+their requests take turns; see *Speed and settings* for what two slots (`--parallel 2`) measured on a 16 GB card.
 
 ## Updates
 
@@ -306,7 +382,8 @@ command-center\
   updater.py     update check and install (from this GitHub repo)
   llamaup.py     llama.cpp engine updates (official builds, checksum-verified, roll back)
   chats.py       saved chats
-  workspaces.py  VS Code / Cline / Tailscale helpers
+  workspaces.py  VS Code / Cline / Tailscale helpers, git worktrees for the agents
+  team.py        agent team: agent registry, task board, planner prompt, briefs, Claude Code runner, review/merge
   tokens.py      tokens-used meter
   tuner.py       measures the fastest settings for each model on this PC (auto-optimise)
   fsutil.py      atomic file writes shared by the modules above
@@ -314,9 +391,10 @@ command-center\
   fonts\         Inter and IBM Plex Mono (SIL Open Font License)
 bench\bench.py             speed benchmark (starts its own llama-server)
 bench\memeval.py           memory recall evaluation on a fixed, invented set of memories
-tests\smoke.py             smoke tests for the request guard, phone rules, key handling and importers
+tests\smoke.py             smoke tests: request guard, phone rules, key handling, importers, worktrees, agent team
 docs\review-prompt.md      a prompt for a full review/improvement pass with a strong model
 docs\review-report.md      what the last review pass measured, fixed and left open
+docs\team-demo.md          a script for recording two agents building one feature side by side
 ```
 
 **Not in the repo** (created on your PC): `api-key.txt`, `command-center\secrets.json` (cloud keys), `llm-config.bat`, `llama.cpp\`, `models\`, `memory\`,

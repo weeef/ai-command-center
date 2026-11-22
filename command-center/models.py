@@ -358,10 +358,13 @@ def describe(m, ctx=None, hw=None, mode=None):
     return d
 
 
-def command(m, ctx, mode=None, tune=None):
+def command(m, ctx, mode=None, tune=None, slots=1):
     """llama-server command line for this model at this context, sized for this PC. `tune` holds settings measured
     for this model by tuner.py: {"moe": expert layers kept in RAM} or {"fit_target": MiB of VRAM left free}, and
-    {"ub": prompt batch size}. Without it the defaults below apply."""
+    {"ub": prompt batch size}. Without it the defaults below apply.
+    slots=2 gives two agents a slot each, `ctx` per slot (one shared KV buffer of 2 x ctx). Measured 2026-11-22 with
+    bench.py --tasks agents: two agents writing at once go +42% (Qwen3.6 35B) / +63% (Qwen3.8 27B) faster together,
+    each one slower alone, prompt reading no faster, the prompt cache holds either way, +0.8-1.2 GB VRAM."""
     tune = tune or {}
     c, hw = config(), hardware()
     threads = c.get("THREADS") or str(hw["cores"])
@@ -390,7 +393,8 @@ def command(m, ctx, mode=None, tune=None):
     else:
         args += ["--fit", "off", "-ngl", "0"]
     ub = str(int(tune["ub"])) if "ub" in tune else c.get("UB") or ("2048" if hw["vram_gb"] >= 12 else "512")
-    args += ["-c", str(ctx), "-np", "1", "--cache-ram", c.get("CACHE_RAM") or "8192",
+    slots = 2 if slots == 2 else 1
+    args += ["-c", str(ctx * slots), "-np", str(slots)] + (["--kv-unified-per-slot", str(ctx)] if slots > 1 else []) + ["--cache-ram", c.get("CACHE_RAM") or "8192",
              "-fa", "on", "-ctk", "q8_0", "-ctv", "q8_0",
              "-t", threads, "-b", str(max(2048, int(ub))), "-ub", ub] + spec + ["--metrics"]
     if plan(m, ctx, hw)["fit"] != "gpu":
@@ -398,14 +402,14 @@ def command(m, ctx, mode=None, tune=None):
     return args
 
 
-def launch(m, ctx, mode=None, tune=None):
+def launch(m, ctx, mode=None, tune=None, slots=1):
     """Start llama-server in the background (no console window); its output goes to command-center\\llama.log."""
     if not os.path.exists(LLAMA_EXE):
         raise RuntimeError("llama.cpp isn't installed: run setup.bat")
     if not os.path.exists(KEYFILE):
         raise RuntimeError("api-key.txt is missing: run setup.bat")
     log = open(LOG, "w", encoding="utf-8", errors="replace")
-    cmd = command(m, ctx, mode, tune)
+    cmd = command(m, ctx, mode, tune, slots)
     log.write("# " + " ".join('"%s"' % a if " " in a else a for a in cmd) + "\n"); log.flush()
     p = subprocess.Popen(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                          creationflags=NOWIN | 0x00000200)  # CREATE_NEW_PROCESS_GROUP: outlives the command center

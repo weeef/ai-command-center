@@ -879,13 +879,82 @@ def t_review():
           os.path.exists(os.path.join(lap, "server", "wip.py")) and g("rev-parse", "--verify", "--quiet", "refs/heads/agent/laptop/server-part").returncode == 0, d)
 
 
+def t_slots():
+    """Two server slots: off by default, exactly the measured flags when on, PC-only to change."""
+    lib = server.models.scan()
+    if lib:
+        m = lib[0]
+        one, two = server.models.command(m, 32768), server.models.command(m, 32768, slots=2)
+        check("slots: one slot by default", one[one.index("-np") + 1] == "1" and one[one.index("-c") + 1] == "32768"
+              and "--kv-unified-per-slot" not in one, one)
+        check("slots: two slots = 2 x ctx, each capped at ctx", two[two.index("-np") + 1] == "2" and two[two.index("-c") + 1] == "65536"
+              and two[two.index("--kv-unified-per-slot") + 1] == "32768", two)
+        check("slots: anything else means one", server.models.command(m, 32768, slots=7)[one.index("-np") + 1] == "1")
+    saved, save = server.settings.get("slots"), server.save_settings
+    server.save_settings = lambda: None
+    try:
+        st, d = req("POST", "/api/models/slots", json.dumps({"slots": 3}))
+        check("slots: only 1 or 2", st == 400, st)
+        st, d = req("POST", "/api/models/slots", json.dumps({"slots": 2}))
+        check("slots: saved for the next start", st == 200 and server.settings["slots"] == 2, d)
+        as_phone(True)
+        try:
+            st, _ = req("POST", "/api/models/slots", json.dumps({"slots": 1}), **PHONE)
+            check("phone: can't change the slots", st == 403 and server.settings["slots"] == 2, st)
+        finally:
+            as_phone(False)
+    finally:
+        server.save_settings = save
+        if saved is None:
+            server.settings.pop("slots", None)
+        else:
+            server.settings["slots"] = saved
+
+def t_claude():
+    """What the live run with a real Claude Code agent on Qwen3.8 taught (2026-11-22)."""
+    import team
+    req_ = {"system": [{"type": "text", "text": "S"}], "messages": [
+        {"role": "user", "content": [{"type": "text", "text": "task"}]},
+        {"role": "system", "content": [{"type": "text", "text": "reminder"}]},
+        {"role": "assistant", "content": "ok"}, {"role": "user", "content": "next"}]}
+    out = server.anthropic_to_local(req_)
+    roles = [m["role"] for m in out["messages"]]
+    check("claude: a system message mid-conversation joins the user turn (Qwen refuses it otherwise)",
+          roles == ["user", "assistant", "user"] and "<system-reminder>\nreminder\n</system-reminder>" in out["messages"][0]["content"][1]["text"]
+          and out["system"] == [{"type": "text", "text": "S"}], out["messages"])
+    seen = set()
+    u = {"input_tokens": 100, "cache_read_input_tokens": 900, "output_tokens": 0}
+    a = team._step_from_claude({"type": "assistant", "message": {"id": "m1", "usage": u, "content": [{"type": "text", "text": "x"}]}}, seen, r"C:\wt")
+    b = team._step_from_claude({"type": "assistant", "message": {"id": "m1", "usage": u, "content": [
+        {"type": "tool_use", "name": "Write", "input": {"file_path": r"C:\WT\server\export.py"}}]}}, seen, r"C:\wt")
+    c = team._step_from_claude({"type": "assistant", "message": {"id": "m1", "usage": u, "content": [{"type": "text", "text": "y"}]}}, seen, r"C:\wt")
+    check("claude: one reply's tokens count once, its tool call still shows", a["prompt"] == 1000 and b["prompt"] == 0
+          and b["tool"] == "Write" and c is None, (a, b, c))
+    check("claude: paths in the worktree are shown relative to it", b["target"] == r"server\export.py", b["target"])
+    repo = temp_repo("ctx repo")
+    saved, real = server.settings.get("agents"), (server.model_info, server.laptop_info)
+    server.settings["agents"] = [{"name": "cc1", "backend": "pc", "client": "claude-code"}]
+    server.model_info = lambda *a: {"state": "ON", "name": "PC model", "ctx": 32768}
+    server.laptop_info = lambda *a, **k: {"state": "OFF", "id": None}
+    try:
+        team.edit_board(repo, team.agents(server.settings), "g", [{"agent": "cc1", "title": "x", "owns": ["server/"]}])
+        ok, msg, _, _ = server.team_start(repo)
+        check("claude: refused up front on a 32K model (its own prompt needs ~30k)", not ok and "64K" in msg
+              and not os.path.isdir(repo + "-agents"), msg)
+    finally:
+        server.model_info, server.laptop_info = real
+        if saved is None:
+            server.settings.pop("agents", None)
+        else:
+            server.settings["agents"] = saved
+
 def urllib_quote(s):
     import urllib.parse
     return urllib.parse.quote(s, safe="")
 
 
 GROUPS = {"web": t_web, "modules": t_modules, "smuggle": t_smuggle, "key": t_key, "guard": t_guard, "phone": t_phone, "tools": t_tools, "tuner": t_tuner, "laptop": t_laptop,
-          "worktree": t_worktree, "team": t_team, "board": t_board, "teamrun": t_teamrun, "review": t_review}
+          "worktree": t_worktree, "team": t_team, "board": t_board, "teamrun": t_teamrun, "review": t_review, "slots": t_slots, "claude": t_claude}
 
 if __name__ == "__main__":
     want = sys.argv[1:] or list(GROUPS)

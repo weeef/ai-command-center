@@ -112,3 +112,106 @@ other GPUs, cloud provider checks with a real key, and the README update.
 2. Build the memory evaluation (fixed memories + questions) and tune the recall thresholds and the learner prompt
    against it with the real embedding model, checking `cache_n` across turns.
 3. Re-run `bench/bench.py` for the uncensored model and on real Cline tasks, then update the README speed table.
+
+---
+
+# Agent team pass (2026-11-22)
+
+Goal: turn "open · both" into a real multi-agent mode, where one goal is split between coding agents that work at the
+same time, each in its own worktree, and you review and merge. Five steps, each committed and pushed on its own.
+
+## What was built
+
+1. **Agent registry + worktree helper** (`team.py`, `workspaces.py`). Agents are a name, a backend (`pc`, `laptop`,
+   `cloud:anthropic`) and a client (`vscode` = one of the two existing VS Code setups, `claude-code` = headless). All
+   three are checked against fixed sets. `ensure_worktree()` is general; `laptop_worktree()` now uses it and behaves
+   as before. `agent_worktree()` gives `<repo>-agents\<agent>` on `agent/<agent>/<task>`. A folder with uncommitted
+   work is never switched or removed, and a folder that isn't one of the repo's worktrees is never touched.
+2. **Task board + planner.** One board per repo in `<git common dir>\cc-team\board.json`, never committed. A split
+   needs one task per agent and owned paths inside the repo, and no two tasks may own overlapping paths. The planner
+   is the strongest backend that's on: cloud only when it's set up *and* ticked for that plan. It sees the goal, the
+   tracked file list and the README head. Each agent's brief (`.cc-agent.md`, plus `.clinerules/cc-team.md` for
+   Cline) has its task, its files, the others' status and the handoff notes; agents append `- <name>: …` lines,
+   which are passed on. The brief files are excluded via `.git\info\exclude`.
+3. **7:team tab + live status.** Start opens VS Code on each Cline agent's worktree (the starter prompt goes on the
+   clipboard: Cline can't be handed a task from outside) and runs Claude Code headless (its native `claude.exe`,
+   with a fixed argument list, since the task is in the brief). On a local model, Claude Code goes through
+   `/agent/<name>/v1/messages` with a token made for that one run. Steps come from the Cline proxy and from Claude
+   Code's stream-json: tool and file, tokens, cache share. Also shown: changed files, files changed outside what the
+   agent owns, and files more than one agent touched. Stop kills a headless agent's process tree; for Cline, the
+   proxy refuses its next step.
+4. **Review + merge.** When an agent finishes, its leftovers are committed on its own branch and the project's tests
+   run in its worktree (`tests\smoke.py` > pytest > `npm test`, one run at a time). Per agent: diff, tests, merge,
+   send back with a note, discard. Merge is `--no-ff` in your checkout. It refuses when your checkout has uncommitted
+   changes or is on another branch; a conflict is aborted and named. Never forced, never pushed. Clean-up asks first
+   and keeps folders with unsaved work; merged branches are deleted with `-d`, discarded ones only if ticked. The
+   uninstaller lists `-agents` worktrees.
+5. **`--parallel` option**, off by default: **model picker → two agents at once** gives two slots,
+   `-np 2 -c 2×ctx --kv-unified-per-slot ctx`.
+
+Phone: can read 7:team and diffs. Every POST under `/api/team` is refused from the phone, including routes added
+later (`REMOTE_READONLY`). `/api/models/slots` is PC-only.
+
+Tests: `tests\smoke.py` grew from 9 to 16 groups (worktree, team, board, teamrun, review, slots, claude). They use
+throw-away repos (paths with a space and `&`), a fake model server and a fake Claude Code. No real VS Code, model or
+cloud is touched.
+
+## What was measured
+
+**`--parallel` on the RTX 5080** (`bench.py --tasks agents`): two agents, ~15-20k-token contexts each, three turns
+each. Full table in the README.
+
+| model | slots | both writing at once | each alone | first prompts | later turns cached | peak VRAM |
+|---|---|---|---|---|---|---|
+| Qwen3.6 35B-A3B, 64K/agent | 1 | 68 tok/s | 77 / 68 | 13.5 s | 99.8% | 13.5 GB |
+| | 2 | 97 tok/s (+42%) | 52 / 54 | 13.5 s | 99.8% | 14.3 GB |
+| Qwen3.8 27B, 32K/agent, no MTP | 1 | 52 tok/s | 55 / 54 | 17.9 s | 99.8% | 14.6 GB |
+| | 2 | 84 tok/s (+63%) | 44 / 44 | 18.8 s | 99.8% | 15.7 GB |
+
+What the numbers say:
+- One slot already keeps each agent's prompt cache when the agents take turns: `--cache-ram` restores it.
+- Two slots only pay off while both agents generate text at the same time, and they cost 0.8-1.2 GB of VRAM.
+- Two 16K slots can't hold a 19k-token agent prompt.
+
+Hence an opt-in, not the default.
+
+**Live runs** (real planner, real Claude Code 2.1.330 on the local Qwen3.8 27B, temp repo):
+- **Planner:** the first plan gave both tasks to one agent, which the validation refused. One retry with the reason
+  fixed it, so local models now get one retry with the broken rule. Planning took 9 s.
+- **First Claude Code run:** HTTP 500, *"System message must be at the beginning"*. Claude Code puts `system`-role
+  messages mid-conversation and Qwen's template refuses them. The proxy now folds them into the user turn as
+  `<system-reminder>`, which keeps the prompt prefix stable for the cache.
+- **After that fix:** one agent built its part in 154 s (31 steps, 95% of prompt tokens cached), stayed inside its
+  files, and left a correct handoff note. In the two-agent run the second agent failed with "Prompt is too long":
+  Claude Code's own prompt is ~27-32k tokens and the model ran at 32K. Start now refuses a Claude Code agent on a
+  model under 64K, with that explanation.
+- **The live run also fixed:**
+  - token counting: Claude Code repeats a reply's usage on every content block, so prompt tokens were counted twice
+  - a made-up cost on local models
+  - `__pycache__` files that would have been committed with an agent's work
+
+## Left open, and why
+
+- **Cline agents were not run live.** Their path is the existing 5:cline proxy plus the step parser, tested with a
+  fake model server. A real run needs VS Code windows and your clicks (pasting the starter prompt). Worth doing
+  while recording the demo.
+- **Cline CLI** (npm `cline` 3.0.75) isn't installed and wasn't installed: it needs your OK. It would give headless
+  Cline agents.
+- **More than two VS Code agents** would need more VS Code profiles (one Cline config each); headless agents have
+  no such limit.
+- **Not run on a real model:**
+  - Claude Code on the laptop's model (PAIR's `/v1/messages`)
+  - Claude Code on cloud Claude (costs money)
+  - `--parallel` with MTP speculation
+- **Phone layout:** checked only at Edge's minimum headless width (492 px): nothing overflows there. The real 390 px
+  layout and the phone (remote) view weren't checked on a phone.
+- **Restarts:** if the command center restarts while a headless agent works, the agent loses its output pipe and is
+  marked stopped. Send it back to resume.
+
+## Next three things
+
+1. Record the demo (`docs\team-demo.md`) with two Cline agents. That's also the first live run of the Cline path.
+2. Run the planner on a bigger real repo and compare it with cloud planning on the same goal (with your OK on the
+   cost).
+3. Decide on the Cline CLI. If it works headless against the command center's `/cline` route, Cline agents would no
+   longer need VS Code windows or a pasted prompt.

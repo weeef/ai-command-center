@@ -17,6 +17,8 @@ Examples (run from the repo root, with the model in 1:llm turned OFF: only one f
   python bench/bench.py --name vcache --extra "-t 8 --cpu-range 0-7 --cpu-strict 1"
   python bench/bench.py --name mtp --model mtp --moe 25 --spec "--spec-type draft-mtp,ngram-mod --spec-draft-n-max 2" --no-vision
   python bench/bench.py --name unc --model unc --moe 25
+  python bench/bench.py --name np1 --tasks agents --ctx 65536                       two agents taking turns, one slot
+  python bench/bench.py --name np2 --tasks agents --np 2 --ctx 131072 --extra "--kv-unified-per-slot 65536"
 """
 import argparse
 import http.client
@@ -85,6 +87,59 @@ def chat(system, user, max_tokens):
     return j.get("timings") or {}, (j["choices"][0]["message"].get("content") or "")
 
 
+def chat_msgs(msgs, max_tokens):
+    """Like chat(), but keeps the prompt cache on: the agents task measures whether it holds."""
+    j = post("/v1/chat/completions", {
+        "messages": msgs, "max_tokens": max_tokens, "temperature": 0, "seed": 42, "stream": False,
+        "cache_prompt": True, "chat_template_kwargs": {"enable_thinking": False}})
+    return j.get("timings") or {}, (j["choices"][0]["message"].get("content") or "")
+
+
+def agents_task(parallel, out_tokens=400):
+    """Two coding agents on one model, Cline-style: each has its own big project context (~10-12k tokens) and asks
+    for a file rewrite, then a follow-up in the same conversation. parallel=True sends both agents' requests at once
+    (needs -np 2); False lets them take turns A, B, A, B on one slot (what happens today with -np 1).
+    Turn 2 shows whether each agent's prompt cache survived the other agent's request."""
+    ctx = {"A": frozen("command-center/server.py")[:42000], "B": frozen("command-center/index.html")[:42000]}
+    src = frozen("command-center/tokens.py")
+    sess = {k: [{"role": "system", "content": "You are a coding agent. Project context, for reference:\n```\n%s\n```" % v},
+                {"role": "user", "content": "Rename the constant POLL to POLL_SECONDS everywhere in this file. Reply with "
+                                            "the complete new file in one ```python block.\n\n```python\n%s\n```" % src}]
+            for k, v in ctx.items()}
+    # round 2 re-emits the file (speculation makes it nearly free); round 3 is free writing, like an agent's reasoning
+    follow = {2: "Now also rename the function recent_log to recent_entries. Reply with the complete file again.",
+              3: "Without any code: explain in about 300 words how this file decides when to save, and what could go wrong."}
+    rounds = []
+    for rnd in (1, 2, 3):
+        res, t0 = {}, time.time()
+
+        def one(k):
+            try:
+                res[k] = chat_msgs(sess[k], out_tokens)
+            except Exception as e:   # e.g. the prompt doesn't fit the slot: a result too
+                res[k] = ({"error": str(e)[:200]}, "")
+        if parallel:
+            th = [threading.Thread(target=one, args=(k,)) for k in sess]
+            [x.start() for x in th]
+            [x.join() for x in th]
+        else:
+            for k in sess:
+                one(k)
+        wall = time.time() - t0
+        r = {"round": rnd, "wall_s": round(wall, 1),
+             "total_tg": round(sum(res[k][0].get("predicted_n", 0) for k in res) / wall, 1)}
+        for k, (t, text) in res.items():
+            r[k] = {"prompt": t.get("prompt_n", 0) + t.get("cache_n", 0), "cached": t.get("cache_n", 0),
+                    "pp": round(t.get("prompt_per_second", 0), 1), "tg": round(t.get("predicted_per_second", 0), 1),
+                    "out": t.get("predicted_n", 0), "error": t.get("error")}
+            if rnd < 3:
+                sess[k] = sess[k] + [{"role": "assistant", "content": text}, {"role": "user", "content": follow[rnd + 1]}]
+        rounds.append(r)
+        if any(r[k]["error"] for k in res):
+            break
+    return rounds
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--name", required=True)
@@ -99,7 +154,8 @@ def main():
     ap.add_argument("--spec", default="--spec-type ngram-mod")
     ap.add_argument("--no-vision", action="store_true", help="don't load the mmproj (MTP can't be combined with it)")
     ap.add_argument("--extra", default="", help="more llama-server flags, appended as-is")
-    ap.add_argument("--tasks", default="read,rewrite,chat")
+    ap.add_argument("--tasks", default="read,rewrite,chat", help="read,rewrite,chat and/or agents (two coding agents on one model)")
+    ap.add_argument("--np", type=int, default=1, help="server slots (-np); with 2+ the agents task sends both agents at once")
     ap.add_argument("--force", action="store_true", help="run even if a model is already up on :8090")
     a = ap.parse_args()
 
@@ -117,7 +173,7 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
 
     args = [exe, "-m", model, "--host", "127.0.0.1", "--port", str(PORT), "--fit", "off", "-ngl", "99",
-            "--n-cpu-moe", str(a.moe), "-c", str(a.ctx), "-np", "1", "-fa", "on", "-ctk", a.ctk, "-ctv", a.ctk,
+            "--n-cpu-moe", str(a.moe), "-c", str(a.ctx), "-np", str(a.np), "-fa", "on", "-ctk", a.ctk, "-ctv", a.ctk,
             "--load-mode", "none", "-t", str(a.threads), "-b", str(a.b), "-ub", str(a.ub), "--no-ui"]
     mm = os.path.join(ROOT, MMPROJ)
     if not a.no_vision and os.path.exists(mm):
@@ -172,6 +228,8 @@ def main():
             rec.update(rw_tokens=t.get("predicted_n"), rw_tg=round(t.get("predicted_per_second", 0), 1),
                        rw_ok="POLL_SECONDS" in text and "def recent_log" in text,
                        rw_draft=t.get("draft_n"), rw_draft_ok=t.get("draft_n_accepted"))
+        if "agents" in tasks:
+            rec["agents"] = agents_task(a.np > 1)
         if "chat" in tasks:
             t, _ = chat(None, "Explain how a heat pump works and when it beats a gas boiler, in about 300 words.", 400)
             rec.update(chat_tg=round(t.get("predicted_per_second", 0), 1), chat_draft=t.get("draft_n"),
@@ -190,7 +248,11 @@ def main():
     rec["vram_peak_mib"] = peak["v"]
     with open(os.path.join(out_dir, "results-v2.jsonl"), "a", encoding="utf-8") as f:
         f.write(json.dumps(rec) + "\n")
-    print(json.dumps({k: v for k, v in rec.items() if k not in ("flags", "model", "when", "llama")}))
+    print(json.dumps({k: v for k, v in rec.items() if k not in ("flags", "model", "when", "llama", "agents")}))
+    for r in rec.get("agents") or []:
+        print("  agents round %d: %.1fs, %.1f tok/s together | " % (r["round"], r["wall_s"], r["total_tg"]) + " | ".join(
+            ("%s: ERROR %s" % (k, r[k]["error"])) if r[k].get("error") else
+            "%s: %d in (%d cached) %.0f pp %.1f tg" % (k, r[k]["prompt"], r[k]["cached"], r[k]["pp"], r[k]["tg"]) for k in ("A", "B")))
     time.sleep(3)  # let the driver release VRAM before the next run
 
 
