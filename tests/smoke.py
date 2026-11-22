@@ -513,8 +513,119 @@ def t_team():
             server.settings["agents"] = saved
 
 
+def temp_repo(name):
+    """A throw-away git repo with one commit, in the test folder."""
+    repo = os.path.join(TMP, name)
+    os.makedirs(os.path.join(repo, "server"))
+    os.makedirs(os.path.join(repo, "ui"))
+    for f in ("server/api.py", "ui/app.js", "README.md"):
+        with open(os.path.join(repo, f), "w") as fh:
+            fh.write("x\n")
+    g = lambda *a: subprocess.run([workspaces.GIT, "-C", repo, "-c", "user.name=t", "-c", "user.email=t@example.com"] + list(a),
+                                  capture_output=True, text=True)
+    g("init", "-q", "-b", "main"); g("add", "-A"); g("commit", "-q", "-m", "one")
+    return repo
+
+
+def t_board():
+    """The task board: the split's rules, where it is kept, the planner and the brief each agent gets."""
+    import team
+    reg = team.DEFAULT_AGENTS
+    split = [{"agent": "pc", "title": "Export API", "goal": "GET /api/export", "owns": ["server/", "tests/test_export.py"]},
+             {"agent": "laptop", "title": "Export button", "goal": "a button", "owns": "ui/app.js\nui/export.css"}]
+    ok, msg, clean, _ = team.check_tasks(split, reg)
+    check("board: a clean split passes (owns may be a list or lines)", ok and clean[1]["owns"] == ["ui/app.js", "ui/export.css"]
+          and clean[0]["slug"] == "export-api", (msg, clean))
+    for owns, why in ((["server/api.py"], "a file inside the other's folder"), (["Server"], "the same folder, other case"),
+                      (["tests/test_export.py"], "the same file")):
+        bad = [split[0], dict(split[1], owns=owns)]
+        ok, msg, _, clash = team.check_tasks(bad, reg)
+        check("board: overlap refused (%s)" % why, not ok and "both own" in msg and clash, msg)
+    for owns in (["../x"], ["C:/Windows/x"], ["/etc/x"], ["a/../../b"], [], ["a\x00b"]):
+        ok, msg, _, _ = team.check_tasks([dict(split[0], owns=owns)], reg)
+        check("board: owned path %r refused" % (owns,), not ok, msg)
+    check("board: unknown agent refused", not team.check_tasks([dict(split[0], agent="ghost")], reg)[0])
+    check("board: two tasks for one agent refused", not team.check_tasks([split[0], dict(split[0], title="b", owns=["docs/"])], reg)[0])
+
+    repo = temp_repo("board repo")
+    ok, msg, b = team.edit_board(repo, reg, "an export feature", split)
+    p = team.board_path(repo)
+    check("board: kept in the repo's .git folder, not in the working tree",
+          ok and p == os.path.join(repo, ".git", "cc-team", "board.json") and os.path.exists(p), (msg, p))
+    st = subprocess.run([workspaces.GIT, "-C", repo, "status", "--porcelain"], capture_output=True, text=True).stdout
+    check("board: git sees no new files", st.strip() == "", st)
+    ok, wt, _ = workspaces.agent_worktree(repo, "pc", "export-api")
+    check("board: an agent's worktree finds the same board", ok and team.board_path(wt) == p, team.board_path(wt))
+    b["state"] = "running"; team.save_board(repo, b)
+    check("board: the split can't change while the team works", not team.edit_board(repo, reg, "x", split)[0])
+    b["state"] = "draft"; team.save_board(repo, b)
+
+    br = team.brief(b, b["tasks"][0])
+    check("board: the brief has the task, the owned files and the other agent's status",
+          "Export API" in br and "`server/`" in br and "**laptop** (draft): Export button" in br and "`ui/app.js`" in br, br)
+    team.add_note(repo, "t2", "laptop", "the button calls GET /api/export?fmt=csv")
+    br = team.brief(team.load_board(repo), b["tasks"][0])
+    check("board: handoff notes reach the other agent's brief", "- laptop: the button calls GET /api/export?fmt=csv" in br, br)
+    mine = br + "- pc: export returns {rows: [...]}\n- laptop: not mine to add\n"
+    check("board: only the agent's own new handoff lines are picked up",
+          team.new_notes(mine, "pc", []) == ["export returns {rows: [...]}"] and team.new_notes(mine, "laptop", ["the button calls GET /api/export?fmt=csv"]) == ["not mine to add"],
+          (team.new_notes(mine, "pc", []), team.new_notes(mine, "laptop", [])))
+
+    # the planner, with the models stubbed: the strongest one that's on, cloud only when ticked
+    asked = []
+    real = server.llm_json, server.model_info, server.laptop_info, server.save_settings
+    state = {"pc": "ON", "laptop": "OFF"}
+    server.model_info = lambda *a: {"state": state["pc"], "name": "PC model"}
+    server.laptop_info = lambda *a, **k: {"state": state["laptop"], "name": "laptop model", "id": "x"}
+    server.llm_json = lambda msgs, schema, n, backend=None, **k: asked.append((backend, msgs[1]["content"])) or {"tasks": split}
+    server.save_settings = lambda: None
+    repos_was = server.settings.get("team_repos")
+    try:
+        ok, msg, b2 = server.team_plan(repo, "an export feature", use_cloud=True)   # cloud isn't set up here
+        check("planner: the PC model plans when cloud isn't set up", ok and asked and asked[0][0] == "pc" and b2["planner"]["backend"] == "pc", (msg, asked[:1]))
+        check("planner: it sees the goal and the repo's file list", "an export feature" in asked[0][1] and "server/api.py" in asked[0][1])
+        state["pc"] = "OFF"; asked.clear()
+        ok, msg, _ = server.team_plan(repo, "x")
+        check("planner: nothing on -> a clear refusal, no request", not ok and not asked and "no model is on" in msg, msg)
+        state["laptop"] = "ON"
+        ok, msg, b3 = server.team_plan(repo, "x")
+        check("planner: the laptop plans when it's the only one on", ok and asked[0][0] == "laptop", msg)
+        server.llm_json = lambda *a, **k: {"tasks": [split[0], dict(split[1], owns=["server/x.py"])]}
+        ok, msg, b4 = server.team_plan(repo, "x")
+        check("planner: a split with an overlap comes back to be fixed, not saved", not ok and b4 and "both own" in b4.get("problem", ""), msg)
+        check("planner: the saved board is still the last good one", team.load_board(repo)["tasks"][1]["owns"] == ["ui/app.js", "ui/export.css"])
+
+        st, d = req("POST", "/api/team/board", json.dumps({"repo": os.path.join(repo, "server"), "goal": "g2", "tasks": split}))
+        check("board route: a folder inside the repo means the repo", st == 200 and d["repo"] == repo and d["board"]["goal"] == "g2", d)
+        st, d = req("POST", "/api/team/board", json.dumps({"repo": TMP, "goal": "g", "tasks": split}))
+        check("board route: a folder that isn't a repo is refused", st == 400, d)
+        st, d = req("GET", "/api/team?repo=" + urllib_quote(repo))
+        check("board route: GET returns the board", st == 200 and d["board"]["goal"] == "g2", st)
+        as_phone(True)
+        try:
+            st, d = req("GET", "/api/team?repo=" + urllib_quote(repo), **PHONE)
+            check("phone: sees the board", st == 200 and d["board"]["goal"] == "g2", st)
+            st, _ = req("POST", "/api/team/plan", json.dumps({"repo": repo, "goal": "g"}), **PHONE)
+            check("phone: can't plan", st == 403, st)
+            st, _ = req("POST", "/api/team/board", json.dumps({"repo": repo, "goal": "g", "tasks": split}), **PHONE)
+            check("phone: can't edit the split", st == 403, st)
+        finally:
+            as_phone(False)
+    finally:
+        server.llm_json, server.model_info, server.laptop_info, server.save_settings = real
+        if repos_was is None:
+            server.settings.pop("team_repos", None)
+        else:
+            server.settings["team_repos"] = repos_was
+
+
+def urllib_quote(s):
+    import urllib.parse
+    return urllib.parse.quote(s, safe="")
+
+
 GROUPS = {"web": t_web, "modules": t_modules, "smuggle": t_smuggle, "key": t_key, "guard": t_guard, "phone": t_phone, "tools": t_tools, "tuner": t_tuner, "laptop": t_laptop,
-          "worktree": t_worktree, "team": t_team}
+          "worktree": t_worktree, "team": t_team, "board": t_board}
 
 if __name__ == "__main__":
     want = sys.argv[1:] or list(GROUPS)

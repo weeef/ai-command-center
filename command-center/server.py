@@ -1077,7 +1077,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             c = chats.get_chat(path[len("/api/chats/"):])
             self.send_json(200 if c else 404, c or {"error": "no such chat"})
         elif path == "/api/team":
-            self.send_json(200, dict(team.public(settings), remote=self.remote))
+            qs = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            repo = team_repo((qs.get("repo") or [""])[0] or (settings.get("team_repos") or [""])[0])
+            self.send_json(200, dict(team.public(settings), remote=self.remote, repo=repo,
+                                     repos=[r for r in settings.get("team_repos") or [] if os.path.isdir(r)],
+                                     board=team.load_board(repo) if repo else None))
         elif path == "/api/uninstall":
             self.send_json(200, uninstall_scan(qs_flag(self.path, "fresh")))
         elif path == "/api/code":
@@ -1215,6 +1219,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/api/code/both":
             ok, msg = workspaces.open_both(data.get("path") or "", settings, save_settings)
             return self.send_json(200 if ok else 400, {"ok": ok, "msg": msg})
+        if path in ("/api/team/plan", "/api/team/board"):
+            repo = team_repo(data.get("repo"))
+            if not repo:
+                return self.send_json(400, {"ok": False, "msg": "pick a folder that is a git repo with at least one commit"})
+            goal = str(data.get("goal") or "").strip()
+            if path == "/api/team/plan":
+                if not goal:
+                    return self.send_json(400, {"ok": False, "msg": "say what the team should build"})
+                pick = data.get("planner") if data.get("planner") in ("pc", "laptop", "cloud") else None
+                ok, msg, b = team_plan(repo, goal, pick, data.get("use_cloud") is True)
+            else:
+                ok, msg, b = team.edit_board(repo, team.agents(settings), goal or None, data.get("tasks"))
+            if ok:
+                remember_team_repo(repo)
+            return self.send_json(200 if ok else 400, {"ok": ok, "msg": msg, "board": b, "repo": repo})
         if path == "/api/team/agents":
             ok, msg, clean = team.save_agents(settings, save_settings, data.get("agents"))
             return self.send_json(200 if ok else 400, {"ok": ok, "msg": msg, "agents": clean})
@@ -1773,13 +1792,14 @@ def stream_stats(tail):
     return out
 
 
-def llm_json(messages, schema, max_tokens):
-    """One short, non-streaming request to whichever model "run on" points at, for memory housekeeping.
-    Returns the parsed JSON object, or None if no model is available (memory retries later)."""
+def llm_json(messages, schema, max_tokens, backend=None, empty=None, timeout=240):
+    """One short, non-streaming request for JSON. backend None = whichever model "run on" points at (memory
+    housekeeping), or "pc" / "laptop" explicitly (the agent team's planner). Returns the parsed JSON object, or
+    None if that model isn't available (memory retries later). A reply with no JSON in it gives `empty`."""
     req = {"messages": messages, "max_tokens": max_tokens, "temperature": 0.2, "stream": False,
            "chat_template_kwargs": {"enable_thinking": False},
-           "response_format": {"type": "json_schema", "json_schema": {"name": "memories", "schema": schema}}}
-    if target["v"] == "laptop":
+           "response_format": {"type": "json_schema", "json_schema": {"name": "answer", "schema": schema}}}
+    if (backend or ("laptop" if target["v"] == "laptop" else "pc")) == "laptop":
         mid = laptop_info()["id"]
         if not mid:
             return None
@@ -1789,7 +1809,7 @@ def llm_json(messages, schema, max_tokens):
             return None
         host, auth = LLAMA, {"Authorization": "Bearer " + api_key()}
     for attempt in (0, 1):
-        c = http.client.HTTPConnection(*host, timeout=240)
+        c = http.client.HTTPConnection(*host, timeout=timeout)
         try:
             c.request("POST", "/v1/chat/completions", json.dumps(req), {"Content-Type": "application/json", **auth})
             r = c.getresponse()
@@ -1807,15 +1827,72 @@ def llm_json(messages, schema, max_tokens):
             text = json.loads(body)["choices"][0]["message"].get("content") or ""
         except (ValueError, KeyError, IndexError):
             return None
-        if "</think>" in text:
-            text = text.split("</think>", 1)[1]
-        a, b = text.find("{"), text.rfind("}")
-        try:
-            out = json.loads(text[a:b + 1]) if a >= 0 else None
-        except ValueError:
-            out = None
-        return out if isinstance(out, dict) else {"memories": []}
+        out = team.parse_plan(text)
+        return out if out is not None else ({"memories": []} if empty is None else empty)
     return None
+
+
+def team_repo(path):
+    """The repo a team request is about: an existing folder inside a git repo with a commit, else None.
+    The browser only ever names a folder; git decides what the repo is."""
+    if not isinstance(path, str) or not path.strip() or '"' in path:
+        return None
+    p = os.path.abspath(os.path.expandvars(os.path.expanduser(path.strip().strip('"'))))
+    if not os.path.isdir(p):
+        return None
+    root = workspaces.git_root(p)
+    if not root or workspaces.run([workspaces.GIT, "-C", root, "rev-parse", "--verify", "--quiet", "HEAD"])[0] != 0:
+        return None
+    return root
+
+
+def remember_team_repo(repo):
+    rec = [r for r in settings.get("team_repos") or [] if os.path.normcase(r) != os.path.normcase(repo)]
+    settings["team_repos"] = [repo] + rec[:7]
+    save_settings()
+
+
+def team_plan(repo, goal, pick=None, use_cloud=False):
+    """Ask the strongest backend that's on to split the goal between the registered agents. -> (ok, msg, board)."""
+    reg = team.agents(settings)
+    msgs = team.plan_messages(goal, reg, repo)
+    cloud_ready = cloud.status(settings)["ready"]
+    pc_on = model_info(None)["state"] in ("ON", "ASLEEP")
+    lap_on = laptop_info()["state"] in ("ON", "ASLEEP")
+    order = team.planner_order(cloud_ready, use_cloud, pc_on, lap_on, pick)
+    if not order:
+        why = ("cloud isn't set up (6:set → cloud)" if pick == "cloud" or (use_cloud and not cloud_ready)
+               else "no model is on: turn one on in 1:llm, or tick cloud")
+        return False, "nothing can plan right now: " + why, None
+    tried = []
+    for who in order:
+        if who == "cloud":
+            c = cloud.config(settings)
+            prompt = msgs[0]["content"] + "\n\n" + msgs[1]["content"]
+            ok, text, _ = cloud.CALL[c["provider"]](c["models"][c["provider"]], prompt, False)
+            plan = team.parse_plan(text) if ok else None
+            label = {"backend": "cloud", "model": "%s %s" % (cloud.NAMES[c["provider"]], c["models"][c["provider"]])}
+            if not ok:
+                tried.append("cloud: " + str(text)[:120])
+        else:
+            plan = llm_json(msgs, team.PLAN_SCHEMA, 3000, backend=who, empty={}, timeout=420)
+            info = model_info(None) if who == "pc" else laptop_info()
+            label = {"backend": who, "model": info.get("name")}
+            if plan is None:
+                tried.append("%s: no answer" % who)
+        if plan and plan.get("tasks"):
+            ok, msg, b = team.edit_board(repo, reg, goal, plan["tasks"], planner=label)
+            if ok:
+                return True, "planned by %s" % (label["model"] or label["backend"]), b
+            # a split that breaks the rules is still shown, so you can fix it instead of starting over
+            ok2, _, clean, clash = team.check_tasks(plan["tasks"], reg)
+            draft = team.new_board(repo, goal, clean or [], label) if clean else None
+            if draft is not None:
+                draft["problem"] = msg
+            return False, "the planner's split needs a fix: " + msg, draft
+        if plan is not None and who != "cloud":
+            tried.append("%s: no tasks in the answer" % who)
+    return False, "planning failed (" + "; ".join(tried) + ")", None
 
 
 def idle_watch():
