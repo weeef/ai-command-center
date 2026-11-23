@@ -286,6 +286,7 @@ main{display:grid;grid-template-columns:432px 1fr;gap:14px;padding:6px 12px 12px
 .chip.tg.online:not(.sel){color:var(--ok)}
 #usagePane>.title{display:flex;align-items:baseline;gap:0;white-space:nowrap;max-width:calc(100% - 26px)}#usageNote{margin-left:6px;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .chip.tg .lrun{font-size:.92em;opacity:.9}
+.chip.tg .selfmark{font-style:normal;font-size:.85em;opacity:.65}
 .chip.tg.sel .lrun{color:inherit}
 .hide{display:none!important}
 #modelPick{display:inline-flex;align-items:center;gap:6px;max-width:260px;min-width:0}
@@ -789,8 +790,8 @@ body.remote #tags span[data-ws="2"]{display:none}
       </div>
       <div id="tgtRow">
         <span class="k">run on</span>
-        <button class="chip tg" data-t="local" title="your models on this PC (port 8090)">this pc</button>
-        <button class="chip tg" data-t="laptop" title="the laptop's model through NVIDIA PAIR (port 8080)">laptop</button>
+        <button class="chip tg" data-t="local" title="the models on this device (port 8090)"><span class="devn" data-dev="pc">this device</span> <i class="selfmark">(this device)</i></button>
+        <button class="chip tg" data-t="laptop" title="the paired device's model through NVIDIA PAIR (port 8080)">paired device</button>
       </div>
       <div id="ctl">
         <button id="powerBtn" title="turn the selected model on or off">⏻ on</button>
@@ -798,7 +799,7 @@ body.remote #tags span[data-ws="2"]{display:none}
         <span id="ctlMsg"></span>
       </div>
     </section>
-    <section class="pane" id="usagePane"><div class="title">usage <span class="ut" data-u="pc" role="button" tabindex="0">this pc</span><span class="ut" data-u="laptop" role="button" tabindex="0">laptop</span> <i id="usageNote"></i></div>
+    <section class="pane" id="usagePane"><div class="title">usage <span class="ut devn" data-u="pc" data-dev="pc" role="button" tabindex="0">this device</span><span class="ut devn" data-u="laptop" data-dev="laptop" role="button" tabindex="0">paired device</span> <i id="usageNote"></i></div>
       <div class="meter" id="mVram"><span class="lab">vram</span><span class="segs"></span><span class="val">–</span></div>
       <div class="meter" id="mRam"><span class="lab">ram</span><span class="segs"></span><span class="val">–</span></div>
       <div class="spark"><span class="lab">gpu</span><canvas id="sGpu"></canvas><span class="val" id="vGpu">–</span></div>
@@ -836,17 +837,17 @@ body.remote #tags span[data-ws="2"]{display:none}
 <!-- 2:code ─ VS Code + Cline -->
 <main id="ws2" class="ws" hidden>
   <div class="col">
-    <section class="pane setup" id="setup-pc"><div class="title">vscode <i>· this pc's model</i></div><div class="sbody">loading…</div></section>
-    <section class="pane setup" id="setup-laptop"><div class="title">vscode <i>· laptop's model</i></div><div class="sbody">loading…</div></section>
+    <section class="pane setup" id="setup-pc"><div class="title">vscode <i>· <span class="devn" data-dev="pc">this device</span>'s model</i></div><div class="sbody">loading…</div></section>
+    <section class="pane setup" id="setup-laptop"><div class="title">vscode <i>· <span class="devn" data-dev="laptop">paired device</span>'s model</i></div><div class="sbody">loading…</div></section>
   </div>
   <div class="col">
     <section class="pane" id="projPane"><div class="title">projects</div>
       <div class="openrow">
         <span class="ps">❯</span>
         <input id="projPath" spellcheck="false" autocomplete="off" placeholder="paste a folder path, e.g. D:\projects\my-app">
-        <button data-open="pc" title="open in your main VS Code (this pc's model)">open · pc</button>
-        <button data-open="laptop" title="open in the laptop VS Code (laptop's model)">open · laptop</button>
-        <button data-open="both" title="pc window on this repo + laptop window on its own git worktree (<name>-laptop), so both agents can work at once">open · both</button>
+        <button data-open="pc" title="open in your main VS Code (this device's model)">open · <span class="devn" data-dev="pc">this device</span></button>
+        <button data-open="laptop" title="open in the second VS Code (the paired device's model)">open · <span class="devn" data-dev="laptop">paired device</span></button>
+        <button data-open="both" title="this device's window on this repo + the paired device's window on its own git worktree (<name>-laptop), so both agents can work at once">open · both</button>
       </div>
       <div class="hint">tip: in Explorer, shift + right-click a folder → <b>Copy as path</b>, then paste it here.</div>
       <div id="recent"></div>
@@ -878,8 +879,8 @@ body.remote #tags span[data-ws="2"]{display:none}
 <!-- 5:cline ─ Cline (VS Code) through the command center -->
 <main id="ws5" class="ws" hidden>
   <div class="col">
-    <section class="pane"><div class="title">cline <i>· this pc's vscode</i></div><div id="clPc" class="clcard">loading…</div></section>
-    <section class="pane"><div class="title">cline <i>· laptop vscode</i></div><div id="clLaptop" class="clcard">loading…</div></section>
+    <section class="pane"><div class="title">cline <i>· <span class="devn" data-dev="pc">this device</span>'s vscode</i></div><div id="clPc" class="clcard">loading…</div></section>
+    <section class="pane"><div class="title">cline <i>· <span class="devn" data-dev="laptop">paired device</span>'s vscode</i></div><div id="clLaptop" class="clcard">loading…</div></section>
     <section class="pane"><div class="title">memory <i>· for cline</i></div><div id="clMem">loading…</div></section>
   </div>
   <div class="col">
@@ -947,8 +948,8 @@ body.remote #tags span[data-ws="2"]{display:none}
           <datalist id="teamRepos"></datalist><button id="teamLoad">load</button></div>
         <textarea id="teamGoal" rows="3" maxlength="4000" placeholder="what should the team build? one feature, in a few sentences"></textarea>
         <div class="memloc"><select id="teamPlanner" title="who splits the goal into tasks">
-            <option value="">planner: strongest that's on</option><option value="conductor">planner: Claude, who then conducts</option><option value="pc">planner: this pc's model</option>
-            <option value="laptop">planner: the laptop's model</option><option value="cloud">planner: cloud</option></select>
+            <option value="">planner: strongest that's on</option><option value="conductor">planner: Claude, who then conducts</option><option value="pc" class="devopt" data-dev="pc" data-fmt="planner: %s's model">planner: this device's model</option>
+            <option value="laptop" class="devopt" data-dev="laptop" data-fmt="planner: %s's model">planner: the paired device's model</option><option value="cloud">planner: cloud</option></select>
           <label class="hint" title="the goal, the repo's file list and the start of its README are sent to your cloud provider (billed)"><input type="checkbox" id="teamCloud"> may use cloud</label>
           <button id="teamPlan" class="primary">plan</button></div>
       </div>
@@ -980,10 +981,10 @@ body.remote #tags span[data-ws="2"]{display:none}
     <button id="mdOpen">open models folder</button> <button id="mdRescan">rescan</button></div>
 </dialog>
 <dialog id="lapDlg" aria-labelledby="ldTitle">
-  <div class="mdhead"><div class="title" id="ldTitle">laptop models</div><span id="ldHw"></span><button id="ldClose" title="close (Esc)">✕</button></div>
+  <div class="mdhead"><div class="title" id="ldTitle"><span class="devn" data-dev="laptop">paired device</span> models</div><span id="ldHw"></span><button id="ldClose" title="close (Esc)">✕</button></div>
   <div id="ldList"></div>
-  <div class="hint">These are the models downloaded on the laptop, run through NVIDIA PAIR. Picking one while the laptop's model is on unloads the current one and loads the new one (they don't fit together). While it's off, the pick is what <b>⏻ on</b> starts.
-    To put another model on the laptop, add it from the model catalog in the PAIR app; it shows up here.</div>
+  <div class="hint">These are the models downloaded on the paired device, run through NVIDIA PAIR. Picking one while its model is on unloads the current one and loads the new one (they don't fit together). While it's off, the pick is what <b>⏻ on</b> starts.
+    To put another model on the paired device, add it from the model catalog in the PAIR app; it shows up here.</div>
 </dialog>
 <dialog id="updDlg" aria-labelledby="updTitle">
   <div class="title" id="updTitle">new version available</div>
@@ -1325,19 +1326,29 @@ function uiState(){
   if (st === "ON" && (S.busy || chatBusy)) return "THINKING";
   return st;
 }
+/* Device names: "pc" / "local" is always the device this command center runs on (its hostname), "laptop" is the
+   device paired through PAIR (its name from PAIR's member list). The keys stay fixed; only what you see changes. */
+function selfName(){ return (S && S.host) || "this device"; }
+function peerName(){ return (S && S.laptop_name) || "paired device"; }
+function devName(k){ return k === "laptop" ? peerName() : selfName(); }
+function renderDevNames(){
+  document.querySelectorAll(".devn").forEach(e => { const n = devName(e.dataset.dev); if (e.textContent !== n) e.textContent = n; });
+  document.querySelectorAll(".devopt").forEach(e => { const n = e.dataset.fmt.replace("%s", devName(e.dataset.dev)); if (e.textContent !== n) e.textContent = n; });
+}
 function render(){
   if (!S) return;
+  renderDevNames();
   visionUI();
   const m = S.model, st = uiState();
   $("state").textContent = st; $("state").className = "st-" + st;
   $("host").textContent = `${S.user}@${S.host}`;
   const laptop = S.target === "laptop";
   document.querySelectorAll(".chip.tg").forEach(c => { c.classList.toggle("sel", c.dataset.t === S.target); c.disabled = ctlBusy; });
-  $("chatHost").textContent = laptop ? "· laptop via PAIR 127.0.0.1:8080" : "· 127.0.0.1:8090";
+  $("chatHost").textContent = laptop ? `· ${peerName()} via PAIR 127.0.0.1:8080` : `· ${selfName()} · 127.0.0.1:8090`;
   const lc = document.querySelector('.chip.tg[data-t="laptop"]');
-  const LM = S.laptop_model, lst = LM ? LM.state : "OFF", lname = S.laptop_name || "laptop";
+  const LM = S.laptop_model, lst = LM ? LM.state : "OFF", lname = peerName();
   const lrun = lst !== "OFF", lword = !lrun ? "" : LM.processing ? "busy" : ({ON: "on", ASLEEP: "asleep", LOADING: "loading"})[lst] || lst.toLowerCase();
-  lc.innerHTML = (S.laptop_online ? "● " : "○ ") + "laptop" + (lrun ? ` <span class="lrun st-${LM.processing ? "THINKING" : lst}">· ${lword}</span>` : "");
+  lc.innerHTML = (S.laptop_online ? "● " : "○ ") + esc(lname) + (lrun ? ` <span class="lrun st-${LM.processing ? "THINKING" : lst}">· ${lword}</span>` : "");
   lc.classList.toggle("online", !!S.laptop_online);
   lc.classList.toggle("running", lrun);
   lc.title = !S.laptop_online ? (S.laptop_note || `${lname} is off or not reachable`)
@@ -1382,7 +1393,7 @@ function renderUsage(){
     t.classList.toggle("sel", t.dataset.u === k);
     const mm = S.machines[t.dataset.u];
     t.classList.toggle("down", !mm.ok);
-    t.title = (t.dataset.u === "pc" ? "this PC" : "the laptop") + (mm.ok ? "" : " (not reachable)") + " · click to show";
+    t.title = devName(t.dataset.u) + (t.dataset.u === "pc" ? " (this device)" : "") + (mm.ok ? "" : " (not reachable)") + " · click to show";
   });
   const LM = k === "laptop" && S.laptop_model;
   $("usageNote").textContent = !M.ok ? "not reachable" : M.name + (LM && LM.state !== "OFF" ? ` · ${shortModel(LM.name)} ${LM.processing ? "busy" : LM.state.toLowerCase()}`
@@ -1410,7 +1421,7 @@ function renderTokens(){
   $("tokRows").innerHTML = ["pc", "laptop"].map(k => {
     const t = T[k] || {}, approx = t.exact ? "" : "≈";
     const tip = t.exact ? "exact, from the model server's own counters" : "approximate: output only, counted while this window is open (prompt tokens need --metrics on that server)";
-    return `<div class="tr ${t.on ? "" : "off"}" title="${tip}"><span class="m">${k === "pc" ? "this pc" : "laptop"}</span>
+    return `<div class="tr ${t.on ? "" : "off"}" title="${tip}"><span class="m" title="${esc(devName(k))}">${esc(devName(k))}</span>
         <span class="n">${t.exact ? fmtTok(t.in) : "–"} <i>in</i></span>
         <span class="n">${approx}${fmtTok(t.out)} <i>out</i></span>
         <span class="r">${t.on && t.tps ? t.tps + " t/s" : t.on ? "idle" : "off"}</span></div>
@@ -1423,7 +1434,7 @@ async function loadTokLog(){
     const j = await (await fetch("/api/tokens/log", {cache:"no-store"})).json();
     L.innerHTML = j.log.length ? j.log.map(e => {
       const d = new Date(e.start * 1000), mins = Math.round((e.end - e.start) / 60);
-      return `<div>${d.toLocaleDateString(undefined,{month:"short",day:"numeric"})} ${d.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})} · ${e.machine === "pc" ? "pc" : "laptop"} · ${mins}m · ${e.exact ? fmtTok(e.in) + " in · " : ""}${e.exact ? "" : "≈"}${fmtTok(e.out)} out</div>`;
+      return `<div>${d.toLocaleDateString(undefined,{month:"short",day:"numeric"})} ${d.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})} · ${esc(e.machine === "pc" ? selfName() : peerName())} · ${mins}m · ${e.exact ? fmtTok(e.in) + " in · " : ""}${e.exact ? "" : "≈"}${fmtTok(e.out)} out</div>`;
     }).join("") : "<div>no finished sessions yet: a session is logged when its model turns off</div>";
   } catch (e) { L.textContent = "could not load the log"; }
 }
@@ -1481,7 +1492,7 @@ async function setTarget(t){
   try {
     const r = await fetch("/api/target", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({target: t})});
     if (!r.ok) throw new Error((await r.json()).error);
-    sys(t === "laptop" ? "now using the laptop's model (through PAIR)." : "now using this PC's models.");
+    sys(t === "laptop" ? `now using ${peerName()}'s model (through PAIR).` : `now using the models on ${selfName()} (this device).`);
     const j = await (await fetch("/api/stats", {cache:"no-store"})).json(); S = j; render(); loadCline(); if (t === "laptop") loadLaptop().then(render);
   } catch (e) { sys("could not switch: " + e.message, true); }
 }
@@ -1535,19 +1546,19 @@ function renderLapPick(){
   const b = $("modelPick"), m = S.model, up = m.state !== "OFF";
   const pickedM = lap && lap.models.find(x => x.id === lap.picked);
   const name = up || !pickedM ? shortModel(m.name || m.id || (pickedM && pickedM.id)) : pickedM.name;
-  b.querySelector("span").textContent = name || (m.note ? "no laptop model" : "laptop model");
+  b.querySelector("span").textContent = name || (m.note ? `no model on ${peerName()}` : `${peerName()} model`);
   b.querySelector(".fitdot").className = "fitdot" + (up ? " fit-gpu" : "");
   const pc = $("pickCap"), vis = up ? m.vision : pickedM && pickedM.vision;
   pc.hidden = vis == null;
   if (vis != null) { pc.className = "cap " + (vis ? "vis" : "txt"); pc.textContent = vis ? "images" : "text only"; }
   visionUI();
-  b.title = (S.laptop_name || "laptop") + (up ? ` is running ${name}` : ` · next: ${name}`) + " · click to choose the laptop's model";
+  b.title = peerName() + (up ? ` is running ${name}` : ` · next: ${name}`) + ` · click to choose ${peerName()}'s model`;
 }
 function renderLapDlg(){
   const L = lap;
-  $("ldHw").textContent = L ? `${L.name || "laptop"}${L.vram_gb ? " · " + L.vram_gb + " GB VRAM" : ""}${L.online ? "" : " · not reachable"}` : "";
-  if (!L) { $("ldList").innerHTML = `<div class="hint">couldn't ask the command center for the laptop's models.</div>`; return; }
-  if (!L.models.length) { $("ldList").innerHTML = `<div class="hint" style="margin:0 0 8px">${esc(L.note || "PAIR lists no models for the laptop.")}</div>`; return; }
+  $("ldHw").textContent = L ? `${L.name || peerName()}${L.vram_gb ? " · " + L.vram_gb + " GB VRAM" : ""}${L.online ? "" : " · not reachable"}` : "";
+  if (!L) { $("ldList").innerHTML = `<div class="hint">couldn't ask the command center for the paired device's models.</div>`; return; }
+  if (!L.models.length) { $("ldList").innerHTML = `<div class="hint" style="margin:0 0 8px">${esc(L.note || `PAIR lists no models for ${peerName()}.`)}</div>`; return; }
   const upId = S && S.target === "laptop" && S.model.state !== "OFF" ? S.model.id : (L.models.find(x => x.state !== "OFF") || {}).id;
   $("ldList").innerHTML = L.models.map(x => {
     const st = x.state === "OFF" ? "" : x.state === "ASLEEP" ? "asleep" : x.state === "LOADING" ? "loading" : "running";
@@ -1563,7 +1574,7 @@ async function pickLaptop(id){
   if (up && m.id === id) return $("lapDlg").close();
   if (up) {   // switch the running laptop model (the server saves the pick too)
     $("lapDlg").close();
-    sys(`switching the laptop to ${shortModel(id)}: unloading ${shortModel(m.id)} first…`);
+    sys(`switching ${peerName()} to ${shortModel(id)}: unloading ${shortModel(m.id)} first…`);
     await modelAction("on", null, false, false, id);
   } else {
     const r = await postJSON("/api/models/laptop", {id});
@@ -1751,7 +1762,7 @@ const HELP = `commands
   /off                       stop the model
   /model [name]              pick a model by (part of) its name, or open the model picker
   /models                    open the model picker (add models, change context)
-  /laptop  /local            run on the laptop (via PAIR) or this PC
+  /laptop  /local            run on the paired device (via PAIR) or this device
   /theme [corpus|tokyo|mocha|gruvbox|matrix]
   /new                       start a new chat (the current one stays saved)
   /chats                     open saved chats (also the "history" button)
@@ -1824,7 +1835,7 @@ async function send(){
   const content = imgs.length ? [...(text ? [{type:"text", text}] : []), ...imgs.map(u => ({type:"image_url", image_url:{url:u}}))] : text;
   history.push({role:"user", content});
 
-  const m = el("div", "msg bot"); m.appendChild(el("div", "who", "◆ " + (S.target === "laptop" ? "laptop · " + (S.model.name || "model") : (S.model.name || S.model.key || "model"))));
+  const m = el("div", "msg bot"); m.appendChild(el("div", "who", "◆ " + (S.target === "laptop" ? peerName() + " · " + (S.model.name || "model") : (S.model.name || S.model.key || "model"))));
   const think = el("details", "think"); think.innerHTML = "<summary>thinking</summary>"; const tbody = el("div", "tbody"); think.appendChild(tbody); think.hidden = true;
   const body = el("div", "body cursor"); const stat = el("div", "stat");
   m.append(think, body, stat); log.appendChild(m); scroll(true);
@@ -3138,7 +3149,7 @@ function renderCline(d){
         <button class="btn-main ${r.routed ? "" : "go"}" data-cl="${w}" data-through="${r.routed ? 0 : 1}" ${clBusy ? "disabled" : ""}>${r.routed ? "go direct" : "route through here"}</button></div>
       <div class="kvt">
         <span class="k">base url</span><span class="v" title="${esc(r.points || "")}">${esc(r.points || "–")}</span><span></span>
-        <span class="k">model</span><span class="v">${w === "pc" ? "this PC's model (8090)" : "the laptop via PAIR (8080)"}</span><span></span>
+        <span class="k">model</span><span class="v">${w === "pc" ? esc(selfName()) + "'s model (8090)" : esc(peerName()) + " via PAIR (8080)"}</span><span></span>
         <span class="k">vscode</span><span class="v">${r.running ? "open" : "closed"}</span><span></span>
       </div>
       ${r.running ? `<div class="note">Close this VS Code to switch, or set it by hand in Cline → settings → <b>Base URL</b>:</div><div class="kvt" style="margin-top:6px">${copyRow("route", r.url_cc)}${copyRow("direct", r.url_direct)}</div>` : ""}`;
@@ -3153,7 +3164,7 @@ function renderCline(d){
   $("clLogN").textContent = log.length ? "· " + log.length : "";
   $("clLog").innerHTML = log.length ? log.map(e => {
     const st = e.status === "…" ? `<span class="st run">working</span>` : e.status === 200 ? `<span class="st ok">ok</span>` : `<span class="st bad">${esc(String(e.status))}</span>`;
-    const meta = [e.which === "pc" ? "this pc" : "laptop", `${e.steps || 1} step${(e.steps || 1) === 1 ? "" : "s"}`,
+    const meta = [devName(e.which), `${e.steps || 1} step${(e.steps || 1) === 1 ? "" : "s"}`,
       e.mem || e.chunks ? `◉ ${e.mem} memor${e.mem === 1 ? "y" : "ies"}${e.chunks ? " + " + e.chunks + " chats" : ""}` : "no memories",
       e.prompt ? `last step: ${e.prompt.toLocaleString()} in${e.cached ? ` (${Math.round(100 * e.cached / e.prompt)}% cached)` : ""} · ${(e.out || 0).toLocaleString()} out` : "",
       e.secs != null ? e.secs + "s" : ""].filter(Boolean).join(" · ");
@@ -3220,15 +3231,15 @@ function teamReview(t, b){
 }
 function renderTeamAgents(d){
   const cl = d.clients || {}, cc = cl["claude-code"] || {};
-  const label = {pc: "this pc's model", laptop: "the laptop's model", "cloud:anthropic": "Claude (cloud, billed)"};
+  const label = {pc: selfName() + "'s model", laptop: peerName() + "'s model", "cloud:anthropic": "Claude (cloud, billed)"};
   $("teamAgents").innerHTML = d.agents.map(a => `<div class="agrow"><span class="n">${esc(a.name)}</span>
-      <span class="d">${a.client === "vscode" ? "Cline in " + (a.name === "pc" ? "your main VS Code" : "the laptop VS Code") : "Claude Code, headless"} · ${esc(label[a.backend] || a.backend)}</span>
+      <span class="d">${a.client === "vscode" ? "Cline in " + (a.name === "pc" ? "your main VS Code (" + selfName() + ")" : "the second VS Code (" + peerName() + ")") : "Claude Code, headless"} · ${esc(label[a.backend] || a.backend)}</span>
       ${d.agents.length > 1 ? `<button class="x tact" data-agdel="${esc(a.name)}" title="remove this agent">×</button>` : ""}</div>`).join("") +
     `<div class="memloc tact"><input id="agName" maxlength="20" placeholder="name, e.g. cc1" style="flex:0 1 120px">
-       <select id="agBackend"><option value="pc">this pc's model</option><option value="laptop">the laptop's model</option><option value="cloud:anthropic">Claude (cloud, billed)</option></select>
+       <select id="agBackend"><option value="pc">${esc(label.pc)}</option><option value="laptop">${esc(label.laptop)}</option><option value="cloud:anthropic">Claude (cloud, billed)</option></select>
        <button id="agAdd" ${cc.installed ? "" : "disabled"}>+ Claude Code agent</button></div>
      <div class="hint">${cc.installed ? `Claude Code ${esc(cc.version || "")} is installed: it runs headless in its worktree, on the model you pick. A cloud agent asks before every start.` : "Claude Code isn't installed, so only the two VS Code agents are available."}
-       VS Code agents are your main VS Code (<b>pc</b>) and the laptop VS Code (<b>laptop</b>).</div>`;
+       VS Code agents are your main VS Code (<b>pc</b>, ${esc(selfName())}'s model) and the second VS Code (<b>laptop</b>, ${esc(peerName())}'s model).</div>`;
 }
 function renderTeamSplit(b, d){
   const box = $("teamSplit"), names = d.agents.map(a => a.name);
@@ -3572,7 +3583,7 @@ function renderCode(d){
     const usable = k === "pc" ? d.installed : d.installed && d.laptop_setup;
     const mstate = m.state || "OFF";
     el.innerHTML = `
-      <div class="shead"><span class="dot ${s.running ? "on" : ""}"></span><span class="big">${esc(s.label)}</span>
+      <div class="shead"><span class="dot ${s.running ? "on" : ""}"></span><span class="big">VS Code · ${esc(devName(k))}</span>
         <span class="sub">${s.running ? "running" : "not running"}</span><span class="grow"></span>
         <button class="btn-main go" data-launch="${k}" ${usable ? "" : "disabled"}>${s.running ? "new window" : "launch"}</button></div>
       <div class="kvt">
@@ -3581,23 +3592,23 @@ function renderCode(d){
       </div>
       <div class="sect">cline settings</div>
       ${(() => { const pt = (s.points_to || "").replace(/\/+$/, ""), ok = pt === s.expect.replace(/\/+$/, "");
-        return `<div class="kvt"><span class="k">uses</span><span class="v ${ok ? "st-ON" : "st-OFF"}">${ok ? "✓ " : "✗ "}${esc(pt || "not an OpenAI Compatible setup")}${ok ? (k === "laptop" ? " · laptop" : " · this pc") : ""}</span><span></span></div>` +
-          (ok ? "" : `<div class="note">This window's Cline points at <b>${esc(pt || "another provider")}</b>, not ${k === "laptop" ? "the laptop" : "this PC"} (${esc(s.expect)}).` +
-            (k === "laptop" ? ` Close the laptop VS Code and launch it from here: it's switched back to the laptop on every launch.` : ` Set the base url below in Cline's settings.`) + `</div>`); })()}
+        return `<div class="kvt"><span class="k">uses</span><span class="v ${ok ? "st-ON" : "st-OFF"}">${ok ? "✓ " : "✗ "}${esc(pt || "not an OpenAI Compatible setup")}${ok ? " · " + esc(devName(k)) : ""}</span><span></span></div>` +
+          (ok ? "" : `<div class="note">This window's Cline points at <b>${esc(pt || "another provider")}</b>, not ${esc(devName(k))} (${esc(s.expect)}).` +
+            (k === "laptop" ? ` Close the second VS Code and launch it from here: it's switched back to ${esc(peerName())} on every launch.` : ` Set the base url below in Cline's settings.`) + `</div>`); })()}
       <div class="kvt">
         ${copyRow("provider", s.cline.provider)}
         ${copyRow("base url", s.cline.base_url)}
         ${k === "pc" ? keyRow(s.cline.api_key) : copyRow("api key", s.cline.api_key)}
         ${copyRow("model id", s.cline.model_id, String(s.cline.model_id).split(/[\\/]/).pop())}
       </div>
-      ${mstate === "OFF" ? `<div class="note">The ${k === "pc" ? "PC" : "laptop"} model is off, so Cline in this window will get connection errors. Turn it on in <b>1:llm</b>.</div>` : ""}
+      ${mstate === "OFF" ? `<div class="note">The model on ${esc(devName(k))} is off, so Cline in this window will get connection errors. Turn it on in <b>1:llm</b>.</div>` : ""}
       ${!usable ? `<div class="note">${!d.installed ? "VS Code's <b>code</b> command wasn't found." : "start-vscode-laptop.bat is missing."}</div>` : ""}`;
   }
   const r = $("recent");
   r.innerHTML = d.recent.length ? d.recent.map(p => {
     const name = p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || p;
     return `<div class="rec"><span class="name">${esc(name)}</span><span class="path" title="${esc(p)}">&lrm;${esc(p)}</span>
-      <button data-openp="pc" data-p="${esc(p)}">pc</button><button data-openp="laptop" data-p="${esc(p)}">laptop</button><button data-openp="both" data-p="${esc(p)}" title="both agents at once, laptop on its own worktree">both</button>
+      <button data-openp="pc" data-p="${esc(p)}" title="open in your main VS Code (${esc(selfName())}'s model)">${esc(selfName())}</button><button data-openp="laptop" data-p="${esc(p)}" title="open in the second VS Code (${esc(peerName())}'s model)">${esc(peerName())}</button><button data-openp="both" data-p="${esc(p)}" title="both agents at once, ${esc(peerName())}'s on its own worktree">both</button>
       <button class="x" data-forget="${esc(p)}" title="remove from list">×</button></div>`;
   }).join("") : `<div class="hint">Folders you open from here show up in this list.</div>`;
   renderRoutes();
@@ -3608,10 +3619,10 @@ function renderRoutes(){
   const c = st => st === "ON" ? "ok" : st === "LOADING" || st === "ASLEEP" ? "mid" : "bad";
   const w = webData;
   const lines = [
-    `<span class="n">VS Code</span>          ─ cline ─▶ <span class="d">127.0.0.1:8090</span> ─▶ <span class="${c(pcM.state)}">llama-server · ${esc((pcM.key || "off"))}</span>`,
-    `<span class="n">VS Code (laptop)</span> ─ cline ─▶ <span class="d">127.0.0.1:8080</span> ─▶ PAIR ─▶ <span class="${S.laptop_online ? c(lapM.state || "OFF") : "bad"}">${esc(S.laptop_name || "laptop")}${S.laptop_online ? "" : " (offline)"}</span>`,
+    `<span class="n">VS Code</span>          ─ cline ─▶ <span class="d">127.0.0.1:8090</span> ─▶ <span class="${c(pcM.state)}">${esc(selfName())} · llama-server · ${esc((pcM.key || "off"))}</span>`,
+    `<span class="n">VS Code (2nd)</span>     ─ cline ─▶ <span class="d">127.0.0.1:8080</span> ─▶ PAIR ─▶ <span class="${S.laptop_online ? c(lapM.state || "OFF") : "bad"}">${esc(peerName())}${S.laptop_online ? "" : " (offline)"}</span>`,
     `<span class="n">iPhone</span>           ─ tailscale ─▶ <span class="d">${esc(w && w.self ? w.self.dns.split(".")[0] + ".ts.net" : "your-pc.ts.net")}</span> ─▶ <span class="${w && !w.serve.on ? "bad" : "ok"}">command center 8099</span> <span class="d">─▶ same as this window</span>`,
-    `<span class="n">this window</span>      ─ chat ─▶ <span class="d">${S.target === "laptop" ? "PAIR 8080" : "8090"}</span> <span class="d">(1:llm "run on")</span>`,
+    `<span class="n">this window</span>      ─ chat ─▶ <span class="d">${S.target === "laptop" ? "PAIR 8080 → " + esc(peerName()) : "8090 → " + esc(selfName())}</span> <span class="d">(1:llm "run on")</span>`,
   ];
   $("routes").innerHTML = lines.join("\n") + `\n\n<span class="d">green = up · amber = asleep/loading · red = off</span>`;
 }
@@ -3657,17 +3668,17 @@ function renderWeb(d){
       ${d.remote ? "" : keyRow(d.api_key)}
       <span class="k">serves</span><span class="v">${esc(d.serve.target || "127.0.0.1:8099")} · ${String(d.serve.target || "").endsWith(":8099") || !d.serve.on ? "this command center" : "llama-server only (turn off and on to switch)"}</span><span></span>
       <span class="k">model</span><span class="v"><span class="dot ${stateDot(m.state || "OFF")}"></span>${esc(m.name || "off")}</span><span></span>
-      <span class="k">this pc</span><span class="v">${esc(d.self ? d.self.ip + " · " + d.self.dns : "–")}</span><span></span>
+      <span class="k">${esc(selfName())}</span><span class="v">${esc(d.self ? d.self.ip + " · " + d.self.dns : "–")}</span><span></span>
     </div>
     ${on && !up && S && S.target !== "laptop" ? `<div class="note">The model is off: turn it on in <b>${phone.matches ? "2:sys" : "1:llm"}</b> before chatting.</div>` : ""}
     ${!on && d.running ? `<div class="note">Your phone can't reach the model right now. <b>Turn on</b> shares it with your tailnet only.</div>` : ""}
-    <div class="hint" style="margin-top:8px">${d.remote ? "Turning phone access on/off, VS Code and the API key are only available on the PC." : "The phone gets this command center and chats with whatever \"run on\" picks (this PC or the laptop). It works while the command center is open on the PC."}</div>`;
+    <div class="hint" style="margin-top:8px">${d.remote ? "Turning phone access on/off, VS Code and the API key are only available on the PC." : "The phone gets this command center and chats with whatever \"run on\" picks (this device or the paired one). It works while the command center is open on the PC."}</div>`;
   $("tailnetName").textContent = d.self ? "· " + d.self.dns.split(".").slice(1).join(".") : "";
   const rows = [d.self ? {...d.self, me: true} : null, ...d.peers].filter(Boolean);
   $("tailnet").innerHTML = `<table class="devs">${rows.map(r => `<tr class="${r.online ? "" : "off"} ${r.me ? "me" : ""}">
-    <td><span class="dot ${r.online ? "on" : ""}"></span>${esc(r.name || "?")}${r.me ? " <span class='hint'>(this pc)</span>" : ""}</td>
+    <td><span class="dot ${r.online ? "on" : ""}"></span>${esc(r.name || "?")}${r.me ? " <span class='hint'>(this device)</span>" : ""}</td>
     <td class="os">${esc(r.os || "")}</td><td class="ip">${esc(r.ip || "")}</td><td>${r.online ? "online" : "offline"}</td></tr>`).join("")}</table>
-    <div class="hint" style="margin-top:8px">Devices signed in to your Tailscale account. Your laptop talks to this PC through PAIR on your home network, not Tailscale, so it's fine if it isn't listed.</div>`;
+    <div class="hint" style="margin-top:8px">Devices signed in to your Tailscale account. The paired device talks to this one through PAIR on your home network, not Tailscale, so it's fine if it isn't listed.</div>`;
   renderRoutes();
 }
 $("ws3").addEventListener("click", async e => {

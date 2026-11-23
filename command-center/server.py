@@ -475,6 +475,14 @@ def laptop_machine():
 laptop_cache = {"machine": None, "t": 0.0, "resolved": None, "model": None}
 
 
+def peer_name():
+    """The paired device's name for messages (whatever it is called, not \"laptop\")."""
+    try:
+        return (laptop_cache["machine"] or {}).get("name") or laptop_address()[1] or "the paired device"
+    except Exception:
+        return "the paired device"
+
+
 def resolve_laptop(name):
     """What the laptop's name resolves to right now (mDNS/DNS), IPv4 only; None if it doesn't."""
     if not name:
@@ -812,11 +820,12 @@ def stats():
             return _stats["v"]
     # Both machines every time, so the usage pane can show either one whatever the target is.
     g = gpu()
-    pc = {"label": "this pc", "name": socket.gethostname(), "ok": True, "gpu": g,
+    pc = {"label": socket.gethostname(), "name": socket.gethostname(), "ok": True, "gpu": g,
           "ram": part(ram, {"total": 0, "free": 0}, "ram"), "cpu": part(cpu_percent, 0.0, "cpu")}
     off = {"state": "OFF", "key": None, "name": None, "processing": False, "note": "status unavailable (see server.log)"}
     lm = laptop_cache["machine"]
-    lap = {"label": "laptop", "name": lm["name"] if lm else (laptop_address()[1] or "laptop"), "ok": lm is not None,
+    lap_name = lm["name"] if lm else (laptop_address()[1] or "paired device")
+    lap = {"label": lap_name, "name": lap_name, "ok": lm is not None,
            "gpu": lm and lm["gpu"], "ram": lm["ram"] if lm else {"total": 0, "free": 0}, "cpu": lm["cpu"] if lm else 0}
     if target["v"] == "laptop":
         m = part(laptop_info, dict(off), "laptop model")
@@ -1358,7 +1367,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if target["v"] == "laptop":
                 mid = laptop_info()["id"]
                 if not mid:
-                    return self.send_json(502, {"error": "no laptop model listed by PAIR. Is the laptop on?"})
+                    return self.send_json(502, {"error": "no model listed by PAIR for %s. Is it on?" % peer_name()})
                 data["model"] = mid  # the model id always comes from PAIR's listing, never the browser
                 host, auth = PAIR, {}
             else:
@@ -1635,7 +1644,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             mid = laptop_info()["id"]
             if not mid:
                 entry["status"] = "laptop offline"
-                return self.send_json(502, {"error": {"message": "no laptop model listed by PAIR. Is the laptop on?"}})
+                return self.send_json(502, {"error": {"message": "no model listed by PAIR for %s. Is it on?" % peer_name()}})
             data["model"] = mid
             return self.proxy_chat(json.dumps(data).encode(), PAIR, {}, info, entry, on_done=on_done)
         strip_images(data)
@@ -1666,7 +1675,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if backend == "laptop":
             mid = laptop_info()["id"]
             if not mid:
-                return self.send_json(502, {"type": "error", "error": {"type": "api_error", "message": "the laptop's model is off"}})
+                return self.send_json(502, {"type": "error", "error": {"type": "api_error", "message": "%s's model is off" % peer_name()}})
             data["model"] = mid
             return self.proxy_chat(json.dumps(data).encode(), PAIR, {}, upath=upath)
         return self.proxy_chat(json.dumps(data).encode(), LLAMA, {"Authorization": "Bearer " + api_key()}, upath=upath)
@@ -2098,7 +2107,7 @@ def team_start(repo, confirm_cloud=False):
         if a["client"] == "vscode" and not (cl["vscode"]["installed"] if a["name"] == "pc" else cl["vscode"]["laptop_setup"]):
             return False, "%s needs %s" % (t["agent"], "VS Code" if a["name"] == "pc" else "start-vscode-laptop.bat"), b, {}
         if a["backend"] == "pc" and not pc_on:
-            return False, "%s works with this PC's model, which is off: turn it on in 1:llm first" % t["agent"], b, {}
+            return False, "%s works with %s's model, which is off: turn it on in 1:llm first" % (t["agent"], socket.gethostname()), b, {}
         if a["client"] == "claude-code" and not a["backend"].startswith("cloud:"):
             # Claude Code's own instructions and tool list are ~27-32k tokens: at 32K it fails with "Prompt is too
             # long" after a few steps (live run, 2026-11-22). Say so now instead of after minutes of work.
@@ -2108,7 +2117,7 @@ def team_start(repo, confirm_cloud=False):
                                "the context in the model picker (▾ model), or give this task to a Cline agent"
                                % (t["agent"], CLAUDE_MIN_CTX // 1024, "this PC" if a["backend"] == "pc" else "the laptop", ctx // 1024)), b, {}
         if a["backend"] == "laptop" and not lap.get("id"):
-            return False, "%s works with the laptop's model, which PAIR doesn't list: is the laptop on?" % t["agent"], b, {}
+            return False, "%s works with %s's model, which PAIR doesn't list: is it on?" % (t["agent"], peer_name()), b, {}
     notes = []
     for t in b["tasks"]:
         ok, msg = team.prepare(repo, b, t, reg[t["agent"]]["client"])
