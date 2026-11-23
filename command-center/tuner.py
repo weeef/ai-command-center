@@ -78,6 +78,20 @@ def forget(m, ctx, mode, hw=None):
             fsutil.write_json(PROFILES, d, indent=1)
 
 
+def known_batches(m, hw=None):
+    """[(batch, context)] for every saved result of this model (any context, this GPU) whose settings use a batch
+    size: what the tuner or learning found it can run with."""
+    hw = hw or models.hardware()
+    out = []
+    for k, p in _all().items():
+        parts = k.split("|")
+        if len(parts) == 6 and parts[0] == m["id"] and parts[4] == str(hw.get("gpu")) and isinstance(p, dict):
+            ub = (p.get("best") or {}).get("ub") or ((p.get("learn") or {}).get("base") or {}).get("ub")
+            if ub and parts[2].isdigit():
+                out.append((int(ub), int(parts[2])))
+    return out
+
+
 def mark_stale(m, ctx, mode, hw=None):
     """The saved settings no longer load (engine or driver update, less free VRAM): fall back to the defaults from
     now on without measuring again, so the next load isn't any slower. "optimise again" measures afresh."""

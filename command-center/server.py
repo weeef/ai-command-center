@@ -272,8 +272,8 @@ def model_info(gpu_util):
     except Exception:
         pass
     try:
-        _, models = llama_get("/v1/models")
-        info["id"] = ((models or {}).get("data") or [{}])[0].get("id")
+        _, listed = llama_get("/v1/models")   # not "models": that name would hide the module in this whole function
+        info["id"] = ((listed or {}).get("data") or [{}])[0].get("id")
     except Exception:
         pass
     try:
@@ -350,8 +350,20 @@ def start_model(m, ub=None, note="", settle=False):
             sys.stderr and print(time.ctime(), done, file=sys.stderr)
     ctx, mode = model_ctx(m), model_mode(m)
     # with the measured settings, if any; two slots only if you turned that on (two agents writing at once)
-    pref_ub = ((settings.get("model_prefs") or {}).get(m["id"]) or {}).get("ub")
-    base = {"ub": int(pref_ub)} if pref_ub else {}   # a smaller batch this model needed (its compute buffers didn't fit)
+    base = {}
+    unit = ((settings.get("model_prefs") or {}).get(m["id"]) or {}).get("compute_unit")
+    known = None if unit else fallback_ub(m)   # a smaller batch this model needed before, and at which context
+    if unit:
+        # this model's compute buffer per (context x batch) was measured: size the batch for this context from it
+        u = models.ub_for(float(unit), ctx)
+        if u < 2048:
+            base = {"ub": u}
+    elif known:
+        # the memory that limited it grows with context x batch: at another context the batch scales the other way
+        u = known[0] * known[1] // ctx
+        u = next((x for x in (2048,) + models.SMALLER_UB if x <= u), models.SMALLER_UB[-1])
+        if u < 2048:
+            base = {"ub": u}
     learn = None
     if ub:
         tune = dict(tuner.best(m, ctx, mode) or {}, ub=ub)
@@ -365,6 +377,18 @@ def start_model(m, ub=None, note="", settle=False):
         tune["ub"] = base["ub"]
     launch.update(profiled=bool(tuner.best(m, ctx, mode)), learning=learn, sums=None)
     launch["proc"] = models.launch(m, ctx, mode, tune or None, 2 if settings.get("slots") == 2 else 1)
+
+
+def fallback_ub(m):
+    """(batch, context) of the smallest batch this model needed so far, or None: from a load that ran out of memory
+    (settings.json -> model_prefs) or from what the tuner kept for it at some context (tuning.json)."""
+    pref = (settings.get("model_prefs") or {}).get(m["id"]) or {}
+    seen = []
+    if pref.get("ub"):
+        seen.append((int(pref["ub"]), int(pref.get("ub_ctx") or model_ctx(m))))
+    seen += tuner.known_batches(m)
+    # the most constraining one: the smallest batch x context product
+    return min(seen, key=lambda x: x[0] * x[1]) if seen else None
 
 
 def recover_launch(p):
@@ -387,12 +411,18 @@ def recover_launch(p):
     if lt and lt[0] == m["id"] and tuner.failed(m, ctx, mode, lt[3], (models.log_tail(1) or "didn't load")[:160]):
         start_model(m, note="a setting being tried for %s didn't load: back to the best known one" % m["name"], settle=True)
         return True
-    if models.compute_oom(text):
+    # Out of memory while loading: with llama.cpp's fit placing the weights, what didn't fit is almost always the
+    # compute buffer (the batch). The message varies ("failed to allocate compute ..." or a bare "CUDA error: out of
+    # memory"); with a logged size the batch that fits is computed, without one it halves.
+    if models.compute_oom(text) or (models.load_oom(text) and not launch.get("profiled")):
         u = models.fit_ub(text, ub, m, ctx)
         if not u:
             return False
         pref = dict((settings.get("model_prefs") or {}).get(m["id"]) or {})
-        pref["ub"] = u
+        pref.update(ub=u, ub_ctx=ctx)
+        unit = models.compute_unit(text, ub, ctx)
+        if unit:
+            pref["compute_unit"] = unit   # MiB per (context x batch): sizes the batch at any context from now on
         settings.setdefault("model_prefs", {})[m["id"]] = pref
         save_settings()
         if lt and lt[0] == m["id"]:
@@ -1027,16 +1057,49 @@ class LoopGuard:
                 return True
         return False
 
-    def stopped_events(self, anthropic=False):
+    @property
+    def garbage(self):
+        """The reply is (almost) one character over and over ("??????"): the model itself has broken down, which a
+        new question won't fix. Seen 2026-11-23 with Inkling-2-Mini at 128K context on a 16 GB card: after one
+        long reply every answer was "?" until the model was restarted; at 64K it never happened."""
+        t = "".join(self.text.split())
+        return len(t) > 1000 and max(t.count(c) for c in set(t)) / len(t) >= 0.8
+
+    def stopped_events(self, anthropic=False, why=None):
         """What to send the client in place of the rest of the reply: a normal end (so agents treat it as a cut-off
         reply, not an error) plus, for the chat window, why."""
-        why = ("stopped: the model was repeating itself (%s characters so far). Ask again, or rephrase." %
-               format(self.total, ","))
+        why = why or ("stopped: the model was repeating itself (%s characters so far). Ask again, or rephrase." %
+                      format(self.total, ","))
         if anthropic:
             return (b'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"max_tokens",'
                     b'"stop_sequence":null},"usage":{"output_tokens":0}}\n\nevent: message_stop\ndata: {"type":"message_stop"}\n\n')
         return (b"data: " + json.dumps({"choices": [{"index": 0, "delta": {}, "finish_reason": "length"}],
                                          "cc_stopped": why}).encode() + b"\n\ndata: [DONE]\n\n")
+
+
+def garbage_recovery(upstream):
+    """The model's output turned to garbage (LoopGuard.garbage). For this PC's model: restart it at the next smaller
+    context, remember that for the model, and return what to tell the user. Returns None to keep the usual reason."""
+    if upstream != LLAMA:
+        return ("stopped: the model's output turned into garbage (one character over and over). Restart the model "
+                "on %s, or pick a smaller context for it there." % peer_name())
+    m = models.find(launch.get("key"))
+    if not m:
+        return None
+    ctx = model_ctx(m)
+    smaller = [c for c in models.ctx_choices(m) if c < ctx]
+    if not smaller:
+        return ("stopped: the model's output turned into garbage even at the smallest context. Turn it off and on "
+                "again; if it keeps happening, this model doesn't run correctly with this llama.cpp build.")
+    new = smaller[-1]
+    pref = dict((settings.get("model_prefs") or {}).get(m["id"]) or {})
+    pref["ctx"] = new
+    settings.setdefault("model_prefs", {})[m["id"]] = pref
+    save_settings()
+    threading.Thread(target=lambda: model_action("on", m["id"], restart=True), daemon=True).start()
+    return ("stopped: %s's output turned into garbage at %dK context, which this model can't handle reliably on this "
+            "PC. Restarting it at %dK context (remembered; change it in the model list). Send your message again "
+            "once it's on." % (m["name"], ctx // 1024, new // 1024))
 
 
 # ---------------------------------------------------------------- http
@@ -1737,7 +1800,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         self._raw(b"data: " + payload + b"\n\n")
                 up.close()
                 if guard.tripped:
-                    self._raw(guard.stopped_events())
+                    self._raw(guard.stopped_events(why=part(lambda: garbage_recovery(upstream), None, "garbage") if guard.garbage else None))
                     self.wfile.write(b"0\r\n\r\n")
                     return
                 if not calls:
@@ -2067,7 +2130,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     except OSError:
                         pass
                     up.close()
-                    end = guard.stopped_events(anthropic=upath.endswith("/messages"))
+                    why = part(lambda: garbage_recovery(upstream), None, "garbage") if guard.garbage else None
+                    end = guard.stopped_events(anthropic=upath.endswith("/messages"), why=why)
                     self.wfile.write(b"%x\r\n%s\r\n" % (len(end), end))
                     if entry is not None:
                         entry["stopped"] = "loop"

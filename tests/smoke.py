@@ -268,8 +268,13 @@ def t_tuner():
     fake = {"_meta": {"x.attention.head_count": 24, "x.attention.head_count_kv": 8, "x.attention.key_length": 128,
                       "x.attention.value_length": 128}, "arch": "x", "layers": 24}
     big = "E ggml_backend_cuda_buffer_type_alloc_buffer: allocating 57257.49 MiB on device 0: cudaMalloc failed: out of memory"
-    check("models: the batch that fits is found from the logged size in one step",
-          server.models.fit_ub(big, 2048, fake, 131072, {"vram_gb": 15.9}) == 256, server.models.fit_ub(big, 2048, fake, 131072, {"vram_gb": 15.9}))
+    check("models: the batch is found from the logged size in one step, leaving the GPU to the weights",
+          server.models.fit_ub(big, 2048, fake, 131072, {"vram_gb": 15.9}) == 128, server.models.fit_ub(big, 2048, fake, 131072, {"vram_gb": 15.9}))
+    unit = server.models.compute_unit(big, 2048, 131072)
+    hw16 = {"vram_gb": 15.9}
+    check("models: from that cost, each context gets the batch that ran fast (64K: 256, measured 41 tok/s; 32K: 512)",
+          [server.models.ub_for(unit, c, hw16) for c in (131072, 65536, 32768, 16384)] == [128, 256, 512, 1024],
+          [server.models.ub_for(unit, c, hw16) for c in (131072, 65536, 32768, 16384)])
     check("models: without a logged size it halves", server.models.fit_ub("failed to allocate compute pp buffers", 2048, fake, 131072, {"vram_gb": 15.9}) == 1024)
     check("models: any out-of-memory is recognised, a missing architecture is not",
           server.models.load_oom(big) and not server.models.load_oom("unknown model architecture: 'x'"))
@@ -367,6 +372,60 @@ def t_loop():
     check("loop guard: a model repeating itself while thinking is stopped", tripped and g.total < 20000, g.total)
     tripped, _ = run(sse(words("Hmm, maybe it is 42. No, it is 41. " * 400), anthropic=True), size=37)
     check("loop guard: Claude Code's stream format too, with events split across reads", tripped)
+    check("loop guard: a thinking loop isn't taken for a broken model", not g.garbage)
+    tripped, g = run(sse(["???"] * 4000))
+    check("loop guard: '?????' output is stopped and recognised as a broken model", tripped and g.garbage)
+    # recovery: restart this PC's model at the next smaller context, remembered for the model
+    calls, fm = [], {"id": "x.gguf", "name": "X", "ctx_train": 131072}
+    real_r = (server.models.find, server.model_action, server.save_settings, server.model_ctx, server.launch.get("key"),
+              dict(server.settings.get("model_prefs") or {}))
+    server.models.find, server.save_settings = (lambda k: fm if k == "x.gguf" else None), (lambda: None)
+    server.model_action = lambda *a, **kw: calls.append((a, kw))
+    server.model_ctx = lambda m: 131072
+    server.launch["key"] = "x.gguf"
+    try:
+        why = server.garbage_recovery(server.LLAMA)
+        for _ in range(20):
+            if calls:
+                break
+            time.sleep(0.05)
+        check("garbage: this PC's model restarts at the next smaller context, and that is remembered",
+              server.settings["model_prefs"]["x.gguf"]["ctx"] == 65536 and calls == [(("on", "x.gguf"), {"restart": True})]
+              and "64K" in why and "Send your message again" in why, (why, calls))
+        check("garbage: for the paired device it only explains (its context is set there)",
+              "Restart the model on" in server.garbage_recovery(server.PAIR))
+    finally:
+        server.models.find, server.model_action, server.save_settings, server.model_ctx = real_r[:4]
+        server.launch["key"] = real_r[4]
+        server.settings["model_prefs"] = real_r[5]
+    # a model server that quits while loading: its status shows why (this path used to crash on a shadowed name)
+    class Exited:
+        args, returncode = ["llama-server", "-ub", "2048"], 1
+
+        def poll(self):
+            return 1
+    real_l = (dict(server.launch), server.recover_launch)
+    server.recover_launch = lambda p: False
+    server.launch.update(proc=Exited(), key=None, fail="")
+    try:
+        info = server.model_info(None)
+        # (state isn't checked: a real model may be running on 8090 while the tests run)
+        check("status: a model server that quit while loading is reported, not a crash",
+              server.launch["proc"] is None and info.get("note", "").startswith("failed to start"), info)
+    finally:
+        server.launch.clear()
+        server.launch.update(real_l[0])
+        server.recover_launch = real_l[1]
+    # the batch a model needed at one context, carried to another (memory grows with context x batch)
+    real_f = (server.tuner.known_batches, dict(server.settings.get("model_prefs") or {}))
+    server.tuner.known_batches = lambda m, hw=None: [(256, 131072)]
+    server.settings["model_prefs"] = {}
+    try:
+        check("batch: a batch learned at 128K is the fallback for this model",
+              server.fallback_ub({"id": "x.gguf", "ctx_train": 131072}) == (256, 131072))
+    finally:
+        server.tuner.known_batches = real_f[0]
+        server.settings["model_prefs"] = real_f[1]
     server.launch.pop("sums_reset", None)
     end = G().stopped_events()
     check("loop guard: the client gets a normal end with the reason", b'"finish_reason": "length"' in end and b"cc_stopped" in end

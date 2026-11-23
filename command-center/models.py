@@ -438,20 +438,38 @@ def load_oom(text):
     return bool(re.search(r"out of memory|cudaMalloc failed|failed to allocate|unable to allocate", text or "", re.I))
 
 
-def fit_ub(text, ub, m, ctx, hw=None):
-    """After a compute-buffer out-of-memory at batch `ub`: the batch that should fit, in one step instead of halving
-    one failed load at a time (each failed load costs a full model load). llama-server logs the size it tried to
-    allocate; the compute buffer grows about linearly with the batch, so scale the batch to what the GPU has left
-    after the KV cache and a reserve. None when nothing smaller is left to try."""
-    ub = int(ub)
+# The compute buffer may use at most this share of the GPU. "The largest batch that fits" is the wrong target: on
+# Inkling-2-Mini at 64K, batch 512 fit with a ~9 GB compute buffer, but llama.cpp's fit made room by moving most of
+# the weights to RAM and writing fell to 7 tok/s; batch 256 (~4.5 GB) left the weights on the GPU: 41 tok/s.
+COMPUTE_SHARE = 0.25
+
+
+def compute_unit(text, ub, ctx):
+    """MiB of compute buffer per (context x batch), from the size a failed load logged, or None."""
     sizes = [float(x) for x in re.findall(r"allocating ([0-9.]+) MiB", text or "")]
+    return max(sizes) / (int(ctx) * int(ub)) if sizes and int(ub) > 0 and int(ctx) > 0 else None
+
+
+def ub_for(unit, ctx, hw=None):
+    """The largest batch whose compute buffer stays within COMPUTE_SHARE of the GPU at this context."""
     hw = hw or hardware()
-    if not sizes or not hw.get("vram_gb"):
-        return smaller_ub(ub)
-    budget = max(512.0, (hw["vram_gb"] - 1.5 - kv_gb(m, ctx)) * 1024)
-    target = ub * budget / max(sizes)
+    cap = COMPUTE_SHARE * (hw.get("vram_gb") or 0) * 1024
+    return next((u for u in (2048,) + SMALLER_UB if unit * ctx * u <= cap), SMALLER_UB[-1])
+
+
+def fit_ub(text, ub, m, ctx, hw=None):
+    """After an out-of-memory at batch `ub`: the batch to load with next, in one step instead of halving one failed
+    load at a time (each failed load costs a full model load). llama-server logs the size it tried to allocate; the
+    compute buffer grows about linearly with context x batch, so the batch is sized to keep it within COMPUTE_SHARE
+    of the GPU. Without a logged size it halves. None when nothing smaller is left to try."""
+    ub = int(ub)
+    unit = compute_unit(text, ub, ctx)
     smaller = [u for u in SMALLER_UB if u < ub]
-    return next((u for u in smaller if u <= target), smaller[-1] if smaller else None)
+    if not smaller:
+        return None
+    if unit is None or not (hw or hardware()).get("vram_gb"):
+        return smaller_ub(ub)
+    return min(ub_for(unit, ctx, hw), smaller[0])
 
 
 def log_tail(n=12):
