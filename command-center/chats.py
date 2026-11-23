@@ -1,4 +1,4 @@
-"""Saved chats for the 1:llm chat pane.
+"""Saved chats for the Chat chat pane.
 
 One JSON file per chat in <memory folder>\\chats\\ (never committed: it's personal). The browser only ever
 names a chat by its id, which must match ID_RE, so a request can't reach any other file.

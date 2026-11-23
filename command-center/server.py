@@ -21,7 +21,7 @@ import time
 import zlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import workspaces  # noqa: E402  (2:code and 3:web)
+import workspaces  # noqa: E402  (Code and Phone)
 import tokens  # noqa: E402  (tokens burned per machine)
 import chats  # noqa: E402  (saved chat history)
 import memory  # noqa: E402  (long-term memory shared by every model)
@@ -1127,7 +1127,7 @@ def qs_flag(raw_path, name):
 
 
 def uninstall_scan(fresh=False):
-    """What uninstall.ps1 would find (items + sizes) for the 6:set checkboxes. Takes a few seconds (winget), so the
+    """What uninstall.ps1 would find (items + sizes) for the Settings checkboxes. Takes a few seconds (winget), so the
     result is kept for 2 minutes."""
     with _unin["lock"]:
         if _unin["v"] and not fresh and time.time() - _unin["t"] < 120:
@@ -1889,11 +1889,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         else:
             cline_log.append(entry)
         # agent team: a stopped agent's next step is refused (that is how Cline in VS Code is stopped from here);
-        # a working agent's steps go into its panel in 7:team
+        # a working agent's steps go into its panel in Team
         tt, on_done = team_task(which), None
         if tt and tt[1].get("status") == "stopped":
             entry["status"] = "stopped"
-            return self.send_json(409, {"error": {"message": "Stopped by the command center (7:team). Start the task again there."}})
+            return self.send_json(409, {"error": {"message": "Stopped by the command center (Team). Start the task again there."}})
         if tt:
             on_done = lambda e, tail, r=tt[0], tid=tt[1]["id"]: team.record_step(r, tid, team_step(e, tail))
         backend = next((a["backend"] for a in team.agents(settings) if a["name"] == which), which)
@@ -1957,7 +1957,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def llama_update_post(self, what, data):
-        """6:set -> llama.cpp engine. install/rollback run in the background; the page polls /api/llama-update."""
+        """Settings -> llama.cpp engine. install/rollback run in the background; the page polls /api/llama-update."""
         if what == "check":
             return self.send_json(200, LU.check())
         if what == "settings":
@@ -2071,7 +2071,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return self.send_json(404, {"error": "not found"})
 
     def proxy_chat(self, body, upstream, auth, mem_info=None, entry=None, upath="/v1/chat/completions", on_done=None):
-        """Forward one model request and stream the answer back. `entry` (a 5:cline row) and `on_done(entry or {},
+        """Forward one model request and stream the answer back. `entry` (a Cline row) and `on_done(entry or {},
         tail)` see the last 16 KB of the reply, where the token counts and the tool call are."""
         global active_streams
         up = http.client.HTTPConnection(*upstream, timeout=900)
@@ -2320,7 +2320,7 @@ def team_step(entry, tail):
 
 
 def team_view(repo):
-    """The board for 7:team with what's live: changed files, files outside what the agent owns, and whether a
+    """The board for Team with what's live: changed files, files outside what the agent owns, and whether a
     headless agent is still running (one marked running whose process is gone was cut off by a restart)."""
     reg = {a["name"]: a for a in team.agents(settings)}
     b = team.sync(repo, {n: a["client"] for n, a in reg.items()}) if repo else None
@@ -2378,7 +2378,7 @@ def team_start(repo, confirm_cloud=False):
         if a["client"] == "vscode" and not (cl["vscode"]["installed"] if a["name"] == "pc" else cl["vscode"]["laptop_setup"]):
             return False, "%s needs %s" % (t["agent"], "VS Code" if a["name"] == "pc" else "start-vscode-laptop.bat"), b, {}
         if a["backend"] == "pc" and not pc_on:
-            return False, "%s works with %s's model, which is off: turn it on in 1:llm first" % (t["agent"], socket.gethostname()), b, {}
+            return False, "%s works with %s's model, which is off: turn it on in Chat first" % (t["agent"], socket.gethostname()), b, {}
         if a["client"] == "claude-code" and not a["backend"].startswith("cloud:"):
             # Claude Code's own instructions and tool list are ~27-32k tokens: at 32K it fails with "Prompt is too
             # long" after a few steps (live run, 2026-11-22). Say so now instead of after minutes of work.
@@ -2418,7 +2418,7 @@ def team_start(repo, confirm_cloud=False):
             ok, m = workspaces.open_code(a["name"], t["worktree"], settings, save_settings,
                                          lap.get("id") if a["name"] == "laptop" else None)
             if a["name"] == "pc" and not workspaces.ROUTE["pc"]:
-                notes.append("main Cline isn't routed through the command center (5:cline), so pc's steps won't show here")
+                notes.append("main Cline isn't routed through the command center (Cline), so pc's steps won't show here")
         else:
             cloud_run = a["backend"].startswith("cloud:")
             ok, m = team_run_claude(repo, t, a)
@@ -2529,7 +2529,7 @@ def team_stop(repo, task_id):
         return False, "no such task"
     if t.get("status") != "running":
         return False, "%s isn't running" % t["agent"]
-    team.set_status(repo, task_id, "stopped", finished=time.time(), message="stopped from 7:team")
+    team.set_status(repo, task_id, "stopped", finished=time.time(), message="stopped from Team")
     killed = team.stop(t["agent"])
     return True, ("stopped %s" % t["agent"]) if killed else ("%s is stopped: Cline gets an error on its next step" % t["agent"])
 
@@ -2585,8 +2585,8 @@ def team_plan(repo, goal, pick=None, use_cloud=False):
     lap_on = laptop_info()["state"] in ("ON", "ASLEEP")
     order = team.planner_order(cloud_ready, use_cloud, pc_on, lap_on, pick)
     if not order:
-        why = ("cloud isn't set up (6:set → cloud)" if pick == "cloud" or (use_cloud and not cloud_ready)
-               else "no model is on: turn one on in 1:llm, or tick cloud")
+        why = ("cloud isn't set up (Settings → cloud)" if pick == "cloud" or (use_cloud and not cloud_ready)
+               else "no model is on: turn one on in Chat, or tick cloud")
         return False, "nothing can plan right now: " + why, None
     tried = []
     for who in order:

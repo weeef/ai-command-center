@@ -25,7 +25,7 @@ graphics card plus 32-64 GB of RAM).
    - asks which model(s) to download (22-25 GB each) and fetches the 0.6 GB memory-search model
    - writes `llm-config.bat` with settings sized for **your** graphics card
    - puts a **Command Center** shortcut on your desktop
-3. **Double-click Command Center.** In **1:llm** press **⏻ on** (the first start takes ~30 s), then type in the chat.
+3. **Double-click Command Center.** In **Chat** press **⏻ on** (the first start takes ~30 s), then type in the chat.
 
 That's it. Everything below is optional.
 
@@ -35,15 +35,15 @@ That's it. Everything below is optional.
 
 | tab | what it's for |
 |---|---|
-| **1:llm** | Turn the model on/off, pick *standard* or *uncensored*, choose **run on** *this pc* or *laptop*, and chat. Paste or drop images (vision). Live GPU/RAM/CPU usage, speed of the last reply (pp = reading, tg = writing) and tokens used. The **brain** shows the state: grey = off, nodes lighting up = loading, pulses = thinking. In the *corpus* theme its glowing nodes are your memories; it drifts and breathes even when the model is off, leans toward the pointer, and a click fires the nearest neurons. |
-| **2:code** | Open projects in VS Code with the Cline coding agent wired to your local model. Optional second "laptop" VS Code (see *Two machines*). |
-| **3:web** | Phone access over Tailscale: one button to turn it on, the address to open on your phone, your devices. |
-| **4:mem** | Your memories as a **brain**: every memory is a neuron in its topic's region (about you = frontal lobe, preferences = prefrontal, how-tos = motor strip, projects = parietal, people + events = temporal, facts = occipital, other = cerebellum). Bigger = recalled more often, ring = pinned. Synapses join memories with related meaning; signals travel along them and a neuron fires when the model recalls it. Click a neuron to read/edit/pin/forget it; switch to **tree** for a radial tree by topic. Scroll to zoom, drag to move. |
-| **5:cline** | Route Cline through the command center so it gets memory too, plus a log of every Cline task (steps, memories used, tokens, cache hit rate). |
-| **7:team** | An **agent team**: give one goal, a planner splits it into one task per coding agent with the files each one owns, every agent works in its own git worktree at the same time, and you review each branch (diff, tests) and merge it. Optionally **Claude conducts**: it plans, checks every part and sends it back with fixes until it's right. See *Agent team*. |
-| **6:set** | Memory on/off and auto-learning, the memory folder (move it to another drive), import from ChatGPT/Claude, export, the searchable memory list, the theme, and **cloud & web search** (API keys for Claude / ChatGPT / Gemini). |
+| **Chat** | Turn the model on/off, pick *standard* or *uncensored*, choose **run on** this device or a paired one (each shown by its name), and chat. Paste or drop images (vision). Live GPU/RAM/CPU usage, speed of the last reply (pp = reading, tg = writing) and tokens used. The **brain** shows the state: grey = off, nodes lighting up = loading, pulses = thinking. In the *corpus* theme its glowing nodes are your memories; it drifts and breathes even when the model is off, leans toward the pointer, and a click fires the nearest neurons. |
+| **Code** | Open projects in VS Code with the Cline coding agent wired to your local model. Optional second "laptop" VS Code (see *Two machines*). |
+| **Cline** | Route Cline through the command center so it gets memory too, plus a log of every Cline task (steps, memories used, tokens, cache hit rate). |
+| **Team** | An **agent team**: give one goal, a planner splits it into one task per coding agent with the files each one owns, every agent works in its own git worktree at the same time, and you review each branch (diff, tests) and merge it. Optionally **Claude conducts**: it plans, checks every part and sends it back with fixes until it's right. See *Agent team*. |
+| **Memory** | Your memories as a **brain**: every memory is a neuron in its topic's region (about you = frontal lobe, preferences = prefrontal, how-tos = motor strip, projects = parietal, people + events = temporal, facts = occipital, other = cerebellum). Bigger = recalled more often, ring = pinned. Synapses join memories with related meaning; signals travel along them and a neuron fires when the model recalls it. Click a neuron to read/edit/pin/forget it; switch to **tree** for a radial tree by topic. Scroll to zoom, drag to move. |
+| **Phone** | Phone access over Tailscale: one button to turn it on, the address to open on your phone, your devices. |
+| **Settings** | Memory on/off and auto-learning, the memory folder (move it to another drive), import from ChatGPT/Claude, export, the searchable memory list, the theme, and **cloud & web search** (API keys for Claude / ChatGPT / Gemini). |
 
-Keyboard: **Alt+1 … Alt+7** switch tabs. In chat: **Enter** sends, **Shift+Enter** new line, `/help` lists commands
+Keyboard: **Alt+1 … Alt+7** switch tabs, in the order they appear (Settings, at the right, is Alt+7). In chat: **Enter** sends, **Shift+Enter** new line, `/help` lists commands
 (`/new`, `/chats`, `/remember …`, `/on`, `/off`, `/theme`, …). **history** (top right of the chat) reopens old chats.
 
 ---
@@ -56,14 +56,14 @@ Every model you run (standard, uncensored, the laptop, any model you add later) 
   "is building X", "sister lives in Denver") as short sentences in 8 topics. You'll see `◉ remembered: …` in the chat.
 - **It recalls by itself.** Each message pulls in the relevant memories and snippets of older chats. The reply's
   stats line shows `◉ 3 memories`; click it to see which. Unrelated questions recall nothing.
-- **You stay in control.** `/remember <fact>` in chat, or edit / pin (★ = always included) / forget in **4:mem** or
-  **6:set**. Turn learning or memory off in **6:set**.
+- **You stay in control.** `/remember <fact>` in chat, or edit / pin (★ = always included) / forget in **Memory** or
+  **Settings**. Turn learning or memory off in **Settings**.
 - **It's cheap.** At most ~1.5k tokens per message (usually ~150), placed so the model's prompt cache keeps working:
   a new chat turn only processes the new text.
 - **It's portable.** Everything lives in one folder (`memory\` by default): `memory.db` + `chats\`. To use another
-  drive: **6:set → location**, type e.g. `E:\ai-memory`, **move here**. It copies, verifies, switches, and keeps the
+  drive: **Settings → location**, type e.g. `E:\ai-memory`, **move here**. It copies, verifies, switches, and keeps the
   old folder as a backup. If the drive is unplugged, memory pauses (chat still works) instead of starting over.
-- **Bring your history.** **6:set → import**: pick the `.zip` from ChatGPT (*Settings → Data controls → Export data*)
+- **Bring your history.** **Settings → import**: pick the `.zip` from ChatGPT (*Settings → Data controls → Export data*)
   or Claude (*Settings → Privacy → Export data*). Old conversations become searchable chats right away, and memories
   are learned from them in the background. Saved memories can be pasted one per line.
 
@@ -84,7 +84,7 @@ How it works: `command-center\memory.py`. SQLite with full-text search plus embe
 | `THREADS`, `CACHE_RAM`, `NGL` | CPU threads, RAM for llama.cpp's prompt cache (MB), GPU layers (0 = CPU only). |
 
 If a model fails to start with an out-of-memory error, raise `MOE_*` by 2. If VRAM has room to spare (watch **usage**
-in 1:llm while chatting), lower it by 1-2.
+in Chat while chatting), lower it by 1-2.
 
 **Measured on the reference PC** (RTX 5080 16 GB, Ryzen 9 9950X3D, 64 GB DDR5-6000, 12k-token prompt; llama.cpp b12290, which was ~2% faster than b11798 on the same settings):
 
@@ -136,7 +136,7 @@ the desktop):
   already busy), and each agent alone is slower than it would be with the model to itself.
 - **It costs 0.8-1.2 GB of VRAM.** Qwen3.8 27B with two 32K slots peaked at 15.7 GB of 16.3, which is too close
   with other GPU apps open. Two 16K slots are not an option: a Cline-sized prompt (19k tokens) didn't fit.
-- Turn it on when two agents in **7:team** use this PC's model at once. With one agent on this PC and one on the
+- Turn it on when two agents in **Team** use this PC's model at once. With one agent on this PC and one on the
   laptop (the default team), leave it off.
 
 ### Optimise any model automatically
@@ -180,7 +180,7 @@ A connector that lets the local model use the web by itself, with no account and
 - **web_search**: asks a search engine and gets back titles, links and short excerpts.
 - **web_fetch**: opens one page and reads its text (a search result, or a link you paste into the chat).
 
-Turn it on in **6:set → web access**. In the chat you see each search (`🔎`) and each page it reads (`📄`), up to 6
+Turn it on in **Settings → web access**. In the chat you see each search (`🔎`) and each page it reads (`📄`), up to 6
 per reply.
 
 - **How dependable search is.** Without a key, searches go through the public pages of DuckDuckGo and Brave, taking
@@ -209,7 +209,7 @@ Give your local model two tools it can use when it decides they help:
 Any one API key is enough: **Claude** (console.anthropic.com), **ChatGPT** (platform.openai.com) or **Gemini**
 (aistudio.google.com). Each provider's own built-in web search is used, so there's no separate search account.
 
-1. **6:set → cloud & web search**: pick the provider, paste the key, **save key** (it tests the key and lists the
+1. **Settings → cloud & web search**: pick the provider, paste the key, **save key** (it tests the key and lists the
    models it can use), optionally set the model, then **turn on**.
 2. Chat as usual. When the model searches you'll see `🔎 searching the web: "…"` in its reply, then the sources
    (click to expand). `/search <query>` asks it to search explicitly.
@@ -218,14 +218,14 @@ Privacy: only the query or question the local model writes is sent; never your c
 `command-center\secrets.json` on your PC (never committed, never shown in full in the app). Usage is billed by the
 provider. Claude uses the official `anthropic` Python package (setup installs it) with `claude-opus-5-5` by default
 and server-side refusal fallbacks enabled; ChatGPT uses the Responses API web search tool; Gemini uses Google Search
-grounding. Defaults can be changed per provider in 6:set. Not used by Cline (it has its own tools).
+grounding. Defaults can be changed per provider in Settings. Not used by Cline (it has its own tools).
 
 ---
 
 ## Phone access (optional)
 
 1. Install [Tailscale](https://tailscale.com/download) on the PC and your phone, signed in to the same account.
-2. In **3:web**, press **turn on**. Open the address it shows on your phone (Safari: Share → *Add to Home Screen*).
+2. In **Phone**, press **turn on**. Open the address it shows on your phone (Safari: Share → *Add to Home Screen*).
 
 The phone gets the same app in a phone layout: chat, saved chats, memory, model on/off. It can't open VS Code, see the
 API key, move the memory or switch phone access off. It works while the command center is open on the PC. Only
@@ -237,20 +237,20 @@ that someone else shared into your tailnet is refused. To let another account in
 
 Install [VS Code](https://code.visualstudio.com/) and the **Cline** extension. In Cline's settings choose
 *OpenAI Compatible*, base URL `http://127.0.0.1:8099/cline/pc/v1` (through the command center, with memory; or
-`http://127.0.0.1:8090/v1` directly), any model id, and the key from `api-key.txt`. Or let **5:cline** set it for you
+`http://127.0.0.1:8090/v1` directly), any model id, and the key from `api-key.txt`. Or let **Cline** set it for you
 (close VS Code first). Routed Cline needs the command center to be open.
 
 ## Two machines (optional)
 
 If a second PC runs NVIDIA's Personal AI Router (PAIR), the command center can use its model: **run on → laptop** in
-1:llm. `start-vscode-laptop.bat` opens a separate VS Code whose Cline uses the laptop, and **2:code → open · both**
-puts the two agents on separate git worktrees of the same repo so they can work side by side. **7:team** turns that
+Chat. `start-vscode-laptop.bat` opens a separate VS Code whose Cline uses the laptop, and **Code → open · both**
+puts the two agents on separate git worktrees of the same repo so they can work side by side. **Team** turns that
 into a coordinated team (next section).
 
 ## Agent team (optional)
 
 Several coding agents build one feature at the same time, each in its own copy of the project, and you merge what
-they made. Open **7:team** (Alt+7):
+they made. Open **Team** (Alt+7):
 
 1. **Pick the project** (any folder inside a git repo with at least one commit) and **write the goal** in a few
    sentences.
@@ -264,12 +264,12 @@ they made. Open **7:team** (Alt+7):
    what the other agents are doing, and handoff notes. The brief files never reach git (`.git\info\exclude`).
    - **Cline in VS Code** agents (*pc* = your main VS Code, *laptop* = the laptop VS Code) open on their worktree.
      Cline can't be handed a task from outside, so the one-line starter prompt is put on the clipboard: paste it
-     into each Cline. For the live log, route the main Cline through the command center (5:cline).
-   - **Claude Code** agents (add them under *agents* in 7:team, if Claude Code is installed) run headless: no
+     into each Cline. For the live log, route the main Cline through the command center (Cline).
+   - **Claude Code** agents (add them under *agents* in Team, if Claude Code is installed) run headless: no
      window, the command center starts `claude` in the worktree and reads its progress. On *this PC's* or *the
      laptop's* model they talk to llama-server's Anthropic-compatible endpoint through the command center
      (`/agent/<name>/v1/messages`, with a token made for that one run). On *Claude (cloud)* they use your Claude key
-     from 6:set, or your own Claude Code login, and **every start asks first**, since it's billed.
+     from Settings, or your own Claude Code login, and **every start asks first**, since it's billed.
      On a local model Claude Code needs **at least 64K of context** (its own instructions and tools are ~30k tokens);
      the team won't start one on a smaller context. Raise it in the model picker.
      They may edit files and run python / pytest / npm test / git status, diff, add, commit; never push, merge,
@@ -319,7 +319,7 @@ secrets (`*key*`, `*secret*`, `*token*`, `.env`, `*.pem`, …) are never sent. T
 one of sonnet / opus / haiku, and the prompts are in `conductor.py`.
 
 The board (tasks, owners, status, steps, notes, test results) is `.git\cc-team\board.json` inside the project:
-shared by all its worktrees, never committed. The phone can watch 7:team but not plan, start, stop, merge or clean
+shared by all its worktrees, never committed. The phone can watch Team but not plan, start, stop, merge or clean
 up. One team runs at a time; each agent has one task at a time.
 
 **Two agents on one GPU.** Two agents can use this PC's model at once. With one server slot (the default, `-np 1`)
@@ -330,7 +330,7 @@ their requests take turns; see *Speed and settings* for what two slots (`--paral
 The command center checks this GitHub repo in the background (shortly after it starts, then every 6 hours). When
 there's a newer version, an **↑ update** button appears in the top bar: it lists what changed, and **update now**
 installs it and restarts the server (a few seconds; the window reloads itself, your chat comes back, a loaded model
-keeps running). **Later** hides it for now, and **skip this version** until something newer is out. **6:set → updates**
+keeps running). **Later** hides it for now, and **skip this version** until something newer is out. **Settings → updates**
 has *check now* and an auto-check switch. Nothing installs without you clicking.
 
 - **git clone**: a fast-forward `git pull`. If you've changed files or have commits that aren't on GitHub, it refuses
@@ -340,7 +340,7 @@ has *check now* and an auto-check switch. Nothing installs without you clicking.
 
 ### llama.cpp engine updates
 
-**6:set → llama.cpp engine** keeps `llama.cpp\` on a recent official build from
+**Settings → llama.cpp engine** keeps `llama.cpp\` on a recent official build from
 [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp/releases), the same kind you have (CUDA 13 / CUDA 12 /
 Vulkan / CPU). It checks every 12 hours.
 
@@ -370,7 +370,7 @@ on. llama.cpp can't run MTP and image input together, so models that have both g
 *fast text (MTP)* or *images* (about 30% slower). If you send an image to a text-only model, it gets your text plus a
 note that an image was left out, instead of an error.
 
-Click the model name next to the **on** button in **1:llm** (or type `/models`). The picker lists every model in
+Click the model name next to the **on** button in **Chat** (or type `/models`). The picker lists every model in
 `models\` and tells you, for **your** PC, how each one will run:
 
 - **fits on GPU**: the whole model and its context fit in VRAM. Fastest.
@@ -391,7 +391,7 @@ it image input; split files (`-00001-of-00003.gguf`) count as one model.
 **Tuned for your hardware, automatically:** the bundled Qwen3.6-35B files use the measured settings that setup wrote to
 `llm-config.bat` for your GPU. Every other model uses llama.cpp's `--fit`: at load time it measures the model and your
 free VRAM and puts as much on the GPU as fits, MoE experts spilling to RAM first. Threads, batch size and the KV cache
-format are set for you. If a model fails to start, the reason shows in **1:llm** and the full log is in
+format are set for you. If a model fails to start, the reason shows in **Chat** and the full log is in
 `command-center\llama.log`.
 
 Memory keeps working with any model. `start-llm.bat` still works from a terminal for the bundled models.
@@ -447,20 +447,20 @@ docs\team-demo.md          a script for recording two agents building one featur
 - The web connector (off by default) only opens public web addresses, and only links that were in the conversation or
   in its own search results; it is capped at 6 calls per reply.
 - Your memories, chats and settings stay in files on your PC (the memory folder). Nothing is uploaded anywhere.
-- *Claude conducts* (7:team, off unless you pick it) sends the goal, the project's file list and its agents' diffs
+- *Claude conducts* (Team, off unless you pick it) sends the goal, the project's file list and its agents' diffs
   and test output to Claude through your Claude Code login, with every tool off; files that look like secrets are
   never sent.
 
 ## Uninstall
 
-**6:set → uninstall** lists everything with its size as **checkboxes** (quick picks: *app*, *everything*, *models +
+**Settings → uninstall** lists everything with its size as **checkboxes** (quick picks: *app*, *everything*, *models +
 llama.cpp*, *none*). **uninstall N ticked…** opens a window that shows your picks again and deletes nothing until you
 type `uninstall`. Or double-click `uninstall.bat` in the folder and choose:
 
 1. **everything the command center made**: the program, its settings, API key and logs, the browser and laptop VS Code
    profiles, every llama.cpp build, the models, your memories and saved chats (zipped to the desktop first), the
    desktop / start-menu / taskbar shortcuts. It also points your main Cline back at the provider it had before
-   (5:cline routing) and turns off phone access (`tailscale serve`).
+   (Cline routing) and turns off phone access (`tailscale serve`).
 2. **all of that plus the prerequisites**: the pip packages setup added (numpy, anthropic), Python, Tailscale, VS Code +
    the Cline extension + `~\.cline`, and Git (through winget). Other programs may use these, so they're off in option 1.
 3. **just free disk space**: models + llama.cpp builds only.
@@ -475,9 +475,9 @@ From a terminal: `uninstall.bat -All`, `-Everything`, `-ModelsOnly`, `-Only mode
 
 ## Troubleshooting
 
-- **"model is off" / ECONNREFUSED 127.0.0.1:8090**: start the model (1:llm → on, or `start-standard.bat`).
-- **Cline: connection refused on 8099**: the command center isn't open (or switch Cline to direct in 5:cline).
+- **"model is off" / ECONNREFUSED 127.0.0.1:8090**: start the model (Chat → on, or `start-standard.bat`).
+- **Cline: connection refused on 8099**: the command center isn't open (or switch Cline to direct in Cline).
 - **Model window closes right away**: usually out of VRAM: raise `MOE_STD`/`MOE_UNC` in `llm-config.bat`.
 - **Memory says "folder not found"**: the drive with the memory folder isn't connected; plug it in or pick another
-  folder in 6:set.
+  folder in Settings.
 - **Something else**: run `start-llm.bat` from a terminal to see llama.cpp's messages.

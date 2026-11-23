@@ -54,14 +54,16 @@ button:disabled{opacity:.45;cursor:default}
 
 #bar{height:28px;display:flex;align-items:stretch;background:var(--bg2);border-bottom:1px solid var(--border);white-space:nowrap}
 #bar>*{display:flex;align-items:center;padding:0 10px}
-#tags{padding:0}
-#tags span{padding:0 9px;height:100%;display:flex;align-items:center;color:var(--dim)}
-#tags span.on{background:var(--accent);color:var(--bg);font-weight:bold}
-#tags span{cursor:pointer;user-select:none}
-#tags span:not(.on):hover{color:var(--fg);background:var(--bg3)}
+#bar>.tags{padding:0}
+.tags .gsep{width:1px;margin:6px 5px;background:var(--border)}
+.tags b.tw{font-weight:inherit}
+.tags>span{padding:0 9px;height:100%;display:flex;align-items:center;color:var(--dim)}
+.tags>span.on{background:var(--accent);color:var(--bg);font-weight:bold}
+.tags>span{cursor:pointer;user-select:none}
+.tags>span:not(.on):hover{color:var(--fg);background:var(--bg3)}
 [hidden]{display:none!important}
 
-/* 2:code and 3:web workspaces */
+/* Code and Phone workspaces */
 main.ws{grid-template-columns:1fr 1fr;gap:14px}
 .ws .col{display:flex;flex-direction:column;gap:16px;min-height:0;padding-top:10px;overflow:hidden}
 .ws .pane{padding:14px 14px 12px}
@@ -206,9 +208,9 @@ main{display:grid;grid-template-columns:432px 1fr;gap:14px;padding:6px 12px 12px
 [data-theme="corpus"] body{font-family:var(--sans);font-size:13.5px;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
 [data-theme="corpus"] ::selection{background:#fff;color:#000}
 [data-theme="corpus"] #bar{background:#000;border-bottom-color:var(--border)}
-[data-theme="corpus"] #tags span{font-weight:600;color:rgba(255,255,255,.55);letter-spacing:-.01em}
-[data-theme="corpus"] #tags span:not(.on):hover{color:#fff;background:none}
-[data-theme="corpus"] #tags span.on{background:#fff;color:#000}
+[data-theme="corpus"] .tags>span{font-weight:600;color:rgba(255,255,255,.55);letter-spacing:-.01em}
+[data-theme="corpus"] .tags>span:not(.on):hover{color:#fff;background:none}
+[data-theme="corpus"] .tags>span.on{background:#fff;color:#000}
 [data-theme="corpus"] #state,[data-theme="corpus"] #tps,[data-theme="corpus"] #clock,[data-theme="corpus"] #host{font-family:var(--font);font-size:12px}
 [data-theme="corpus"] #state{letter-spacing:.1em}
 [data-theme="corpus"] #clock{color:#fff;font-weight:500}
@@ -440,9 +442,9 @@ details.think .tbody{white-space:pre-wrap;max-height:260px;overflow-y:auto;font-
 @media (prefers-reduced-motion:reduce){.cursor::after{animation:none}#brain{transition:none}#brainWrap::after{animation:none}}
 
 /* ---------------- phone: same panes, stacked ----------------
-   1:llm = brain strip + chat, 2:sys = fetch (model on/off, run on) + usage, 3:web = phone access + tailnet.
-   2:code (VS Code) is PC-only, so on a phone its tab is replaced by 2:sys. */
-#tags .ph{display:none}
+   Chat = brain strip + chat, Model = fetch (model on/off, run on) + usage, Phone = phone access + tailnet.
+   Code (VS Code) is PC-only, so on a phone its tab is replaced by Model. */
+.tags .ph{display:none}
 /* tool use in chat (web search / ask cloud) */
 .tools{margin:2px 0 6px;display:flex;flex-direction:column;gap:3px}
 .tool{font-size:12px;color:var(--dim);border-left:2px solid var(--accent2);padding-left:9px}
@@ -462,7 +464,7 @@ details.think .tbody{white-space:pre-wrap;max-height:260px;overflow-y:auto;font-
 [data-theme="corpus"] .ckey input{border-radius:6px}
 [data-theme="corpus"] .tool{font-family:var(--font);font-size:11.5px;border-color:#fff;color:var(--dim)}
 [data-theme="corpus"] .tool.run{color:#fff}
-/* 4:mem tree */
+/* Memory tree */
 #ws4{grid-template-columns:1fr 360px}
 #treePane{flex:1 1 auto;display:flex;flex-direction:column;min-height:0}
 .treebar{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
@@ -547,7 +549,7 @@ details.think .tbody{white-space:pre-wrap;max-height:260px;overflow-y:auto;font-
 [data-theme="corpus"] .trrow i,[data-theme="corpus"] .tdtopic{font-family:var(--font)}
 @media (prefers-reduced-motion:reduce){#treeSvg .leaf .halo{animation:none}#treeSvg .nn-sig{display:none}}
 @media (max-width:760px){#ws4{display:flex}#treePane{flex:0 0 auto;height:66vh}#treeRecentPane{flex:0 0 auto;max-height:50vh}}
-/* 4:mem */
+/* Memory */
 #memListPane{flex:1 1 auto;display:flex;flex-direction:column;min-height:0}
 .memtools,.memadd{display:flex;gap:8px;margin-bottom:8px;align-items:center}
 .memtools input,.memadd input,.memloc input,#memList textarea{flex:1;min-width:0;background:var(--bg2);color:var(--fg);border:1px solid var(--border);font:inherit;padding:5px 8px;outline:none}
@@ -584,8 +586,8 @@ details.think .tbody{white-space:pre-wrap;max-height:260px;overflow-y:auto;font-
 .clrow .st{font-size:11px}
 .clrow .st.ok{color:var(--ok)}.clrow .st.bad{color:var(--crit)}.clrow .st.run{color:var(--accent2)}
 [data-theme="corpus"] .clrow .when,[data-theme="corpus"] .clrow .meta,[data-theme="corpus"] .clrow .st{font-family:var(--font)}
-@media (max-width:760px){#tags span[data-ws="5"]{display:none}}
-/* 7:team */
+@media (max-width:760px){.tags>span[data-ws="5"]{display:none}}
+/* Team */
 #ws7 .col{overflow-y:auto}
 #teamGoalPane{flex:0 0 auto}
 #teamGoal,.tsk textarea,.tsk input,.tsk select,#teamAgents input,#teamAgents select,.memloc select{background:var(--bg2);color:var(--fg);border:1px solid var(--border);font:inherit;padding:5px 8px;outline:none}
@@ -648,7 +650,7 @@ body.remote .teamact,body.remote .tact{display:none!important}
 [data-theme="corpus"] #teamGoal,[data-theme="corpus"] .tsk textarea,[data-theme="corpus"] .tsk input,[data-theme="corpus"] .tsk select,
 [data-theme="corpus"] #teamAgents input,[data-theme="corpus"] #teamAgents select{border-radius:6px}
 [data-theme="corpus"] .agp .stp,[data-theme="corpus"] .agp .flist,[data-theme="corpus"] .tsk.ro .owns{font-family:var(--font)}
-body.remote #tags span[data-ws="5"]{display:none}
+body.remote .tags>span[data-ws="5"]{display:none}
 .memloc input[type=checkbox]{flex:none;margin:0}
 .memloc label{white-space:nowrap}
 body.remote #impFileBox{display:none}
@@ -671,10 +673,12 @@ body.remote #impFileBox{display:none}
   #bar{height:40px;overflow-x:auto;scrollbar-width:none}
   #bar::-webkit-scrollbar{display:none}
   #bar>*{padding:0 8px}
-  #tags span{padding:0 11px;font-size:14px}
-  #tags .ph{display:flex}
-  #tags span[data-ws="2"]{display:none}
+  .tags>span{padding:0 11px;font-size:14px}
+  .tags .ph{display:flex}
+  .tags>span[data-ws="2"]{display:none}
   #tps,#host,#clock,#bar .sep{display:none!important}
+  .tags b.tw{display:none}
+  #tags,#tagsSet{order:-1}   /* the gear sits right after the other tabs, not off-screen past the clock */
   #state{cursor:pointer}
   main{display:flex;flex-direction:column;gap:12px;height:calc(100% - 40px);padding:4px 8px 0}
   #side{flex:0 0 auto;gap:12px;overflow:visible}
@@ -699,7 +703,7 @@ body.remote #impFileBox{display:none}
   .devs td.ip{display:none}
   .routes{font-size:11px}
 }
-body.remote #tags span[data-ws="2"]{display:none}
+body.remote .tags>span[data-ws="2"]{display:none}
 /* corpus, everywhere: one label style, controls in white ink, calm motion (kept last so it wins over the parts above) */
 [data-theme="corpus"]{color-scheme:dark}
 [data-theme="corpus"] .row .k,[data-theme="corpus"] .tok .th>span:first-child,[data-theme="corpus"] .hint.lab,
@@ -729,7 +733,7 @@ body.remote #tags span[data-ws="2"]{display:none}
   border:1px solid rgba(255,255,255,.22);border-radius:6px;padding:2px 10px;margin-right:10px;cursor:pointer;transition:border-color .15s}
 [data-theme="corpus"] input[type=file]::file-selector-button:hover{border-color:#fff}
 [data-theme="corpus"] button,[data-theme="corpus"] input,[data-theme="corpus"] select,[data-theme="corpus"] textarea,
-[data-theme="corpus"] .chip,[data-theme="corpus"] #tags span,[data-theme="corpus"] .pane{transition:border-color .15s,background-color .15s,color .15s}
+[data-theme="corpus"] .chip,[data-theme="corpus"] .tags>span,[data-theme="corpus"] .pane{transition:border-color .15s,background-color .15s,color .15s}
 [data-theme="corpus"] .pane:hover{border-color:#383838}
 [data-theme="corpus"] button:not(:disabled):active{transform:translateY(1px)}
 @media (prefers-reduced-motion:reduce){[data-theme="corpus"] *{transition:none!important}}
@@ -737,15 +741,16 @@ body.remote #tags span[data-ws="2"]{display:none}
 </head>
 <body>
 <div id="bar">
-  <div id="tags" role="tablist">
-    <span class="on" data-ws="1" role="tab" tabindex="0" title="models and chat (Alt+1)">1:llm</span>
-    <span data-ws="2" role="tab" tabindex="0" title="VS Code and Cline (Alt+2)">2:code</span>
-    <span class="ph" data-ws="s" role="tab" tabindex="0" title="model on/off and usage">2:sys</span>
-    <span data-ws="3" role="tab" tabindex="0" title="phone access over Tailscale (Alt+3)">3:web</span>
-    <span data-ws="4" role="tab" tabindex="0" title="the memory tree: everything the models remember (Alt+4)">4:mem</span>
-    <span data-ws="5" role="tab" tabindex="0" title="Cline through the command center: memory + request log (Alt+5)">5:cline</span>
-    <span data-ws="6" role="tab" tabindex="0" title="settings: memory, location, import, appearance (Alt+6)">6:set</span>
-    <span data-ws="7" role="tab" tabindex="0" title="agent team: several coding agents on one feature at once (Alt+7)">7:team</span>
+  <div id="tags" class="tags" role="tablist">
+    <span class="on" data-ws="1" role="tab" tabindex="0" title="models and chat (Alt+1)">Chat</span>
+    <span class="ph" data-ws="s" role="tab" tabindex="0" title="turn the model on/off, usage">Model</span>
+    <i class="gsep" aria-hidden="true"></i>
+    <span data-ws="2" role="tab" tabindex="0" title="VS Code with Cline on your model (Alt+2)">Code</span>
+    <span data-ws="5" role="tab" tabindex="0" title="Cline through the command center: memory + request log (Alt+3)">Cline</span>
+    <span data-ws="7" role="tab" tabindex="0" title="agent team: several coding agents on one feature at once (Alt+4)">Team</span>
+    <i class="gsep" aria-hidden="true"></i>
+    <span data-ws="4" role="tab" tabindex="0" title="the memory tree: everything the models remember (Alt+5)">Memory</span>
+    <span data-ws="3" role="tab" tabindex="0" title="phone access over Tailscale (Alt+6)">Phone</span>
   </div>
   <div id="state" class="st-OFF">OFF</div>
   <div class="sep">│</div>
@@ -762,6 +767,9 @@ body.remote #tags span[data-ws="2"]{display:none}
   <button id="themeBtn" title="cycle theme">◐ tokyo</button>
   <div class="sep">│</div>
   <div id="clock">--:--:--</div>
+  <div id="tagsSet" class="tags" role="tablist">
+    <span data-ws="6" role="tab" tabindex="0" title="settings: memory, location, import, web search, updates, appearance (Alt+7)">⚙<b class="tw">&nbsp;Settings</b></span>
+  </div>
 </div>
 <main id="ws1">
   <aside id="side">
@@ -834,7 +842,7 @@ body.remote #tags span[data-ws="2"]{display:none}
   </section>
 </main>
 
-<!-- 2:code ─ VS Code + Cline -->
+<!-- Code ─ VS Code + Cline -->
 <main id="ws2" class="ws" hidden>
   <div class="col">
     <section class="pane setup" id="setup-pc"><div class="title">vscode <i>· <span class="devn" data-dev="pc">this device</span>'s model</i></div><div class="sbody">loading…</div></section>
@@ -856,7 +864,7 @@ body.remote #tags span[data-ws="2"]{display:none}
   </div>
 </main>
 
-<!-- 3:web ─ phone access over Tailscale -->
+<!-- Phone ─ phone access over Tailscale -->
 <main id="ws3" class="ws" hidden>
   <div class="col">
     <section class="pane" id="phonePane"><div class="title">phone access <i>· tailscale serve</i></div><div id="phone">loading…</div></section>
@@ -865,7 +873,7 @@ body.remote #tags span[data-ws="2"]{display:none}
         <li>Make sure the <b>command center is open</b> on the PC (the phone can't reach it otherwise).</li>
         <li>Open the <b>Tailscale</b> app and make sure the VPN is <b>on</b>.</li>
         <li>In Safari, go to the <b>address</b> above. You get this command center, laid out for the phone.</li>
-        <li><b>1:llm</b> is the chat (saved chats under <b>history</b>), <b>2:sys</b> turns the model on/off.</li>
+        <li><b>Chat</b> is the chat (saved chats under <b>history</b>), <b>Model</b> turns the model on/off.</li>
         <li>Tip: Share → <b>Add to Home Screen</b> makes it open like an app.</li>
       </ol>
       <div class="hint">Only devices signed in to your Tailscale account can reach it. It is not on the public internet.</div>
@@ -876,7 +884,7 @@ body.remote #tags span[data-ws="2"]{display:none}
   </div>
 </main>
 
-<!-- 5:cline ─ Cline (VS Code) through the command center -->
+<!-- Cline ─ Cline (VS Code) through the command center -->
 <main id="ws5" class="ws" hidden>
   <div class="col">
     <section class="pane"><div class="title">cline <i>· <span class="devn" data-dev="pc">this device</span>'s vscode</i></div><div id="clPc" class="clcard">loading…</div></section>
@@ -888,13 +896,13 @@ body.remote #tags span[data-ws="2"]{display:none}
   </div>
 </main>
 
-<!-- 4:mem ─ the memory tree -->
+<!-- Memory ─ the memory tree -->
 <main id="ws4" class="ws" hidden>
   <div class="col">
     <section class="pane" id="treePane"><div class="title">memory <i id="treeInfo"></i></div>
       <div class="treebar"><span class="tview"><button data-view="brain" title="memories as neurons in a brain, linked by meaning">brain</button><button data-view="tree" title="memories as a radial tree by topic">tree</button></span><input id="treeQ" placeholder="search memories"><div class="tchips" id="treeChips"></div><button id="treeReset" title="back to the whole tree (double-click the tree does the same)">reset view</button></div>
       <div id="treeWrap"><canvas id="neuroCv" aria-label="memories as neurons in a brain"></canvas><svg id="treeSvg" aria-label="memory tree"></svg><div id="neuroTip" hidden></div>
-        <div id="treeEmpty" hidden>No memories yet. Chat normally and neurons grow here, or add some in <b>6:set</b>.</div></div>
+        <div id="treeEmpty" hidden>No memories yet. Chat normally and neurons grow here, or add some in <b>Settings</b>.</div></div>
     </section>
   </div>
   <div class="col">
@@ -903,7 +911,7 @@ body.remote #tags span[data-ws="2"]{display:none}
   </div>
 </main>
 
-<!-- 6:set ─ settings: memory, location, import, appearance -->
+<!-- Settings ─ settings: memory, location, import, appearance -->
 <main id="ws6" class="ws" hidden>
   <div class="col">
     <section class="pane"><div class="title">memory <i>· shared by every model</i></div><div id="memStatus">loading…</div></section>
@@ -927,7 +935,7 @@ body.remote #tags span[data-ws="2"]{display:none}
     <section class="pane"><div class="title">llama.cpp engine <i>· official builds</i></div><div id="lluBox">loading…</div></section>
     <section class="pane"><div class="title">uninstall</div>
       <div class="hint">Tick what to remove. A window then lists your picks again and deletes nothing until you type <code>uninstall</code> there. Also: <code>uninstall.bat</code> in the folder.</div>
-      <div id="uninBox" class="hint">open 6:set to scan…</div>
+      <div id="uninBox" class="hint">open Settings to scan…</div>
     </section>
     <section class="pane"><div class="title">web access <i>· optional, free</i></div><div id="webBox">loading…</div></section>
     <section class="pane"><div class="title">cloud &amp; web search <i>· optional</i></div><div id="cloudBox">loading…</div></section>
@@ -938,7 +946,7 @@ body.remote #tags span[data-ws="2"]{display:none}
     </section>
   </div>
 </main>
-<!-- 7:team ─ several coding agents on one feature, each in its own worktree -->
+<!-- Team ─ several coding agents on one feature, each in its own worktree -->
 <main id="ws7" class="ws" hidden>
   <div class="col">
     <section class="pane" id="teamGoalPane"><div class="title">team <i id="teamInfo"></i></div>
@@ -968,7 +976,7 @@ body.remote #tags span[data-ws="2"]{display:none}
   <div class="mdhead"><div class="title" id="mdTitle">models</div><span id="mdHw"></span><button id="mdClose" title="close (Esc)">✕</button></div>
   <div id="mdWarn" hidden></div>
   <label class="ms mdauto" title="Every model loads straight away. While you use it, its real reading and writing speed and VRAM are recorded, and each later load tries one other setting, keeping whichever is fastest with VRAM to spare. Loads never wait for test runs. 'optimise' on a model measures everything at once instead (a few minutes)."><input type="checkbox" id="mdAuto"> learn the fastest settings for each model while you use it</label>
-  <label class="ms mdauto" title="Two server slots, each with the full context. Measured on a 16 GB card: two agents writing at the same time go 40-60% faster together, each one alone is slower, reading long prompts is no faster, and it costs 0.8-1.2 GB more VRAM. Worth it only when two agents (7:team) use this PC's model at once. Takes effect the next time the model starts."><input type="checkbox" id="mdSlots"> two agents at once on this PC's model (2 slots, +~1 GB VRAM, from the next start)</label>
+  <label class="ms mdauto" title="Two server slots, each with the full context. Measured on a 16 GB card: two agents writing at the same time go 40-60% faster together, each one alone is slower, reading long prompts is no faster, and it costs 0.8-1.2 GB more VRAM. Worth it only when two agents (Team) use this PC's model at once. Takes effect the next time the model starts."><input type="checkbox" id="mdSlots"> two agents at once on this PC's model (2 slots, +~1 GB VRAM, from the next start)</label>
   <div id="mdList"></div>
   <div class="sect">add a model</div>
   <div class="mdadd">
@@ -1772,8 +1780,8 @@ const HELP = `commands
   /chats                     open saved chats (also the "history" button)
   /title <name>              rename this chat
   /remember <text>           save a memory (every model will know it)
-  /search <query>            ask the model to search the web (needs a cloud key, 6:set)
-  /memory                    open the memory (4:mem)
+  /search <query>            ask the model to search the web (needs a cloud key, Settings)
+  /memory                    open the memory (Memory)
   /help
 keys: Enter send · Shift+Enter newline · paste, drop, or +img to attach images`;
 function command(t){
@@ -2067,7 +2075,7 @@ function memNotice(m){
   if (m.seq === memSeq) return;
   for (const e of (m.learned || []).filter(e => e.seq > memSeq)) {
     const verb = e.op === "update" ? "updated" : e.op === "delete" ? "forgot" : "remembered";
-    const d = el("div", "msg sys mem", esc(`◉ ${verb}: ${e.text}`)); d.title = "open 4:mem to edit or delete";
+    const d = el("div", "msg sys mem", esc(`◉ ${verb}: ${e.text}`)); d.title = "open Memory to edit or delete";
     d.style.cursor = "pointer"; d.onclick = () => showWs("4"); log.appendChild(d); scroll();
   }
   memSeq = m.seq; loadGraph();
@@ -2256,7 +2264,7 @@ function toolEvent(msg, t){
   row.innerHTML = `<details><summary>${esc(head)}</summary><ol>${src.map(s => `<li><a href="${esc(/^https?:\/\//.test(s.url) ? s.url : "#")}" target="_blank" rel="noopener noreferrer">${esc(s.title || s.url)}</a></li>`).join("")}</ol></details>`;
 }
 
-/* ---------------- 6:set → web access (the free connector: search + read pages, no key) ---------------- */
+/* ---------------- Settings → web access (the free connector: search + read pages, no key) ---------------- */
 let webSt = null;
 async function refreshWeb(){
   try { webSt = await (await fetch("/api/connector", {cache:"no-store"})).json(); } catch(e) { return; }
@@ -2290,7 +2298,7 @@ $("webBox").addEventListener("click", async e => {
   }
 });
 
-/* ---------------- 6:set → cloud & web search ---------------- */
+/* ---------------- Settings → cloud & web search ---------------- */
 let cloudSt = null, cloudSel = null, cloudModels = {};
 async function refreshCloud(){
   try { cloudSt = await (await fetch("/api/cloud", {cache:"no-store"})).json(); } catch(e) { return; }
@@ -2342,7 +2350,7 @@ $("cloudBox").addEventListener("click", async e => {
   }
 });
 
-/* ---------------- 4:mem: the memory tree ----------------
+/* ---------------- Memory: the memory tree ----------------
    Radial tree: "memory" in the middle, the 8 topics around it, every memory a leaf in its topic's colour.
    Leaf size = how often it's recalled, ring = pinned, glow = just learned or recalled for the last reply.
    Click a leaf for the full memory + what it's related to (dashed lines), click a topic to open that branch. */
@@ -2633,7 +2641,7 @@ function renderThemePick(){
 }
 document.addEventListener("click", e => { const b = e.target.closest("[data-theme-pick]"); if (b) { setTheme(b.dataset.themePick); } });
 
-/* ---------------- 4:mem brain view ----------------
+/* ---------------- Memory brain view ----------------
    A drawn side view of a brain, facing right: cerebrum with folded gyri (contours of a warped noise field, so the
    folds look organic but never change), the lateral and central sulci, cerebellum with its folia, brainstem.
    Each topic is a region (preferences = prefrontal, about you = frontal, how-tos = motor strip, projects = parietal,
@@ -3142,7 +3150,7 @@ $("updSkip").onclick = async () => {
   $("updDlg").close(); $("updBtn").hidden = $("updSep").hidden = true; refreshUpd();
 };
 
-/* ---------------- 5:cline ----------------
+/* ---------------- Cline ----------------
    Cline sends its requests to the command center (http://127.0.0.1:8099/cline/<pc|laptop>/v1), which adds the
    long-term memory once per task and forwards to the same model as before. */
 let clData = null, clBusy = false;
@@ -3165,7 +3173,7 @@ function renderCline(d){
   }
   $("clMem").innerHTML = `
     <div class="kvt">
-      <span class="k">recall</span><span class="v">${d.memory ? "memories go into each task" : "off"}${d.memory && !d.memory_on ? " (memory itself is off, see 6:set)" : ""}</span><button class="tog ${d.memory ? "on" : ""}" data-clset="memory">${d.memory ? "on" : "off"}</button>
+      <span class="k">recall</span><span class="v">${d.memory ? "memories go into each task" : "off"}${d.memory && !d.memory_on ? " (memory itself is off, see Settings)" : ""}</span><button class="tog ${d.memory ? "on" : ""}" data-clset="memory">${d.memory ? "on" : "off"}</button>
       <span class="k">learn</span><span class="v">${d.learn ? "learns from what you ask Cline" : "off"}</span><button class="tog ${d.learn ? "on" : ""}" data-clset="learn">${d.learn ? "on" : "off"}</button>
     </div>
     <div class="hint" style="margin-top:10px">Memory is looked up once per task and put in the task message, so every step of the task sends the same prompt and the model server's cache keeps working: about 1–2k extra tokens once per task, not per step. The command center has to be open for routed Cline to work; "go direct" undoes it.</div>`;
@@ -3181,7 +3189,7 @@ function renderCline(d){
   }).join("") : `<div class="hint" style="padding:12px 4px">No Cline tasks through the command center yet. Route a VS Code above, then give Cline a task.</div>`;
 }
 
-/* ---------------- 7:team ----------------
+/* ---------------- Team ----------------
    One goal, split by a planner into one task per agent, each agent in its own git worktree
    (<repo>-agents\<agent>, branch agent/<agent>/<task>). The board lives in the repo's .git folder. The phone sees
    all of it but none of the buttons (the server refuses those from the phone anyway). */
@@ -3531,7 +3539,7 @@ function fitScale(){
 addEventListener("resize", fitScale);
 fitScale();
 
-/* ---------------- workspaces: 1:llm 2:code 3:web ---------------- */
+/* ---------------- workspaces: Chat Code Phone ---------------- */
 let ws = "1", wsTimer = 0;
 let remote = false;
 function showWs(n){
@@ -3540,7 +3548,7 @@ function showWs(n){
   if (!phone.matches && n === "s") n = "1";
   ws = n; store.set("rt.ws", n);
   document.body.classList.toggle("sysview", n === "s");
-  document.querySelectorAll("#tags span").forEach(t => { const on = t.dataset.ws === n; t.classList.toggle("on", on); t.setAttribute("aria-selected", on); });
+  document.querySelectorAll(".tags>span").forEach(t => { const on = t.dataset.ws === n; t.classList.toggle("on", on); t.setAttribute("aria-selected", on); });
   for (const k of ["1","2","3","4","5","6","7"]) $("ws" + k).hidden = k !== (n === "s" ? "1" : n);
   if (n === "4") requestAnimationFrame(renderTree);
   if (n === "4" && !brain.pts) buildBrain();
@@ -3564,11 +3572,12 @@ async function refreshWs(){
   } catch (e) {}
   if (ws !== "1") wsTimer = setTimeout(refreshWs, document.hidden ? 15000 : 4000);
 }
-document.querySelectorAll("#tags span").forEach(t => {
+document.querySelectorAll(".tags>span").forEach(t => {
   t.onclick = () => showWs(t.dataset.ws);
   t.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showWs(t.dataset.ws); } };
 });
-addEventListener("keydown", e => { if (e.altKey && !e.ctrlKey && ["1","2","3","4","5","6","7"].includes(e.key)) { e.preventDefault(); showWs(e.key); } });
+const ALT_WS = {"1": "1", "2": "2", "3": "5", "4": "7", "5": "4", "6": "3", "7": "6"};   // Alt+N = the Nth tab on screen
+addEventListener("keydown", e => { if (e.altKey && !e.ctrlKey && ALT_WS[e.key]) { e.preventDefault(); showWs(ALT_WS[e.key]); } });
 function setRemote(r){ if (r === remote) return; remote = r; document.body.classList.toggle("remote", r); if (r && ws === "2") showWs("1"); }
 
 async function postJSON(url, obj){
@@ -3583,7 +3592,7 @@ function copyRow(label, value, display){
 document.addEventListener("click", e => { const b = e.target.closest(".cpv"); if (b) copyText(b.dataset.v, b); const k = e.target.closest(".cpk"); if (k) copyKey(k); });
 const stateDot = st => st === "ON" ? "on" : st === "LOADING" || st === "ASLEEP" ? "warn" : "";
 
-/* 2:code */
+/* Code */
 let codeData = null;
 function renderCode(d){
   codeData = d;
@@ -3610,7 +3619,7 @@ function renderCode(d){
         ${k === "pc" ? keyRow(s.cline.api_key) : copyRow("api key", s.cline.api_key)}
         ${copyRow("model id", s.cline.model_id, String(s.cline.model_id).split(/[\\/]/).pop())}
       </div>
-      ${mstate === "OFF" ? `<div class="note">The model on ${esc(devName(k))} is off, so Cline in this window will get connection errors. Turn it on in <b>1:llm</b>.</div>` : ""}
+      ${mstate === "OFF" ? `<div class="note">The model on ${esc(devName(k))} is off, so Cline in this window will get connection errors. Turn it on in <b>Chat</b>.</div>` : ""}
       ${!usable ? `<div class="note">${!d.installed ? "VS Code's <b>code</b> command wasn't found." : "start-vscode-laptop.bat is missing."}</div>` : ""}`;
   }
   const r = $("recent");
@@ -3631,7 +3640,7 @@ function renderRoutes(){
     `<span class="n">VS Code</span>          ─ cline ─▶ <span class="d">127.0.0.1:8090</span> ─▶ <span class="${c(pcM.state)}">${esc(selfName())} · llama-server · ${esc((pcM.key || "off"))}</span>`,
     `<span class="n">VS Code (2nd)</span>     ─ cline ─▶ <span class="d">127.0.0.1:8080</span> ─▶ PAIR ─▶ <span class="${S.laptop_online ? c(lapM.state || "OFF") : "bad"}">${esc(peerName())}${S.laptop_online ? "" : " (offline)"}</span>`,
     `<span class="n">iPhone</span>           ─ tailscale ─▶ <span class="d">${esc(w && w.self ? w.self.dns.split(".")[0] + ".ts.net" : "your-pc.ts.net")}</span> ─▶ <span class="${w && !w.serve.on ? "bad" : "ok"}">command center 8099</span> <span class="d">─▶ same as this window</span>`,
-    `<span class="n">this window</span>      ─ chat ─▶ <span class="d">${S.target === "laptop" ? "PAIR 8080 → " + esc(peerName()) : "8090 → " + esc(selfName())}</span> <span class="d">(1:llm "run on")</span>`,
+    `<span class="n">this window</span>      ─ chat ─▶ <span class="d">${S.target === "laptop" ? "PAIR 8080 → " + esc(peerName()) : "8090 → " + esc(selfName())}</span> <span class="d">(Chat "run on")</span>`,
   ];
   $("routes").innerHTML = lines.join("\n") + `\n\n<span class="d">green = up · amber = asleep/loading · red = off</span>`;
 }
@@ -3658,7 +3667,7 @@ $("ws2").addEventListener("click", async e => {
 });
 $("projPath").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); $("ws2").querySelector('[data-open="pc"]').click(); } });
 
-/* 3:web */
+/* Phone */
 let webData = null, serveBusy = false;
 function renderWeb(d){
   webData = d;
@@ -3679,7 +3688,7 @@ function renderWeb(d){
       <span class="k">model</span><span class="v"><span class="dot ${stateDot(m.state || "OFF")}"></span>${esc(m.name || "off")}</span><span></span>
       <span class="k">${esc(selfName())}</span><span class="v">${esc(d.self ? d.self.ip + " · " + d.self.dns : "–")}</span><span></span>
     </div>
-    ${on && !up && S && S.target !== "laptop" ? `<div class="note">The model is off: turn it on in <b>${phone.matches ? "2:sys" : "1:llm"}</b> before chatting.</div>` : ""}
+    ${on && !up && S && S.target !== "laptop" ? `<div class="note">The model is off: turn it on in <b>${phone.matches ? "Model" : "Chat"}</b> before chatting.</div>` : ""}
     ${!on && d.running ? `<div class="note">Your phone can't reach the model right now. <b>Turn on</b> shares it with your tailnet only.</div>` : ""}
     <div class="hint" style="margin-top:8px">${d.remote ? "Turning phone access on/off, VS Code and the API key are only available on the PC." : "The phone gets this command center and chats with whatever \"run on\" picks (this device or the paired one). It works while the command center is open on the PC."}</div>`;
   $("tailnetName").textContent = d.self ? "· " + d.self.dns.split(".").slice(1).join(".") : "";
