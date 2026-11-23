@@ -1847,9 +1847,12 @@ async function send(){
   chatBusy = true; abortCtl = new AbortController(); setSend(); render();
   let memInfo = null;
   const toolLog = new Map();
-  let reply = "", reasoning = "", timings = null, usage = null, finish = null, t0 = performance.now(), tFirst = 0, nTok = 0, inThinkTag = false;
+  let reply = "", reasoning = "", timings = null, usage = null, finish = null, t0 = performance.now(), tFirst = 0, nTok = 0, nThink = 0, inThinkTag = false, stopped = "";
   let raf = 0;
-  const paint = () => { raf = 0; body.innerHTML = md(reply); if (reasoning) { think.hidden = false; tbody.textContent = reasoning; } scroll(); };
+  // the thinking line counts up while the model thinks, so a long think never looks like nothing is happening
+  const thinkLabel = () => `thinking · ${nThink.toLocaleString()} token${nThink === 1 ? "" : "s"} · ${Math.round((performance.now() - t0) / 1000)}s`;
+  const paint = () => { raf = 0; body.innerHTML = md(reply); if (reasoning) { think.hidden = false; think.firstChild.textContent = thinkLabel(); tbody.textContent = reasoning; } scroll(); };
+  const tick = setInterval(() => { if (reasoning && !reply) think.firstChild.textContent = thinkLabel(); }, 1000);
   try {
     const r = await fetch("/v1/chat/completions", {method:"POST", signal: abortCtl.signal, headers:{"Content-Type":"application/json"},
       body: JSON.stringify({model: S.model.id || "local", messages: history.map(h => ({role: h.role, content: forModel(h.content)})), chat_id: chatId || undefined, stream: true, stream_options:{include_usage:true}})});
@@ -1871,12 +1874,13 @@ async function send(){
         let j; try { j = JSON.parse(d); } catch(e) { continue; }
         if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
         if (j.cc_tool) { toolEvent(m, j.cc_tool); toolLog.set(j.cc_tool.id, j.cc_tool); continue; }
+        if (j.cc_stopped) stopped = j.cc_stopped;
         if (j.timings) timings = j.timings;
         if (j.usage) usage = j.usage;
         const ch = j.choices && j.choices[0]; if (!ch) continue;
         if (ch.finish_reason) finish = ch.finish_reason;
         const dl = ch.delta || {};
-        if (dl.reasoning_content) { reasoning += dl.reasoning_content; nTok++; tFirst ||= performance.now(); }
+        if (dl.reasoning_content) { reasoning += dl.reasoning_content; nTok++; nThink++; tFirst ||= performance.now(); }
         if (dl.content) {
           nTok++; tFirst ||= performance.now();
           let c = dl.content;
@@ -1892,7 +1896,8 @@ async function send(){
     if (e.name === "AbortError") finish = "stopped";
     else { body.classList.remove("cursor"); paint(); m.appendChild(el("div", "msg sys err", esc(e.message))); }
   }
-  cancelAnimationFrame(raf); paint(); body.classList.remove("cursor");
+  clearInterval(tick); cancelAnimationFrame(raf); paint(); body.classList.remove("cursor");
+  if (stopped) { finish = "stopped: looping"; m.appendChild(el("div", "msg sys err", esc(stopped))); }
   if (reasoning && !reply) think.open = true;
   if (reply || reasoning) history.push({role:"assistant", content: reply, who: m.firstChild.textContent, ...(reasoning ? {reasoning} : {})});
   else history.pop();

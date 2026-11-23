@@ -18,6 +18,7 @@ import subprocess
 import sys
 import threading
 import time
+import zlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import workspaces  # noqa: E402  (2:code and 3:web)
@@ -425,6 +426,10 @@ def learn_watch():
             continue
         s, p0 = launch.get("sums"), prev[1]
         if s is None:
+            continue
+        if launch.pop("sums_reset", False):   # a looping reply was stopped: drop this load's numbers, start over
+            launch["sums"] = {"n_out": 0, "s_out": 0.0, "n_in": 0, "s_in": 0.0, "vram": None}
+            prev = (lt, vals)
             continue
         s["n_in"] += vals["llamacpp:prompt_tokens_total"] - p0["llamacpp:prompt_tokens_total"]
         s["s_in"] += vals["llamacpp:prompt_seconds_total"] - p0["llamacpp:prompt_seconds_total"]
@@ -962,6 +967,78 @@ def stats():
     return v
 
 
+# ---------------------------------------------------------------- runaway replies
+CHAT_MAX_TOKENS = 32768   # a chat (or phone) request that sets no length limit gets this one
+
+
+class LoopGuard:
+    """Watches a streamed reply (its text, its thinking and any tool-call arguments) and says when the model has
+    fallen into a loop, so the generation can be stopped instead of running until the context is full.
+    Repeating text compresses far better than anything real: measured on 6,000-character windows, prose, code,
+    HTML, tables, JSON and counting all stay at or above ~0.1 of their size, while a model repeating a sentence or a
+    paragraph comes out at 0.01-0.03. Two checks in a row below RATIO count as a loop."""
+    WINDOW, EVERY, RATIO, START = 6000, 1500, 0.05, 8000
+
+    def __init__(self):
+        self.buf, self.text, self.total, self.next, self.low, self.tripped = b"", "", 0, self.START, 0, False
+
+    def _add(self, s):
+        if isinstance(s, str) and s:
+            self.text = (self.text + s)[-self.WINDOW:]
+            self.total += len(s)
+
+    def _event(self, j):
+        if not isinstance(j, dict):
+            return
+        for ch in j.get("choices") or []:       # OpenAI-style (llama-server, PAIR, Cline)
+            d = (ch or {}).get("delta") or {}
+            self._add(d.get("content"))
+            self._add(d.get("reasoning_content"))
+            for tc in d.get("tool_calls") or []:
+                self._add(((tc or {}).get("function") or {}).get("arguments"))
+        d = j.get("delta")                       # Anthropic-style (/v1/messages for Claude Code)
+        if isinstance(d, dict):
+            self._add(d.get("text"))
+            self._add(d.get("thinking"))
+            self._add(d.get("partial_json"))
+
+    def feed(self, chunk):
+        """More of the raw SSE stream. True once the reply is looping."""
+        if self.tripped:
+            return True
+        self.buf += chunk
+        while b"\n" in self.buf:
+            line, self.buf = self.buf.split(b"\n", 1)
+            line = line.strip()
+            if line.startswith(b"data:") and line[5:].strip() != b"[DONE]":
+                try:
+                    self._event(json.loads(line[5:].strip()))
+                except ValueError:
+                    pass
+        if len(self.buf) > 1 << 20:
+            self.buf = b""
+        while self.total >= self.next:
+            self.next += self.EVERY
+            w = self.text.encode("utf-8", "replace")
+            self.low = self.low + 1 if w and len(zlib.compress(w, 6)) / len(w) < self.RATIO else 0
+            if self.low >= 2:
+                self.tripped = True
+                launch["sums_reset"] = True   # a looping reply says nothing about the settings' real speed
+                return True
+        return False
+
+    def stopped_events(self, anthropic=False):
+        """What to send the client in place of the rest of the reply: a normal end (so agents treat it as a cut-off
+        reply, not an error) plus, for the chat window, why."""
+        why = ("stopped: the model was repeating itself (%s characters so far). Ask again, or rephrase." %
+               format(self.total, ","))
+        if anthropic:
+            return (b'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"max_tokens",'
+                    b'"stop_sequence":null},"usage":{"output_tokens":0}}\n\nevent: message_stop\ndata: {"type":"message_stop"}\n\n')
+        return (b"data: " + json.dumps({"choices": [{"index": 0, "delta": {}, "finish_reason": "length"}],
+                                         "cc_stopped": why}).encode() + b"\n\ndata: [DONE]\n\n")
+
+
 # ---------------------------------------------------------------- http
 
 ALLOWED_HOSTS = {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
@@ -1481,6 +1558,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             else:
                 host, auth = LLAMA, {"Authorization": "Bearer " + api_key()}
                 strip_images(data)
+            mt = data.get("max_tokens")
+            if not data.get("max_completion_tokens") and (not isinstance(mt, int) or mt <= 0):
+                data["max_tokens"] = CHAT_MAX_TOKENS   # no limit set: a reply that never ends can't hold the GPU forever
             tools = chat_tools() if data.get("stream") and not data.get("tools") else None
             if tools:
                 return self.tool_chat(data, host, auth, mem_info, tools)
@@ -1623,10 +1703,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         self.send_header("X-Memory", json.dumps(mem_info))
                     self.end_headers()
                     started = True
-                calls, content, buf = {}, "", b""
+                calls, content, buf, guard = {}, "", b"", LoopGuard()
                 while True:
                     chunk = resp.read1(65536)
                     if not chunk:
+                        break
+                    if guard.feed(chunk):
                         break
                     buf += chunk
                     while b"\n" in buf:
@@ -1654,6 +1736,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         content += d.get("content") or ""
                         self._raw(b"data: " + payload + b"\n\n")
                 up.close()
+                if guard.tripped:
+                    self._raw(guard.stopped_events())
+                    self.wfile.write(b"0\r\n\r\n")
+                    return
                 if not calls:
                     break
                 tcs = [{"id": c["id"] or "call_%d_%d" % (rnd, i), "type": "function",
@@ -1969,9 +2055,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header("Transfer-Encoding", "chunked")
             self.end_headers()
             threading.Thread(target=watch_browser, daemon=True).start()
+            guard = LoopGuard()
             while True:
                 chunk = resp.read1(65536)
                 if not chunk:
+                    break
+                if guard.feed(chunk):
+                    # stop the generation (llama-server ends a request whose connection closes), then end the reply
+                    try:
+                        up.sock and up.sock.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass
+                    up.close()
+                    end = guard.stopped_events(anthropic=upath.endswith("/messages"))
+                    self.wfile.write(b"%x\r\n%s\r\n" % (len(end), end))
+                    if entry is not None:
+                        entry["stopped"] = "loop"
                     break
                 if entry is not None:
                     tail = (tail + chunk)[-16384:]

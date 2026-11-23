@@ -334,6 +334,97 @@ def t_learn():
         tuner.PROFILES, tuner.placements, tuner._batches_for = old
 
 
+def t_loop():
+    """Runaway replies: a looping model is stopped and its connection closed; normal text never trips the guard."""
+    G = server.LoopGuard
+
+    def sse(texts, key="content", anthropic=False):
+        out = b""
+        for t in texts:
+            ev = {"type": "content_block_delta", "delta": {"type": "text_delta", "text": t}} if anthropic else \
+                 {"choices": [{"index": 0, "delta": {key: t}}]}
+            out += b"data: " + json.dumps(ev).encode() + b"\n\n"
+        return out
+
+    def words(text, n=4):
+        w = text.split(" ")
+        return [" ".join(w[i:i + n]) + " " for i in range(0, len(w), n)]
+
+    readme = open(os.path.join(ROOT, "README.md"), encoding="utf-8").read()
+    code = open(os.path.join(ROOT, "command-center", "server.py"), encoding="utf-8").read()
+
+    def run(stream, size=700):
+        g = G()
+        return any(g.feed(stream[i:i + size]) for i in range(0, len(stream), size)), g
+
+    tripped, _ = run(sse(words(readme[:40000])))
+    check("loop guard: 40,000 characters of README prose don't trip it", not tripped)
+    tripped, _ = run(sse(words(code[:40000])))
+    check("loop guard: 40,000 characters of code don't trip it", not tripped)
+    tripped, _ = run(sse(words(", ".join(str(i) for i in range(1, 6000)))))
+    check("loop guard: counting to 6,000 doesn't trip it", not tripped)
+    tripped, g = run(sse(words("Wait, let me check that again from the start. " * 400), key="reasoning_content"))
+    check("loop guard: a model repeating itself while thinking is stopped", tripped and g.total < 20000, g.total)
+    tripped, _ = run(sse(words("Hmm, maybe it is 42. No, it is 41. " * 400), anthropic=True), size=37)
+    check("loop guard: Claude Code's stream format too, with events split across reads", tripped)
+    server.launch.pop("sums_reset", None)
+    end = G().stopped_events()
+    check("loop guard: the client gets a normal end with the reason", b'"finish_reason": "length"' in end and b"cc_stopped" in end
+          and end.endswith(b"data: [DONE]\n\n"), end)
+
+    # end to end: a fake model server that loops forever, behind the real chat route
+    seen = {"closed": False, "body": None}
+
+    class Up(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):
+            seen["body"] = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            chunk = sse(words("I should reconsider this whole approach once more. " * 4))
+            try:
+                for _ in range(20000):
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+                    time.sleep(0.002)
+            except OSError:
+                seen["closed"] = True
+
+    up = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Up)
+    threading.Thread(target=up.serve_forever, daemon=True).start()
+
+    class Mem:
+        def recall(self, msgs, cid):
+            return None, {}
+
+        def chat_inject(self, msgs, cid, txt):
+            return msgs
+
+    real = (server.LLAMA, server.memory.M, server.chat_tools, server.target["v"])
+    server.LLAMA, server.memory.M, server.chat_tools, server.target["v"] = up.server_address, Mem(), (lambda: None), "local"
+    try:
+        t0 = time.time()
+        st, d = req("POST", "/v1/chat/completions", json.dumps({"messages": [{"role": "user", "content": "hi"}], "stream": True}))
+        secs = time.time() - t0
+        body = d if isinstance(d, bytes) else json.dumps(d).encode()
+        check("loop guard: a looping chat reply is cut off with the reason", st == 200 and b"cc_stopped" in body and secs < 15, (st, secs, body[-300:]))
+        for _ in range(40):
+            if seen["closed"]:
+                break
+            time.sleep(0.1)
+        check("loop guard: the model server's connection is closed, so it stops generating", seen["closed"])
+        check("chat: a request without a length limit gets one", (seen["body"] or {}).get("max_tokens") == server.CHAT_MAX_TOKENS, seen["body"])
+        st, d = req("POST", "/v1/chat/completions", json.dumps({"messages": [{"role": "user", "content": "hi"}], "stream": True, "max_tokens": 50}))
+        check("chat: a limit the client set is kept", (seen["body"] or {}).get("max_tokens") == 50, seen["body"])
+    finally:
+        server.LLAMA, server.memory.M, server.chat_tools, server.target["v"] = real
+        server.launch.pop("sums_reset", None)
+        up.shutdown()
+
+
 def t_web():
     """The web connector's rules, with the internet stubbed out: nothing is requested from any site."""
     import webtool as w
@@ -1182,7 +1273,7 @@ def urllib_quote(s):
     return urllib.parse.quote(s, safe="")
 
 
-GROUPS = {"web": t_web, "modules": t_modules, "smuggle": t_smuggle, "key": t_key, "guard": t_guard, "phone": t_phone, "tools": t_tools, "tuner": t_tuner, "learn": t_learn, "laptop": t_laptop,
+GROUPS = {"web": t_web, "modules": t_modules, "smuggle": t_smuggle, "key": t_key, "guard": t_guard, "phone": t_phone, "tools": t_tools, "tuner": t_tuner, "learn": t_learn, "loop": t_loop, "laptop": t_laptop,
           "worktree": t_worktree, "team": t_team, "board": t_board, "teamrun": t_teamrun, "review": t_review, "slots": t_slots, "claude": t_claude,
           "conductor": t_conductor}
 
