@@ -215,3 +215,28 @@ Hence an opt-in, not the default.
    cost).
 3. Decide on the Cline CLI. If it works headless against the command center's `/cline` route, Cline agents would no
    longer need VS Code windows or a pasted prompt.
+
+# Claude conducts the team (2026-11-23)
+
+**Built:** `conductor.py` plus hooks in 7:team. Claude, on your own Claude Code login (`claude -p` with every tool
+off, no ANTHROPIC_* variables, so plan usage and no API key), plans the split as step-by-step work orders for the
+local models. It checks each part when it finishes, after its tests: approve, send back to the same agent with a
+numbered fix list (at most 3 times per task), or give up and say why. When all parts are approved it checks once
+that they fit together. It never merges, never sends work back to a cloud agent, and never touches the clipboard.
+Every call is in the conductor box with tokens, seconds and the equivalent API price. The phone can see it but not
+switch it.
+
+**Live run** (Claude sonnet conducting, two headless Claude Code agents on the local Qwen3.8 27B at 64K, temp repo,
+"CSV export of the todos + a test"):
+- The plan took 7 s. Both work orders had exact names, the expected output, and a *Done when:* check.
+- cc1 finished in 156 s (14 steps) and cc2 in 474 s (40 steps). Each stayed inside its files.
+- Claude approved both and the whole-feature check said they fit.
+- Claude's total: 4 calls, 10.9k tokens in, 2.1k out, 16.5 s, about $0.06 at API prices, covered by the plan.
+- **Found:** cc2's tests showed *failed* only because pytest isn't installed. Claude read the output correctly and
+  approved the part anyway. Tests now use pytest only when it's installed; otherwise the test file runs as a plain
+  script.
+
+**Left open:**
+- Each part's tests run on its own branch, so a test that needs another agent's code can't pass until merge. A
+  test run on a temporary merge of all approved parts would close that gap.
+- A Cline agent sent back by Claude still needs you to tell its Cline to re-read the brief.

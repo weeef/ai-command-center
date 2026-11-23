@@ -619,6 +619,18 @@ body.remote .teamact,body.remote .tact{display:none!important}
 .tbtns{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
 .tbtns button{font-size:11.5px}
 .ttest{margin-top:6px;font-size:12px}
+#teamConductor .sect{margin-top:12px}
+.cnd .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.cnd .calls{font-size:11.5px;color:var(--dim);margin-top:6px;max-height:150px;overflow-y:auto}
+.cnd .calls div{display:grid;grid-template-columns:40px minmax(0,1fr) auto;gap:8px;white-space:nowrap}
+.cnd .calls b{font-weight:normal;color:var(--fg);overflow:hidden;text-overflow:ellipsis}
+.cnd .doing{color:var(--accent);font-size:12px;margin-top:6px}
+.cnd .final{font-size:12px;margin-top:6px;border-left:2px solid var(--ok);padding-left:8px}
+.cnd .final.bad{border-color:var(--warn)}
+.rvw{font-size:12px;margin-top:6px;border-left:2px solid var(--accent);padding-left:8px}
+.rvw.approve{border-color:var(--ok)}.rvw.give_up,.rvw.error{border-color:var(--crit)}
+.rvw b{font-weight:normal}.rvw.approve b{color:var(--ok)}.rvw.send_back b{color:var(--accent)}.rvw.give_up b,.rvw.error b{color:var(--crit)}
+.rvw pre{white-space:pre-wrap;color:var(--dim);font-size:11.5px;margin:4px 0 0;max-height:200px;overflow:auto}
 .ttest.passed{color:var(--ok)}.ttest.failed{color:var(--crit)}.ttest.running,.ttest.none{color:var(--dim)}
 .ttest pre{max-height:180px;overflow:auto;color:var(--dim);font-size:11px;white-space:pre-wrap;margin:4px 0 0}
 #teamDiffDlg{background:var(--bg);color:var(--fg);border:1px solid var(--border);padding:14px 16px;width:min(1100px,calc(100vw - 32px));max-height:calc(100vh - 48px);overflow:auto}
@@ -935,12 +947,13 @@ body.remote #tags span[data-ws="2"]{display:none}
           <datalist id="teamRepos"></datalist><button id="teamLoad">load</button></div>
         <textarea id="teamGoal" rows="3" maxlength="4000" placeholder="what should the team build? one feature, in a few sentences"></textarea>
         <div class="memloc"><select id="teamPlanner" title="who splits the goal into tasks">
-            <option value="">planner: strongest that's on</option><option value="pc">planner: this pc's model</option>
+            <option value="">planner: strongest that's on</option><option value="conductor">planner: Claude, who then conducts</option><option value="pc">planner: this pc's model</option>
             <option value="laptop">planner: the laptop's model</option><option value="cloud">planner: cloud</option></select>
           <label class="hint" title="the goal, the repo's file list and the start of its README are sent to your cloud provider (billed)"><input type="checkbox" id="teamCloud"> may use cloud</label>
           <button id="teamPlan" class="primary">plan</button></div>
       </div>
       <div id="teamSplit"></div>
+      <div id="teamConductor"></div>
     </section>
     <section class="pane" id="teamAgentsPane"><div class="title">agents <i>· who can work</i></div><div id="teamAgents">loading…</div></section>
   </div>
@@ -3172,7 +3185,38 @@ function renderTeam(d){
   $("teamPlan").title = b && b.state === "running" ? "the team is working: stop it or review it first" : "split the goal into one task per agent";
   renderTeamAgents(d);
   if (!teamDirty) renderTeamSplit(teamDraft || b, d);
+  renderTeamConductor(teamDraft || b, d);
   renderTeamPanels(b, d);
+}
+const CND_VERDICT = {approve: "approved", send_back: "sent back", give_up: "over to you", error: "couldn't check"};
+function renderTeamConductor(b, d){
+  const box = $("teamConductor"), ci = d.conductor || {};
+  if (!b || !b.tasks || !b.tasks.length) { box.innerHTML = ""; return; }
+  const c = b.conductor || {}, on = !!c.on, s = c.stats || {}, calls = (c.calls || []).slice(-8).reverse();
+  const mdl = c.model || ci.model || "sonnet";
+  const tm = t => new Date((t || 0) * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", hourCycle: "h23"});
+  const what = x => x.kind === "plan" ? "planned" : x.kind === "final" ? "checked all parts together" : `checked ${x.agent || x.task}`;
+  box.innerHTML = `<div class="cnd"><div class="sect">conductor</div>
+    <div class="row tact">
+      <label title="${ci.available ? "Claude checks each part as it finishes: approves it, or sends it back to the same agent with exact fixes (up to " + (ci.max_rounds || 3) + " times), then checks that the parts fit together. It never merges." : "needs Claude Code, which isn't installed"}">
+        <input type="checkbox" id="teamConduct" ${on ? "checked" : ""} ${ci.available ? "" : "disabled"}> Claude conducts</label>
+      <select id="teamCndModel" title="which Claude model conducts">${(ci.models || ["sonnet", "opus", "haiku"]).map(m => `<option ${m === mdl ? "selected" : ""}>${esc(m)}</option>`).join("")}</select>
+    </div>
+    <div class="hint">${on ? `Claude ${esc(mdl)} checks every part when it finishes and sends it back with fixes, up to ${ci.max_rounds || 3} times. It runs on your Claude Code login (your plan's usage). It sees each agent's diff and test output, never your keys. You still merge.`
+      : ci.available ? "Off: you review each part yourself. Tick it and Claude checks the parts and sends them back with fixes until they're right." : "Claude Code isn't installed, so Claude can't conduct."}</div>
+    ${remote ? `<div class="hint">${on ? "Claude conducts this team." : "Claude isn't conducting."}</div>` : ""}
+    ${c.doing ? `<div class="doing">Claude is ${esc(c.doing)}…</div>` : ""}
+    ${c.final ? `<div class="final ${c.final.ok ? "" : "bad"}">${c.final.ok ? "All parts approved. " : ""}${esc(c.final.summary || "")}</div>` : ""}
+    ${s.calls ? `<div class="hint">${s.calls} call${s.calls > 1 ? "s" : ""} · ${teamFmt(s.in)} in · ${teamFmt(s.out)} out · ${s.secs || 0}s${s.cost ? ` · ≈$${(+s.cost).toFixed(2)} at API prices (your plan covers it)` : ""}</div>` : ""}
+    ${calls.length ? `<div class="calls">${calls.map(x => `<div><span>${tm(x.t)}</span><b title="${esc(x.error || "")}">${esc(what(x))}: ${esc(x.error ? "failed · " + x.error : CND_VERDICT[x.verdict] || x.verdict || "")}</b><span>${teamFmt(x.in)} in · ${teamFmt(x.out)} out · ${x.secs || 0}s</span></div>`).join("")}</div>` : ""}
+  </div>`;
+}
+function teamReview(t, b){
+  const r = (t.reviews || []).slice(-1)[0];
+  if (!r) return (b.conductor || {}).doing && (b.conductor.doing || "").includes(t.agent + "'s") ? `<div class="rvw"><b>Claude is checking this part…</b></div>` : "";
+  const sent = (t.reviews || []).filter(x => x.verdict === "send_back" && x.sent).length;
+  return `<div class="rvw ${esc(r.verdict)}"><b>Claude: ${esc(CND_VERDICT[r.verdict] || r.verdict)}</b>${sent ? ` · sent back ${sent}×` : ""} · ${esc(r.summary || "")}
+    ${r.note ? `<details ${r.verdict === "give_up" ? "open" : ""}><summary class="hint">${r.verdict === "send_back" ? "what Claude asked for" : "Claude's note"}</summary><pre>${esc(r.note)}</pre></details>` : ""}</div>`;
 }
 function renderTeamAgents(d){
   const cl = d.clients || {}, cc = cl["claude-code"] || {};
@@ -3236,6 +3280,7 @@ function renderTeamPanels(b, d){
         <span class="sub">${esc(t.title)}</span><span class="grow"></span>
         ${t.status === "running" ? `<button class="btn-main stop tact" data-tstop="${esc(t.id)}">stop</button>` : ""}</div>
       ${teamTest(t.test)}
+      ${teamReview(t, b)}
       <div class="kvt">
         <span class="k">works with</span><span class="v">${esc(t.client === "vscode" ? "Cline · VS Code" : "Claude Code · headless")} · ${esc(t.backend)}</span><span></span>
         <span class="k">files</span><span class="v">${files.length} changed${files.length ? ` · +${add} −${del}` : ""}</span><span></span>
@@ -3264,6 +3309,7 @@ function teamButtons(t){
   return `<div class="tbtns">
     <button data-tdiff="${id}" title="everything this agent changed against the base commit">diff</button>
     ${t.status === "running" && t.client === "vscode" ? `<button class="tact" data-tfin="${id}" title="Cline can't tell the command center it's done: say so here. Its work is committed on its branch and tested">finished</button>` : ""}
+    ${t.status === "done" && teamData && teamData.board && (teamData.board.conductor || {}).on ? `<button class="tact" data-trev="${id}" title="Claude checks this part now and approves it or sends it back">ask Claude</button>` : ""}
     ${fin ? `<button class="tact" data-ttest="${id}" ${t.test && t.test.state === "running" ? "disabled" : ""}>run tests</button>
       <button class="tact primary" data-tmerge="${id}" title="git merge --no-ff into the base branch, in your own checkout. Never pushed">merge</button>
       <button class="tact" data-tback="${id}" title="the agent gets your note and works on it again">send back…</button>
@@ -3287,6 +3333,16 @@ async function teamPost(url, body){
 }
 $("tdClose").onclick = () => $("teamDiffDlg").close();
 $("ws7").addEventListener("input", e => { if (e.target.closest("#teamSplit")) teamDirty = true; });
+$("ws7").addEventListener("change", async e => {
+  if (e.target.id !== "teamConduct" && e.target.id !== "teamCndModel") return;
+  const saved = teamData && teamData.board && !(teamDirty && teamDraft);
+  if (!saved && e.target.id === "teamConduct") return;   // an unsaved split: it's saved with the split
+  const body = {model: $("teamCndModel").value};
+  if (saved) Object.assign(body, {repo: teamRepoPath(), on: $("teamConduct").checked});
+  const r = await teamPost("/api/team/conductor", body);
+  sysToast(r.msg, !r.ok, 6000);
+  refreshTeam();
+});
 $("teamRepo").addEventListener("change", () => { store.set("rt.teamRepo", $("teamRepo").value.trim()); teamDirty = false; teamDraft = null; refreshTeam(); });
 $("teamRepo").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); $("teamLoad").click(); } });
 $("ws7").addEventListener("click", async e => {
@@ -3317,7 +3373,8 @@ $("ws7").addEventListener("click", async e => {
   if (del) { const cur = teamSplitFromForm(); cur.splice(+del.dataset.tdel, 1); teamDraft = {state: "draft", tasks: cur}; renderTeamSplit(teamDraft, teamData); teamDirty = true; return; }
   if (t.closest("#teamSave") || t.closest("#teamStart")) {
     const start = !!t.closest("#teamStart");
-    const r = await teamPost("/api/team/board", {repo, goal: $("teamGoal").value, tasks: teamSplitFromForm()});
+    const cb = $("teamConduct");
+    const r = await teamPost("/api/team/board", Object.assign({repo, goal: $("teamGoal").value, tasks: teamSplitFromForm()}, cb && !cb.disabled ? {conduct: cb.checked} : {}));
     if (!r.ok) return sysToast(r.msg, true, 8000);
     teamDirty = false; teamDraft = null;
     if (!start) { sysToast("split saved"); return refreshTeam(); }
@@ -3339,7 +3396,7 @@ $("ws7").addEventListener("click", async e => {
     $("tdBody").innerHTML = teamDiffHtml(d.diff || "");
     return $("teamDiffDlg").showModal();
   }
-  const act = [["data-tfin", "finish"], ["data-ttest", "test"], ["data-tmerge", "merge"], ["data-tdisc", "discard"], ["data-tback", "sendback"]]
+  const act = [["data-trev", "review"], ["data-tfin", "finish"], ["data-ttest", "test"], ["data-tmerge", "merge"], ["data-tdisc", "discard"], ["data-tback", "sendback"]]
     .map(([a, op]) => [t.closest("[" + a + "]"), op, a]).find(x => x[0]);
   if (act) {
     const [btn, op, a] = act, task = btn.getAttribute(a), tk = (teamData.board.tasks || []).find(x => x.id === task) || {};

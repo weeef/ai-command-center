@@ -207,7 +207,7 @@ def check_tasks(tasks, registry):
         slug = slugify(t.get("slug") or title, slugs)
         slugs.add(slug)
         out.append({"id": "t%d" % (i + 1), "agent": agent, "title": title, "slug": slug,
-                    "goal": str(t.get("goal") or "").strip()[:4000], "owns": list(dict.fromkeys(clean))})
+                    "goal": str(t.get("goal") or "").strip()[:6000], "owns": list(dict.fromkeys(clean))})
     clash = [(a, b, pa, pb) for i, a in enumerate(out) for b in out[i + 1:]
              for pa in a["owns"] for pb in b["owns"] if overlaps(pa, pb)]
     if clash:
@@ -232,7 +232,7 @@ def editable(board):
     return not board or board.get("state") in ("draft", "done")
 
 
-def edit_board(repo, registry, goal, tasks, planner=None):
+def edit_board(repo, registry, goal, tasks, planner=None, conduct=None):
     """Save a split (yours or the planner's). Only while nothing runs: a working agent's files can't change under it."""
     b = load_board(repo)
     if not editable(b):
@@ -245,7 +245,13 @@ def edit_board(repo, registry, goal, tasks, planner=None):
         return False, "say what the team should build", b
     if planner is None and b and b.get("state") == "draft":
         planner = b.get("planner")
-    return True, "saved", save_board(repo, new_board(repo, goal, clean, planner))
+    nb = new_board(repo, goal, clean, planner)
+    if conduct is not None or (b or {}).get("conductor"):
+        # whether Claude conducts, with which model, and its calls so far (the plan's) outlive an edit of the split
+        old = (b or {}).get("conductor") or {}
+        nb["conductor"] = {k: old[k] for k in ("model", "calls", "stats") if old.get(k)}
+        nb["conductor"]["on"] = bool(old.get("on")) if conduct is None else bool(conduct)
+    return True, "saved", save_board(repo, nb)
 
 
 def add_note(repo, task_id, by, text):
@@ -350,9 +356,15 @@ def brief(board, task):
              "## The feature", board.get("goal", ""), "",
              "## Your part: %s" % task["title"], task.get("goal") or "", ""]
     if task.get("feedback"):
-        lines += ["## Sent back by the owner",
-                  "The owner reviewed your work and sent it back. Do this now; your earlier work is still in this folder:"]
-        lines += ["- %s" % " ".join(str(f.get("text")).split()) for f in task["feedback"][-5:]] + [""]
+        last = task["feedback"][-1]
+        who = "Claude, who conducts this team," if last.get("by") == "conductor" else "The owner"
+        lines += ["## Sent back for changes",
+                  "%s reviewed your work and sent it back. Do the latest round now; your earlier work is still in "
+                  "this folder:" % who, ""]
+        for i, f in enumerate(task["feedback"][-3:]):
+            latest = i == len(task["feedback"][-3:]) - 1
+            lines += ["### %s%s" % ("Latest: " if latest else "Earlier: ", "from Claude" if f.get("by") == "conductor" else "from the owner"),
+                      str(f.get("text") or "").strip(), ""]
     lines += ["## Files you own",
              "Edit or create only these. Everything else belongs to another agent or stays as it is:"]
     lines += ["- `%s`" % p for p in task["owns"]]
@@ -703,7 +715,15 @@ def test_command(wt):
             if os.path.isdir(p) and any(n.startswith("test_") and n.endswith(".py") for n in os.listdir(p)):
                 has_pytest = True
     if has_pytest and py:
-        return [py, "-m", "pytest", "-q"]
+        if _has_pytest(py):
+            return [py, "-m", "pytest", "-q"]
+        # pytest isn't installed (live run: "No module named pytest" reported as failed tests): run the test
+        # files as plain scripts when there is one, else unittest's discovery
+        found = sorted(os.path.join(d, n) for d in ("tests", "test") if os.path.isdir(os.path.join(wt, d))
+                       for n in os.listdir(os.path.join(wt, d)) if n.startswith("test_") and n.endswith(".py"))
+        if len(found) == 1:
+            return [py, found[0]]
+        return [py, "-m", "unittest", "discover", "-s", found[0].split(os.sep)[0] if found else "tests", "-p", "test_*.py"]
     pj = fsutil.read_json(os.path.join(wt, "package.json"))
     npm = shutil.which("npm")
     if isinstance(pj, dict) and isinstance(pj.get("scripts"), dict) and pj["scripts"].get("test") and npm:
@@ -711,11 +731,25 @@ def test_command(wt):
     return None
 
 
+_pytest = {}
+
+
+def _has_pytest(py):
+    if py not in _pytest:
+        try:
+            _pytest[py] = subprocess.run([py, "-c", "import pytest"], capture_output=True, timeout=30,
+                                         creationflags=NOWIN).returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            _pytest[py] = False
+    return _pytest[py]
+
+
 _test_lock = threading.Lock()   # one test run at a time: projects' tests often use fixed ports
 
 
-def run_tests(repo, task_id, timeout=900):
-    """Run the project's tests in the agent's worktree, in the background; the result goes into the board."""
+def run_tests(repo, task_id, timeout=900, on_done=None):
+    """Run the project's tests in the agent's worktree, in the background; the result goes into the board, then
+    on_done(repo, task_id) runs (the conductor's check)."""
     b = load_board(repo)
     t = next((x for x in (b or {}).get("tasks", []) if x["id"] == task_id), None)
     if not t or not t.get("worktree") or not os.path.isdir(t["worktree"]):
@@ -723,6 +757,8 @@ def run_tests(repo, task_id, timeout=900):
     cmd = test_command(t["worktree"])
     if not cmd:
         set_status(repo, task_id, t["status"], test={"state": "none", "t": time.time(), "msg": "no tests found in this project"})
+        if on_done:
+            threading.Thread(target=on_done, args=(repo, task_id), daemon=True).start()
         return True, "no tests found in this project"
     label = " ".join(os.path.basename(c) if i == 0 else c for i, c in enumerate(cmd))
     set_status(repo, task_id, t["status"], test={"state": "running", "cmd": label, "t": time.time()})
@@ -742,6 +778,8 @@ def run_tests(repo, task_id, timeout=900):
         if cur:
             set_status(repo, task_id, cur["status"], test={"state": "passed" if ok else "failed", "cmd": label, "t": time.time(),
                                                             "secs": round(time.time() - t0, 1), "tail": out.strip()[-3000:]})
+        if on_done:
+            on_done(repo, task_id)
     threading.Thread(target=go, daemon=True).start()
     return True, "testing: " + label
 
@@ -808,8 +846,8 @@ def merge(repo, task_id):
     return True, "merged %s into %s (%s). Nothing was pushed" % (t["branch"], b.get("base") or "HEAD", sha.strip())
 
 
-def send_back(repo, task_id, note):
-    """The owner's note goes into the brief and the task runs again."""
+def send_back(repo, task_id, note, by="owner"):
+    """The note (yours, or the conductor's) goes into the brief and the task runs again."""
     note = str(note or "").strip()[:MAX_NOTE]
     if not note:
         return False, "write what should change", None
@@ -818,7 +856,7 @@ def send_back(repo, task_id, note):
         t = next((x for x in (b or {}).get("tasks", []) if x["id"] == task_id), None)
         if not t or t.get("status") not in ("done", "stopped", "failed"):
             return False, "only a finished, stopped or failed task can be sent back", None
-        t.setdefault("feedback", []).append({"t": time.time(), "text": note})
+        t.setdefault("feedback", []).append({"t": time.time(), "text": note, "by": by})
         t.update(status="running", finished=None, message=None, test=None, started=time.time())
         b["state"] = "running"
         save_board(repo, b)

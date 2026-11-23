@@ -32,6 +32,7 @@ import webtool  # noqa: E402  (the web connector: free search + page reading as 
 import updater  # noqa: E402  (new versions from GitHub, installed when you say so)
 import llamaup  # noqa: E402  (llama.cpp engine updates)
 import team  # noqa: E402  (agent team: registry, worktrees, task board)
+import conductor  # noqa: E402  (Claude, on your Claude Code login, directing the team's local agents)
 import urllib.parse  # noqa: E402
 import hmac  # noqa: E402
 import secrets  # noqa: E402
@@ -682,7 +683,7 @@ def laptop_action(action, model=None):
 
 
 _stats = {"t": 0, "v": None}
-_BUILD_FILES = ("index.html", "server.py", "models.py", "workspaces.py", "tokens.py", "chats.py", "memory.py", "importers.py", "cloud.py", "updater.py", "llamaup.py", "fsutil.py", "tuner.py", "webtool.py", "team.py")
+_BUILD_FILES = ("index.html", "server.py", "models.py", "workspaces.py", "tokens.py", "chats.py", "memory.py", "importers.py", "cloud.py", "updater.py", "llamaup.py", "fsutil.py", "tuner.py", "webtool.py", "team.py", "conductor.py")
 UP = None  # updater.Updater, made in main()
 LU = None  # llamaup.LlamaUpdater, made in main()
 
@@ -1083,7 +1084,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif path == "/api/team":
             qs = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
             repo = team_repo((qs.get("repo") or [""])[0] or (settings.get("team_repos") or [""])[0])
-            self.send_json(200, dict(team.public(settings), remote=self.remote, repo=repo,
+            self.send_json(200, dict(team.public(settings), remote=self.remote, repo=repo, conductor=conductor.info(settings),
                                      repos=[r for r in settings.get("team_repos") or [] if os.path.isdir(r)],
                                      board=team_view(repo) if repo else None))
         elif path == "/api/team/diff":
@@ -1238,10 +1239,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if path == "/api/team/plan":
                 if not goal:
                     return self.send_json(400, {"ok": False, "msg": "say what the team should build"})
-                pick = data.get("planner") if data.get("planner") in ("pc", "laptop", "cloud") else None
+                pick = data.get("planner") if data.get("planner") in ("pc", "laptop", "cloud", "conductor") else None
                 ok, msg, b = team_plan(repo, goal, pick, data.get("use_cloud") is True)
             else:
-                ok, msg, b = team.edit_board(repo, team.agents(settings), goal or None, data.get("tasks"))
+                ok, msg, b = team.edit_board(repo, team.agents(settings), goal or None, data.get("tasks"),
+                                             conduct=data.get("conduct") if isinstance(data.get("conduct"), bool) else None)
             if ok:
                 remember_team_repo(repo)
             return self.send_json(200 if ok else 400, {"ok": ok, "msg": msg, "board": b, "repo": repo})
@@ -1254,8 +1256,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self.send_json(200 if ok else 409, dict({"ok": ok, "msg": msg, "board": b}, **extra))
             ok, msg = team_stop(repo, str(data.get("task") or ""))
             return self.send_json(200 if ok else 409, {"ok": ok, "msg": msg})
+        if path == "/api/team/conductor":
+            # on/off for this repo's team, and which Claude model conducts (kept for every team)
+            mdl = data.get("model") if data.get("model") in conductor.MODELS else None
+            if mdl:
+                settings["conductor"] = dict(settings.get("conductor") or {}, model=mdl)
+                save_settings()
+            if data.get("on") is None:
+                return self.send_json(200 if mdl else 400, {"ok": bool(mdl), "msg": ("Claude %s conducts from now on" % mdl) if mdl else "pick a model"})
+            repo = team_repo(data.get("repo"))
+            if not repo:
+                return self.send_json(400, {"ok": False, "msg": "pick a folder that is a git repo with at least one commit"})
+            if data.get("on") is True and not team.claude_bin():
+                return self.send_json(409, {"ok": False, "msg": "conducting needs Claude Code, which isn't installed"})
+            ok, msg, _ = conductor.set_on(repo, data.get("on") is True, mdl)
+            if ok and data.get("on") is True:
+                conduct_pending(repo)
+            return self.send_json(200 if ok else 409, {"ok": ok, "msg": msg})
         if path in ("/api/team/finish", "/api/team/test", "/api/team/merge", "/api/team/sendback",
-                    "/api/team/discard", "/api/team/cleanup"):
+                    "/api/team/discard", "/api/team/cleanup", "/api/team/review"):
             repo = team_repo(data.get("repo"))
             if not repo:
                 return self.send_json(400, {"ok": False, "msg": "pick a folder that is a git repo with at least one commit"})
@@ -1263,7 +1282,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if op == "finish":
                 ok, msg = team_finish(repo, tid)
             elif op == "test":
-                ok, msg = team.run_tests(repo, tid)
+                ok, msg = team.run_tests(repo, tid, on_done=conduct_after)
+            elif op == "review":
+                ok, msg = conduct_now(repo, tid)
             elif op == "merge":
                 ok, msg = team.merge(repo, tid)
             elif op == "sendback":
@@ -2099,7 +2120,11 @@ def team_start(repo, confirm_cloud=False):
     now = time.time()
     b["state"], b["started"] = "running", now
     for t in b["tasks"]:
-        t.update(status="running", started=now, finished=None, message=None, steps=[], stats={}, last_step=None)
+        t.update(status="running", started=now, finished=None, message=None, steps=[], stats={}, last_step=None,
+                 reviews=[], feedback=[], test=None)
+    if b.get("conductor"):
+        for k in ("final", "finals", "doing"):
+            b["conductor"].pop(k, None)
     team.save_board(repo, b)
     for t in b["tasks"]:   # again, now that every agent's status says running
         team.write_brief(b, t, reg[t["agent"]]["client"])
@@ -2142,7 +2167,7 @@ def team_after(repo, task_id):
     if not ok:
         team.set_status(repo, task_id, t["status"], message=(t.get("message") or "") + " · " + msg)
     if t["status"] == "done":
-        team.run_tests(repo, task_id)
+        team.run_tests(repo, task_id, on_done=conduct_after)
 
 
 def team_finish(repo, task_id):
@@ -2158,24 +2183,63 @@ def team_finish(repo, task_id):
     return True, "%s's work is committed on %s; testing it" % (t["agent"], t.get("branch"))
 
 
-def team_send_back(repo, task_id, note, confirm_cloud=False):
+SEND_BACK_PROMPT = ("Your task was sent back with changes to make: read .cc-agent.md again (section \"Sent back for "
+                    "changes\") and do the latest round.")
+
+
+def team_send_back(repo, task_id, note, confirm_cloud=False, by="owner"):
+    """Send a finished part back to its agent with a note: yours from the page, or the conductor's (by="conductor").
+    The conductor never sends back to a cloud agent (that's billed: it asks you) and never touches your clipboard."""
     t0 = next((x for x in (team.load_board(repo) or {}).get("tasks", []) if x["id"] == task_id), None)
     a = next((x for x in team.agents(settings) if t0 and x["name"] == t0["agent"]), None) or \
         {"client": "vscode", "backend": (t0 or {}).get("agent", "pc"), "name": (t0 or {}).get("agent", "pc")}
     if a["backend"].startswith("cloud:") and not confirm_cloud:
         return False, "%s uses Claude in the cloud, which is billed to you: confirm to send it back" % a["name"]
-    ok, msg, b = team.send_back(repo, task_id, note)
+    ok, msg, b = team.send_back(repo, task_id, note, by=by)
     if not ok:
         return False, msg
     t = next(x for x in b["tasks"] if x["id"] == task_id)
     team.write_brief(b, t, a["client"])
     if a["client"] == "vscode":
-        copy_to_clipboard("The owner sent your task back with a note: read .cc-agent.md again (section \"Sent back by the owner\") and do it.")
+        if by == "conductor":
+            team.set_status(repo, task_id, "running", message="Claude sent it back: tell its Cline to read .cc-agent.md again")
+            return True, msg + ": tell its Cline to read .cc-agent.md again"
+        copy_to_clipboard(SEND_BACK_PROMPT)
         return True, msg + ": the prompt for its Cline is on the clipboard"
     ok, m = team_run_claude(repo, t, a)
     if not ok:
         team.set_status(repo, task_id, "failed", message=m)
     return ok, msg + ("; Claude Code is working on it again" if ok else ": " + m)
+
+
+def conduct_after(repo, task_id):
+    """A part's tests are done (or it has none): if Claude conducts this team, it checks the part now. Called from the
+    test thread, so the check runs there too."""
+    if ((team.load_board(repo) or {}).get("conductor") or {}).get("on"):
+        conductor.review(repo, task_id, lambda r, tid, note: team_send_back(r, tid, note, by="conductor"))
+
+
+def conduct_now(repo, task_id):
+    """Ask Claude to check one part now (the button, or when you turn conducting on after a part finished)."""
+    b = team.load_board(repo)
+    t = next((x for x in (b or {}).get("tasks", []) if x["id"] == task_id), None)
+    if not t:
+        return False, "no such task"
+    if not (b.get("conductor") or {}).get("on"):
+        return False, "Claude isn't conducting this team: tick \"Claude conducts\" first"
+    if t.get("status") != "done":
+        return False, "Claude checks a part once it's finished"
+    if (t.get("test") or {}).get("state") == "running":
+        return False, "the tests are still running: Claude checks it when they're done"
+    threading.Thread(target=conduct_after, args=(repo, task_id), daemon=True).start()
+    return True, "Claude is checking %s's part" % t["agent"]
+
+
+def conduct_pending(repo):
+    """Conducting was just turned on: check every finished part Claude hasn't seen yet."""
+    for t in (team.load_board(repo) or {}).get("tasks", []):
+        if t.get("status") == "done" and not t.get("reviews") and (t.get("test") or {}).get("state") != "running":
+            threading.Thread(target=conduct_after, args=(repo, t["id"]), daemon=True).start()
 
 
 def team_stop(repo, task_id):
@@ -2211,8 +2275,30 @@ def remember_team_repo(repo):
 
 
 def team_plan(repo, goal, pick=None, use_cloud=False):
-    """Ask the strongest backend that's on to split the goal between the registered agents. -> (ok, msg, board)."""
+    """Ask the strongest backend that's on to split the goal between the registered agents. -> (ok, msg, board).
+    pick="conductor": Claude on your Claude Code login plans, and conducts the team from then on."""
     reg = team.agents(settings)
+    if pick == "conductor":
+        if not team.claude_bin():
+            return False, "Claude conducting needs Claude Code, which isn't installed", None
+        mdl = conductor.model(settings)
+        ok, plan, usage = conductor.plan(repo, goal, reg, mdl)
+        if not ok:
+            return False, "Claude couldn't plan: %s" % plan, None
+        label = {"backend": "conductor", "model": "Claude %s (your Claude Code login)" % mdl}
+        ok, msg, b = team.edit_board(repo, reg, goal, plan.get("tasks") or [], planner=label, conduct=True)
+        if ok:
+            b["conductor"]["model"] = mdl
+            team.save_board(repo, b)
+            conductor.log_plan(repo, usage, mdl, len(plan.get("tasks") or []))
+            b = team.load_board(repo)
+            return True, "planned by Claude %s, who checks every part as it finishes" % mdl, b
+        _, _, clean, _ = team.check_tasks(plan.get("tasks") or [], reg)
+        draft = team.new_board(repo, goal, clean or [], label) if clean else None
+        if draft is not None:
+            draft["problem"] = msg
+            draft["conductor"] = {"on": True, "model": mdl}
+        return False, "Claude's split needs a fix: " + msg, draft
     msgs = team.plan_messages(goal, reg, repo)
     cloud_ready = cloud.status(settings)["ready"]
     pc_on = model_info(None)["state"] in ("ON", "ASLEEP")
@@ -2269,7 +2355,7 @@ def idle_watch():
     import or a move of the memory folder, which would be cut off half-done."""
     while True:
         time.sleep(5)
-        if active_streams > 0 or memory.M.job.get("running") or memory.M.moving or tuner.S["running"] or team.busy():
+        if active_streams > 0 or memory.M.job.get("running") or memory.M.moving or tuner.S["running"] or team.busy() or conductor.busy():
             touch()
         elif time.time() - last_request > IDLE_EXIT:
             memory.M.shutdown()  # stops the embedding server too

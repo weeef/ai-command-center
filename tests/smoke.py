@@ -852,7 +852,7 @@ def t_review():
     finally:
         server.copy_to_clipboard = saved_clip
     br = open(os.path.join(lap, ".cc-agent.md"), encoding="utf-8").read()
-    check("send back: the note is in the agent's brief and it works again", st == 200 and "## Sent back by the owner" in br
+    check("send back: the note is in the agent's brief and it works again", st == 200 and "## Sent back for changes" in br and "from the owner" in br
           and "keep the owner's README text" in br and team.load_board(repo)["tasks"][1]["status"] == "running", (d, br[:300]))
     team.set_status(repo, "t2", "done")
     with open(os.path.join(lap, "server", "wip.py"), "w") as f:
@@ -948,13 +948,173 @@ def t_claude():
         else:
             server.settings["agents"] = saved
 
+def t_conductor():
+    """Claude conducting the team, with a fake Claude: the fixed command line, plan, check each part, send back with
+    the exact note, give up after MAX_ROUNDS, the whole-feature check, and who may switch it on."""
+    import team
+    import conductor
+    calls, answers = [], []
+
+    class Done:
+        def __init__(self, out, rc=0, err=b""):
+            self.stdout, self.stderr, self.returncode = out, err, rc
+
+    def fake(cmd, input=None, cwd=None, env=None, **kw):
+        calls.append({"cmd": cmd, "input": input.decode("utf-8"), "env": env, "cwd": cwd})
+        a = answers.pop(0) if answers else {"verdict": "approve", "note": "", "summary": "fine"}
+        if isinstance(a, Done):
+            return a
+        return Done(json.dumps({"type": "result", "is_error": False, "result": json.dumps(a), "structured_output": a,
+                                "total_cost_usd": 0.01, "usage": {"input_tokens": 5, "cache_read_input_tokens": 100,
+                                                                  "output_tokens": 20}}).encode())
+    real = (conductor.RUNNER, team.claude_bin, server.save_settings, server.copy_to_clipboard, server.settings.get("conductor"))
+    clip = []
+    conductor.RUNNER, team.claude_bin = fake, (lambda: r"C:\fake\claude.exe")
+    server.save_settings, server.copy_to_clipboard = (lambda: None), clip.append
+    try:
+        cmd = conductor.command("claude.exe", "sonnet", conductor.REVIEW_SCHEMA, conductor.REVIEW_SYSTEM)
+        check("conductor: fixed command line, every tool off, nothing from the goal in it",
+              cmd[cmd.index("--tools") + 1] == "" and "--strict-mcp-config" in cmd and "--no-session-persistence" in cmd
+              and cmd[cmd.index("--model") + 1] in conductor.MODELS, cmd[:12])
+        env = team.claude_env()
+        check("conductor: no ANTHROPIC_* variables, so it runs on your own Claude Code login",
+              not any(k.upper().startswith("ANTHROPIC_") for k in env))
+
+        repo = temp_repo("conductor repo")
+        with open(os.path.join(repo, "api-key.txt"), "w") as f:
+            f.write("sk-not-a-real-key\n")
+        subprocess.run([workspaces.GIT, "-C", repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "add", "-A"], capture_output=True)
+        subprocess.run([workspaces.GIT, "-C", repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "k"], capture_output=True)
+        answers.append({"tasks": [{"agent": "pc", "title": "UI part", "goal": "1. add a button\nDone when: it shows", "owns": ["ui/"]},
+                                  {"agent": "laptop", "title": "Server part", "goal": "1. add /api/x\nDone when: it answers", "owns": ["server/"]}]})
+        ok, msg, b = server.team_plan(repo, "a feature", "conductor")
+        sent = calls[-1]["input"]
+        check("conductor: Claude plans, and the team is marked as conducted", ok and b["conductor"]["on"]
+              and b["planner"]["backend"] == "conductor" and len(b["tasks"]) == 2, msg)
+        check("conductor: the plan sees the small repo whole, but never a file that looks like a key",
+              "=== server/api.py ===" in sent and "sk-not-a-real-key" not in sent and "a feature" in sent)
+        check("conductor: the plan's call is in the log", [c["kind"] for c in b["conductor"].get("calls", [])] == ["plan"], b["conductor"])
+        ok, msg, b2 = team.edit_board(repo, team.DEFAULT_AGENTS, "a feature", b["tasks"])
+        check("conductor: editing the split keeps Claude conducting", b2["conductor"]["on"] is True)
+
+        for t in b2["tasks"]:
+            team.prepare(repo, b2, t, "vscode")
+            t["status"] = "done"
+        b2["state"] = "review"
+        team.save_board(repo, b2)
+        pc = b2["tasks"][0]["worktree"]
+        with open(os.path.join(pc, "ui", "app.js"), "a") as f:
+            f.write("buton()\n")
+        team.commit_work(b2["tasks"][0])
+
+        # 1: sent back with Claude's exact note, the agent is running again and its brief has the note
+        answers.append({"verdict": "send_back", "note": "1. In ui/app.js rename buton() to button().", "summary": "typo"})
+        server.conduct_after(repo, "t1")
+        b = team.load_board(repo)
+        t1 = b["tasks"][0]
+        brief = open(os.path.join(pc, team.BRIEF_FILE), encoding="utf-8").read()
+        check("conductor: Claude got the part's diff and task", "+buton()" in calls[-1]["input"] and "Done when: it shows" in calls[-1]["input"])
+        check("conductor: send_back restarts the agent with Claude's note in its brief",
+              t1["status"] == "running" and t1["feedback"][-1]["by"] == "conductor" and "rename buton() to button()" in brief
+              and "Claude, who conducts this team" in brief, (t1["status"], t1.get("feedback")))
+        check("conductor: a VS Code agent sent back by Claude doesn't touch your clipboard", not clip)
+        check("conductor: the verdict shows on the task", t1["reviews"][-1]["verdict"] == "send_back" and t1["reviews"][-1]["sent"])
+
+        # rounds: after MAX_ROUNDS send-backs, the next one is "over to you"
+        for i in range(conductor.MAX_ROUNDS):
+            team.set_status(repo, "t1", "done")
+            answers.append({"verdict": "send_back", "note": "still wrong %d" % i, "summary": "no"})
+            server.conduct_after(repo, "t1")
+        t1 = team.load_board(repo)["tasks"][0]
+        check("conductor: gives up after %d rounds and leaves it to you" % conductor.MAX_ROUNDS,
+              t1["status"] == "done" and t1["reviews"][-1]["verdict"] == "give_up" and t1["reviews"][-1].get("out_of_rounds")
+              and conductor.rounds(t1) == conductor.MAX_ROUNDS, [r["verdict"] for r in t1["reviews"]])
+        check("conductor: each round shows Claude its earlier feedback", "still wrong 0" in calls[-1]["input"])
+
+        # a failed Claude call changes nothing
+        n = len(calls)
+        answers.append(Done(b"", rc=1, err=b"Not logged in"))
+        b = team.load_board(repo)
+        b["tasks"][1]["status"] = "done"
+        team.save_board(repo, b)
+        server.conduct_after(repo, "t2")
+        t2 = team.load_board(repo)["tasks"][1]
+        check("conductor: a failed call is shown and the part stays done", t2["status"] == "done"
+              and t2["reviews"][-1]["verdict"] == "error" and "Not logged in" in t2["reviews"][-1]["summary"], t2.get("reviews"))
+
+        # both approved -> the whole-feature check; a fix goes back to its owner
+        b = team.load_board(repo)
+        b["tasks"][0]["reviews"], b["tasks"][1]["reviews"] = [], []
+        team.save_board(repo, b)
+        answers += [{"verdict": "approve", "note": "", "summary": "ok"}]
+        server.conduct_after(repo, "t1")
+        check("conductor: no whole-feature check while a part isn't approved", not team.load_board(repo)["conductor"].get("final"))
+        answers += [{"verdict": "approve", "note": "", "summary": "ok"},
+                    {"ok": False, "summary": "the route names differ", "fixes": [{"agent": "laptop", "note": "1. call it /api/x, not /api/y"}]}]
+        server.conduct_after(repo, "t2")
+        b = team.load_board(repo)
+        check("conductor: when all parts are approved Claude checks them together and sends the fix to its owner",
+              calls[-1]["input"].startswith("FEATURE:") and "=== AGENT pc" in calls[-1]["input"]
+              and b["tasks"][1]["status"] == "running" and "/api/x, not /api/y" in b["tasks"][1]["feedback"][-1]["text"], b["conductor"].get("final"))
+        team.set_status(repo, "t2", "done")
+        answers += [{"verdict": "approve", "note": "", "summary": "ok"}, {"ok": True, "summary": "they fit", "fixes": []}]
+        server.conduct_after(repo, "t2")
+        b = team.load_board(repo)
+        check("conductor: all approved and fitting: ready for you to merge, nothing merged",
+              b["conductor"]["final"]["ok"] and all(t["status"] == "done" for t in b["tasks"]), b["conductor"].get("final"))
+        check("conductor: calls and tokens are counted", b["conductor"]["stats"]["calls"] == len(calls)
+              and b["conductor"]["stats"]["in"] > 0, b["conductor"]["stats"])
+
+        # tests without pytest installed: the test file runs as a plain script (live run 2026-11-23)
+        os.makedirs(os.path.join(pc, "tests"), exist_ok=True)
+        open(os.path.join(pc, "tests", "test_export.py"), "w").close()
+        py = __import__("shutil").which("python") or __import__("shutil").which("py")
+        saved_pt = dict(team._pytest)
+        team._pytest[py] = False
+        cmd_np = team.test_command(pc)
+        team._pytest[py] = True
+        cmd_p = team.test_command(pc)
+        team._pytest.clear(); team._pytest.update(saved_pt)
+        os.remove(os.path.join(pc, "tests", "test_export.py"))
+        check("tests: pytest only when it's installed, else the test file as a plain script",
+              cmd_np[1:] == [os.path.join("tests", "test_export.py")] and cmd_p[1:] == ["-m", "pytest", "-q"], (cmd_np, cmd_p))
+
+        # off: nothing is checked
+        n = len(calls)
+        conductor.set_on(repo, False)
+        server.conduct_after(repo, "t1")
+        check("conductor: switched off, Claude isn't called", len(calls) == n)
+
+        # routes: PC only, a fixed list of models
+        st, d = req("POST", "/api/team/conductor", json.dumps({"repo": repo, "on": True}))
+        check("conductor: switched on from the page", st == 200 and team.load_board(repo)["conductor"]["on"], d)
+        st, d = req("POST", "/api/team/conductor", json.dumps({"model": "claude-anything --tools Bash"}))
+        check("conductor: only a model from the fixed list", st == 400 and (server.settings.get("conductor") or {}).get("model") != "claude-anything --tools Bash", d)
+        as_phone(True)
+        try:
+            st, _ = req("POST", "/api/team/conductor", json.dumps({"repo": repo, "on": False}), **PHONE)
+            st2, _ = req("POST", "/api/team/review", json.dumps({"repo": repo, "task": "t1"}), **PHONE)
+        finally:
+            as_phone(False)
+        check("conductor: the phone can't switch it or ask for a check", st == 403 and st2 == 403 and team.load_board(repo)["conductor"]["on"], (st, st2))
+        st, d = req("POST", "/api/team/conductor", json.dumps({"repo": repo, "on": False}), Origin="https://evil.example")
+        check("conductor: a cross-site request is refused", st == 403, st)
+    finally:
+        conductor.RUNNER, team.claude_bin, server.save_settings, server.copy_to_clipboard, cnd = real
+        if cnd is None:
+            server.settings.pop("conductor", None)
+        else:
+            server.settings["conductor"] = cnd
+
+
 def urllib_quote(s):
     import urllib.parse
     return urllib.parse.quote(s, safe="")
 
 
 GROUPS = {"web": t_web, "modules": t_modules, "smuggle": t_smuggle, "key": t_key, "guard": t_guard, "phone": t_phone, "tools": t_tools, "tuner": t_tuner, "laptop": t_laptop,
-          "worktree": t_worktree, "team": t_team, "board": t_board, "teamrun": t_teamrun, "review": t_review, "slots": t_slots, "claude": t_claude}
+          "worktree": t_worktree, "team": t_team, "board": t_board, "teamrun": t_teamrun, "review": t_review, "slots": t_slots, "claude": t_claude,
+          "conductor": t_conductor}
 
 if __name__ == "__main__":
     want = sys.argv[1:] or list(GROUPS)

@@ -34,6 +34,7 @@ command-center/*
 !command-center/fsutil.py
 !command-center/tuner.py
 !command-center/team.py
+!command-center/conductor.py
 !command-center/updater.py
 !command-center/llamaup.py
 !command-center/taskbar.py

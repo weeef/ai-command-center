@@ -40,7 +40,7 @@ That's it. Everything below is optional.
 | **3:web** | Phone access over Tailscale: one button to turn it on, the address to open on your phone, your devices. |
 | **4:mem** | Your memories as a **brain**: every memory is a neuron in its topic's region (about you = frontal lobe, preferences = prefrontal, how-tos = motor strip, projects = parietal, people + events = temporal, facts = occipital, other = cerebellum). Bigger = recalled more often, ring = pinned. Synapses join memories with related meaning; signals travel along them and a neuron fires when the model recalls it. Click a neuron to read/edit/pin/forget it; switch to **tree** for a radial tree by topic. Scroll to zoom, drag to move. |
 | **5:cline** | Route Cline through the command center so it gets memory too, plus a log of every Cline task (steps, memories used, tokens, cache hit rate). |
-| **7:team** | An **agent team**: give one goal, a planner splits it into one task per coding agent with the files each one owns, every agent works in its own git worktree at the same time, and you review each branch (diff, tests) and merge it. See *Agent team*. |
+| **7:team** | An **agent team**: give one goal, a planner splits it into one task per coding agent with the files each one owns, every agent works in its own git worktree at the same time, and you review each branch (diff, tests) and merge it. Optionally **Claude conducts**: it plans, checks every part and sends it back with fixes until it's right. See *Agent team*. |
 | **6:set** | Memory on/off and auto-learning, the memory folder (move it to another drive), import from ChatGPT/Claude, export, the searchable memory list, the theme, and **cloud & web search** (API keys for Claude / ChatGPT / Gemini). |
 
 Keyboard: **Alt+1 … Alt+7** switch tabs. In chat: **Enter** sends, **Shift+Enter** new line, `/help` lists commands
@@ -284,6 +284,34 @@ they made. Open **7:team** (Alt+7):
    they have no uncommitted changes, merged branches are deleted with `git branch -d` (which refuses unmerged
    work), discarded branches only if you tick that too. The uninstaller also lists `<project>-agents` worktrees.
 
+### Claude conducts (optional)
+
+You give Claude the idea; Claude directs the local models. It runs on **your Claude Code login** (the `claude` you're
+signed in to, so your plan's usage, no API key and no per-token bill) and needs Claude Code installed.
+
+- **plan** with *planner: Claude, who then conducts*. Claude writes the split like work orders for smaller models:
+  what the part is for, numbered steps with exact file, function and route names, and a *Done when:* line the agent
+  can check itself. You can still edit the split before you start.
+- Or tick **Claude conducts** under the split of any team, with any planner, at any time; pick the model there
+  (sonnet by default, opus or haiku).
+- When an agent finishes and its tests have run, Claude checks the part: the task, the diff, the test output and the
+  handoff notes. It **approves** it, **sends it back** to the same agent with a numbered list of fixes (it goes
+  into the agent's brief under *Sent back for changes*, and a Claude Code agent starts again by itself), or **gives
+  up** and tells you why. After 3 send-backs on one task it stops and leaves it to you.
+- When every part is approved, Claude checks them **together** (do the names, routes and JSON shapes match?) and can
+  send one part back once more. Then the conductor box says *All parts approved* and you review and merge as usual.
+  **Claude never merges**, and it never sends work back to a cloud agent (that's billed: you do it).
+- A Cline agent that Claude sends back can't be restarted from outside: its panel says so; tell its Cline to read
+  `.cc-agent.md` again. Your clipboard is left alone.
+- Every call shows in the conductor box (what it checked, the verdict, tokens, seconds, and the equivalent API price,
+  which your plan covers). **ask Claude** on a finished part checks it again on demand.
+
+Claude is called as `claude -p` with **every tool turned off**, so it can't read your disk or run anything: it sees only
+what the command center sends on stdin. That is the goal, the repo's file list and README start, the whole repo when
+its tracked text adds up to less than 60 KB, and each agent's diff and test output. Files whose names look like
+secrets (`*key*`, `*secret*`, `*token*`, `.env`, `*.pem`, …) are never sent. The command line is fixed: the model is
+one of sonnet / opus / haiku, and the prompts are in `conductor.py`.
+
 The board (tasks, owners, status, steps, notes, test results) is `.git\cc-team\board.json` inside the project:
 shared by all its worktrees, never committed. The phone can watch 7:team but not plan, start, stop, merge or clean
 up. One team runs at a time; each agent has one task at a time.
@@ -384,6 +412,7 @@ command-center\
   chats.py       saved chats
   workspaces.py  VS Code / Cline / Tailscale helpers, git worktrees for the agents
   team.py        agent team: agent registry, task board, planner prompt, briefs, Claude Code runner, review/merge
+  conductor.py   Claude (your Claude Code login) planning the team, checking each part and sending it back
   tokens.py      tokens-used meter
   tuner.py       measures the fastest settings for each model on this PC (auto-optimise)
   fsutil.py      atomic file writes shared by the modules above
@@ -412,6 +441,9 @@ docs\team-demo.md          a script for recording two agents building one featur
 - The web connector (off by default) only opens public web addresses, and only links that were in the conversation or
   in its own search results; it is capped at 6 calls per reply.
 - Your memories, chats and settings stay in files on your PC (the memory folder). Nothing is uploaded anywhere.
+- *Claude conducts* (7:team, off unless you pick it) sends the goal, the project's file list and its agents' diffs
+  and test output to Claude through your Claude Code login, with every tool off; files that look like secrets are
+  never sent.
 
 ## Uninstall
 
