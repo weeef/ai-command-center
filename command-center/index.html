@@ -967,7 +967,7 @@ body.remote #tags span[data-ws="2"]{display:none}
 <dialog id="modelDlg" aria-labelledby="mdTitle">
   <div class="mdhead"><div class="title" id="mdTitle">models</div><span id="mdHw"></span><button id="mdClose" title="close (Esc)">✕</button></div>
   <div id="mdWarn" hidden></div>
-  <label class="ms mdauto" title="The first time a model is turned on, a few trial runs measure which settings are fastest on this PC (a few minutes). The result is saved and used on every later load."><input type="checkbox" id="mdAuto"> optimise each model for this PC the first time it loads</label>
+  <label class="ms mdauto" title="Every model loads straight away. While you use it, its real reading and writing speed and VRAM are recorded, and each later load tries one other setting, keeping whichever is fastest with VRAM to spare. Loads never wait for test runs. 'optimise' on a model measures everything at once instead (a few minutes)."><input type="checkbox" id="mdAuto"> learn the fastest settings for each model while you use it</label>
   <label class="ms mdauto" title="Two server slots, each with the full context. Measured on a 16 GB card: two agents writing at the same time go 40-60% faster together, each one alone is slower, reading long prompts is no faster, and it costs 0.8-1.2 GB more VRAM. Worth it only when two agents (7:team) use this PC's model at once. Takes effect the next time the model starts."><input type="checkbox" id="mdSlots"> two agents at once on this PC's model (2 slots, +~1 GB VRAM, from the next start)</label>
   <div id="mdList"></div>
   <div class="sect">add a model</div>
@@ -1385,19 +1385,23 @@ function render(){
 /* usage pane: shows either machine. Follows "run on" until you click it, then stays where you put it. */
 let usageView = null;   // null = follow the target; "pc" | "laptop" once clicked
 const mhist = { pc: {gpu: [], cpu: []}, laptop: {gpu: [], cpu: []} };
-function usageKey(){ return usageView || (S && S.target === "laptop" ? "laptop" : "pc"); }
+// The paired device's tab is there only while PAIR has another device on record (S.laptop_name).
+const hasPeer = () => !!(S && S.laptop_name);
+function usageKey(){ return !hasPeer() ? "pc" : usageView || (S && S.target === "laptop" ? "laptop" : "pc"); }
 function renderUsage(){
   if (!S || !S.machines) return;
   const k = usageKey(), M = S.machines[k];
   document.querySelectorAll(".ut").forEach(t => {
     t.classList.toggle("sel", t.dataset.u === k);
+    t.hidden = t.dataset.u === "laptop" && !hasPeer();
     const mm = S.machines[t.dataset.u];
     t.classList.toggle("down", !mm.ok);
     t.title = devName(t.dataset.u) + (t.dataset.u === "pc" ? " (this device)" : "") + (mm.ok ? "" : " (not reachable)") + " · click to show";
   });
   const LM = k === "laptop" && S.laptop_model;
-  $("usageNote").textContent = !M.ok ? "not reachable" : M.name + (LM && LM.state !== "OFF" ? ` · ${shortModel(LM.name)} ${LM.processing ? "busy" : LM.state.toLowerCase()}`
-    : LM && LM.gpu_other ? " · gpu in use outside PAIR" : k === "laptop" ? " · no model loaded" : "");
+  // the tabs already name each device (from PAIR's member list), so the note is only the selected one's status
+  $("usageNote").textContent = !M.ok ? "not reachable" : LM && LM.state !== "OFF" ? `${shortModel(LM.name)} ${LM.processing ? "busy" : LM.state.toLowerCase()}`
+    : LM && LM.gpu_other ? "gpu in use outside PAIR" : k === "laptop" ? "no model loaded" : "";
   hist.gpu = mhist[k].gpu; hist.cpu = mhist[k].cpu;
   const segsOff = id => $(id).querySelectorAll(".segs i").forEach(s => s.classList.remove("f"));
   if (M.gpu) {
@@ -1502,7 +1506,7 @@ document.querySelectorAll(".ut").forEach(t => {
   t.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setUsage(t.dataset.u); } };
 });
 // clicking anywhere else in the usage pane flips to the other machine
-$("usagePane").addEventListener("click", () => setUsage(usageKey() === "pc" ? "laptop" : "pc"));
+$("usagePane").addEventListener("click", () => { if (hasPeer()) setUsage(usageKey() === "pc" ? "laptop" : "pc"); });
 /* ---------------- model picker ----------------
    Every .gguf in models\ shows up (models.py on the server). Each card says how it will run on THIS PC:
    fits on the GPU (fastest), GPU + RAM (MoE experts in RAM, still fast), mostly RAM (slow), or too big. */

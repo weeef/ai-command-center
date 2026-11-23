@@ -229,7 +229,12 @@ def model_info(gpu_util):
         return info
     p = launch.get("proc")
     if p is not None and p.poll() is not None:  # llama-server exited on its own: say why instead of "loading"
+        if part(lambda: recover_launch(p), False, "recover a failed load"):
+            info.update(state="LOADING", key=launch["key"], name=model_name(launch["key"]), note=launch.get("note", ""))
+            return info
         launch.update(proc=None, t=0, fail=models.log_tail(6) or "llama-server exited (code %s)" % p.returncode)
+    if launch.get("note") and not info["note"]:
+        info["note"] = launch["note"]   # why it was restarted (recover_launch); cleared once it is up
     if launch.get("fail"):
         info["note"] = "failed to start: " + launch["fail"].splitlines()[-1][:160]
         info["error"] = launch["fail"]
@@ -248,6 +253,9 @@ def model_info(gpu_util):
         info["state"] = "LOADING"
         return info
     info["state"] = "ON"
+    if launch.get("note"):
+        launch["note"] = ""
+        info["note"] = ""
     try:
         _, props = llama_get("/props")
         props = props or {}
@@ -330,16 +338,116 @@ def model_ctx(m):
     return c if c in models.ctx_choices(m) else models.default_ctx(m)
 
 
-def start_model(m):
-    """llama-server in the background, sized for this PC (models.py); output in command-center\\llama.log."""
-    launch.update(key=m["id"], t=time.time(), fail="", proc=None)
+def start_model(m, ub=None, note="", settle=False):
+    """llama-server in the background, sized for this PC (models.py); output in command-center\\llama.log.
+    `ub` forces a prompt batch size (after a launch whose compute buffers didn't fit, see model_info); `note` is
+    shown with the model's state (why it was restarted)."""
+    launch.update(key=m["id"], t=time.time(), fail="", proc=None, note=note)
     if LU:  # nothing from the llama.cpp folder runs right now: the moment to swap in a downloaded engine update
         done = LU.swap_if_staged()
         if done:
             sys.stderr and print(time.ctime(), done, file=sys.stderr)
     ctx, mode = model_ctx(m), model_mode(m)
     # with the measured settings, if any; two slots only if you turned that on (two agents writing at once)
-    launch["proc"] = models.launch(m, ctx, mode, tuner.best(m, ctx, mode), 2 if settings.get("slots") == 2 else 1)
+    pref_ub = ((settings.get("model_prefs") or {}).get(m["id"]) or {}).get("ub")
+    base = {"ub": int(pref_ub)} if pref_ub else {}   # a smaller batch this model needed (its compute buffers didn't fit)
+    learn = None
+    if ub:
+        tune = dict(tuner.best(m, ctx, mode) or {}, ub=ub)
+    elif settings.get("auto_tune", True) and models.hardware()["vram_gb"]:
+        # learn while in use: start at once with what is known, try one new setting per load (tuner.launch_tune)
+        tune, on = tuner.launch_tune(m, ctx, mode, base, settle)
+        learn = (m["id"], ctx, mode, dict(tune)) if on else None
+    else:
+        tune = dict(tuner.best(m, ctx, mode) or {})
+    if base and int(base["ub"]) < int(tune.get("ub") or 1 << 20):
+        tune["ub"] = base["ub"]
+    launch.update(profiled=bool(tuner.best(m, ctx, mode)), learning=learn, sums=None)
+    launch["proc"] = models.launch(m, ctx, mode, tune or None, 2 if settings.get("slots") == 2 else 1)
+
+
+def recover_launch(p):
+    """llama-server just quit while loading. Restart it at once if that can help, and return True:
+    - its compute buffers didn't fit: with the batch the logged size says fits (remembered for this model)
+    - it ran out of memory with saved optimiser settings: with the defaults (those settings are marked stale)
+    Nothing is measured here, so a recovered load takes one more load, never an optimiser run."""
+    try:
+        with open(models.LOG, encoding="utf-8", errors="replace") as f:
+            text = f.read()
+        m = models.find(launch["key"])
+        args = list(p.args)
+        ub = args[args.index("-ub") + 1]
+    except (OSError, ValueError, TypeError, AttributeError):
+        return False
+    if not m:
+        return False
+    ctx, mode = model_ctx(m), model_mode(m)
+    lt = launch.get("learning")
+    if lt and lt[0] == m["id"] and tuner.failed(m, ctx, mode, lt[3], (models.log_tail(1) or "didn't load")[:160]):
+        start_model(m, note="a setting being tried for %s didn't load: back to the best known one" % m["name"], settle=True)
+        return True
+    if models.compute_oom(text):
+        u = models.fit_ub(text, ub, m, ctx)
+        if not u:
+            return False
+        pref = dict((settings.get("model_prefs") or {}).get(m["id"]) or {})
+        pref["ub"] = u
+        settings.setdefault("model_prefs", {})[m["id"]] = pref
+        save_settings()
+        if lt and lt[0] == m["id"]:
+            tuner.forget(m, ctx, mode)   # the base itself didn't fit: learn again on top of the batch that does
+        start_model(m, note="the prompt batch was too big for %s here: loading again with batch %d" % (m["name"], u))
+        return True
+    if launch.get("profiled") and models.load_oom(text) and tuner.mark_stale(m, ctx, mode):
+        start_model(m, note="the saved optimiser settings no longer fit: loading %s with the defaults" % m["name"])
+        return True
+    return False
+
+
+def learn_watch():
+    """While a model learns its settings (launch["learning"]), add up what llama-server's counters say about real use
+    and the GPU's peak VRAM, and hand them to the tuner. One /metrics read every 5 s; nothing is sent to the model."""
+    prev = None
+    while True:
+        time.sleep(5)
+        lt = launch.get("learning")
+        try:
+            code, text = llama_text("/metrics") if lt else (None, None)
+        except OSError:
+            code, text = None, None
+        vals = tuner.parse_counters(text) if code == 200 else None
+        if not lt or not vals:
+            prev = None
+            continue
+        if prev is None or prev[0] is not lt or any(vals[k] < prev[1][k] for k in vals):
+            prev = (lt, vals)   # first read of this load, or the server restarted: counters start over
+            launch["sums"] = {"n_out": 0, "s_out": 0.0, "n_in": 0, "s_in": 0.0, "vram": None}
+            continue
+        s, p0 = launch.get("sums"), prev[1]
+        if s is None:
+            continue
+        s["n_in"] += vals["llamacpp:prompt_tokens_total"] - p0["llamacpp:prompt_tokens_total"]
+        s["s_in"] += vals["llamacpp:prompt_seconds_total"] - p0["llamacpp:prompt_seconds_total"]
+        s["n_out"] += vals["llamacpp:tokens_predicted_total"] - p0["llamacpp:tokens_predicted_total"]
+        s["s_out"] += vals["llamacpp:tokens_predicted_seconds_total"] - p0["llamacpp:tokens_predicted_seconds_total"]
+        g = gpu()
+        if g and g.get("used"):
+            s["vram"] = round(max(s["vram"] or 0.0, g["used"] / 1024 ** 3), 2)
+        prev = (lt, vals)
+        m = models.find(lt[0])
+        if m and part(lambda: tuner.observe(m, lt[1], lt[2], lt[3], s), False, "learn"):
+            if launch.get("learning") is lt:
+                launch["learning"] = None
+
+
+def llama_text(path, timeout=1.5):
+    c = http.client.HTTPConnection(*LLAMA, timeout=timeout)
+    try:
+        c.request("GET", path, headers={"Authorization": "Bearer " + api_key()})
+        r = c.getresponse()
+        return r.status, r.read().decode("utf-8", "replace")
+    finally:
+        c.close()
 
 
 def tune_then_start(m):
@@ -384,7 +492,7 @@ def model_action(action, key, restart=False, retune=False):
         ctx, mode = model_ctx(m), model_mode(m)
         if retune:
             tuner.forget(m, ctx, mode)
-        if (retune or settings.get("auto_tune", True)) and models.hardware()["vram_gb"] and not tuner.profile(m, ctx, mode):
+        if retune and models.hardware()["vram_gb"]:   # "optimise": the measured search, only when asked
             tuner.S.update(running=True, model=m["id"], cancel=False, msg="optimising %s for this PC" % m["name"])
             threading.Thread(target=tune_then_start, args=(m,), daemon=True).start()
             return True, "optimising %s for this PC first (a few minutes, once per model)" % m["name"]
@@ -2401,6 +2509,7 @@ def main():
                    llm_json, lambda: active_streams > 0 or switching["on"], chats)
     token_watch = tokens.TokenWatch(LLAMA, PAIR, api_key)
     threading.Thread(target=token_watch.run, daemon=True).start()
+    threading.Thread(target=learn_watch, daemon=True).start()
     srv.serve_forever()
 
 

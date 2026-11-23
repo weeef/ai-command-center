@@ -417,6 +417,43 @@ def launch(m, ctx, mode=None, tune=None, slots=1):
     return p
 
 
+# Prompt batch sizes to step down through when a model's compute buffers don't fit. Some architectures (seen
+# 2026-11-23 with Inkling-2-Mini, inkling2_loop) don't use fused flash attention in llama.cpp, so their compute
+# buffer grows with context x batch: 131072 x 2048 asked for 57 GB on a 16 GB card; 131072 x 256 fits.
+SMALLER_UB = (1024, 512, 256, 128)
+
+
+def compute_oom(text):
+    """True when llama-server quit because its compute buffers didn't fit: the prompt batch (-ub) is too big here."""
+    return bool(re.search(r"failed to allocate compute|compute pp buffers", text or "", re.I))
+
+
+def smaller_ub(ub):
+    """The next batch size to try below `ub`, or None."""
+    return next((u for u in SMALLER_UB if u < int(ub)), None)
+
+
+def load_oom(text):
+    """True when llama-server quit because something (weights, KV cache or compute buffers) didn't fit in memory."""
+    return bool(re.search(r"out of memory|cudaMalloc failed|failed to allocate|unable to allocate", text or "", re.I))
+
+
+def fit_ub(text, ub, m, ctx, hw=None):
+    """After a compute-buffer out-of-memory at batch `ub`: the batch that should fit, in one step instead of halving
+    one failed load at a time (each failed load costs a full model load). llama-server logs the size it tried to
+    allocate; the compute buffer grows about linearly with the batch, so scale the batch to what the GPU has left
+    after the KV cache and a reserve. None when nothing smaller is left to try."""
+    ub = int(ub)
+    sizes = [float(x) for x in re.findall(r"allocating ([0-9.]+) MiB", text or "")]
+    hw = hw or hardware()
+    if not sizes or not hw.get("vram_gb"):
+        return smaller_ub(ub)
+    budget = max(512.0, (hw["vram_gb"] - 1.5 - kv_gb(m, ctx)) * 1024)
+    target = ub * budget / max(sizes)
+    smaller = [u for u in SMALLER_UB if u < ub]
+    return next((u for u in smaller if u <= target), smaller[-1] if smaller else None)
+
+
 def log_tail(n=12):
     try:
         with open(LOG, encoding="utf-8", errors="replace") as f:

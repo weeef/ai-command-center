@@ -13,6 +13,14 @@ What is tried (the settings that measurably matter; thread count, priority and p
 A result belongs to one model file, one context size, one mode (fast text / images) and one GPU; change any of
 them and it is measured again. A newer llama.cpp build does not discard results (the engine updates often): use
 "optimise again" in the model list after a big engine change.
+
+The measured search below runs only when asked ("optimise" in the model list). Without it, models learn while in
+use (see "learning while in use"): no load ever waits for trial runs.
+
+When the default batch doesn't fit at all (some architectures, e.g. Inkling-2-Mini, keep no fused attention, so
+their compute buffer grows with context x batch), the size llama-server logs sets the batch that fits in one retry,
+and the rest is measured on top of it. If saved settings later stop loading, server.py falls back to the defaults
+at once (mark_stale) instead of measuring again.
 """
 import http.client
 import json
@@ -70,11 +78,29 @@ def forget(m, ctx, mode, hw=None):
             fsutil.write_json(PROFILES, d, indent=1)
 
 
+def mark_stale(m, ctx, mode, hw=None):
+    """The saved settings no longer load (engine or driver update, less free VRAM): fall back to the defaults from
+    now on without measuring again, so the next load isn't any slower. "optimise again" measures afresh."""
+    with _lock:
+        d = _all()
+        p = d.get(key(m, ctx, mode, hw or models.hardware()))
+        if isinstance(p, dict) and p.get("best"):
+            p.update(best={}, stale=int(time.time()))
+            fsutil.write_json(PROFILES, d, indent=1)
+            return True
+    return False
+
+
 def summary(m, ctx, mode, hw=None):
     """One line for the model list, or None when this model hasn't been measured."""
     p = profile(m, ctx, mode, hw)
     if not p:
         return None
+    lp = learning(m, ctx, mode, hw)
+    if lp:
+        s = "learning the fastest settings while you use it: %d of about %d judged" % lp
+        r = p.get("result") or {}
+        return s + (" (best so far %.0f tok/s writing)" % r["tg"] if r.get("tg") else "")
     r, b = p.get("result") or {}, p.get("base") or {}
     s = "optimised for this PC: %.0f tok/s writing, %s tok/s reading" % (r.get("tg") or 0, format(int(r.get("pp") or 0), ","))
     gain = (r.get("tg") or 0) / b["tg"] - 1 if b.get("tg") else 0
@@ -218,6 +244,7 @@ def trial(m, ctx, mode, tune, quick=False):
     log = open(LOG, "a", encoding="utf-8", errors="replace")
     log.write("\n# %s  %s\n# %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), describe(tune), " ".join('"%s"' % a if " " in a else a for a in args)))
     log.flush()
+    start = log.tell()
     t0 = time.time()
     p = subprocess.Popen(args, cwd=models.ROOT, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, creationflags=NOWIN)
     S["proc"] = p
@@ -229,6 +256,16 @@ def trial(m, ctx, mode, tune, quick=False):
                 return res
             if p.poll() is not None:
                 res["why"] = "didn't load (most likely out of memory)"
+                try:
+                    with open(LOG, encoding="utf-8", errors="replace") as f:
+                        f.seek(start)
+                        text = f.read()
+                        if models.compute_oom(text):
+                            res["compute_oom"] = True
+                            res["fit_ub"] = models.fit_ub(text, args[args.index("-ub") + 1], m, ctx)
+                            res["why"] = "didn't load: batch %s needs more VRAM than there is" % args[args.index("-ub") + 1]
+                except (OSError, ValueError):
+                    pass
                 return res
             if time.time() - t0 > 600:
                 res["why"] = "took more than 10 minutes to load"
@@ -280,6 +317,152 @@ def trial(m, ctx, mode, tune, quick=False):
         log.close()
 
 
+# ------------------------------------------------------------------ learning while in use
+# No trial runs before a model can be used: every load starts at once. While you use the model, llama-server's own
+# counters (tokens and seconds spent reading and writing) and the GPU's peak VRAM are recorded for the settings it
+# was started with. Once those settings have done enough real work they are judged, and the next load tries the
+# next candidate (one per load). The same rules as the measured search (choose) pick the winner; when every
+# candidate is judged, the winner is kept and nothing more is tried. "optimise" in the model list still runs the
+# measured search on request.
+LEARN_OUT = 1500      # tokens written in real use before a setting is judged
+LEARN_IN = 2000       # tokens read (for the batch-size judgement); judged on writing alone after 3 x LEARN_OUT
+LEARN_EARLY = 200     # ...but a candidate writing below LEARN_SLOW x the best known speed is judged after this many
+LEARN_SLOW = 0.8
+COUNTERS = ("llamacpp:prompt_tokens_total", "llamacpp:prompt_seconds_total",
+            "llamacpp:tokens_predicted_total", "llamacpp:tokens_predicted_seconds_total")
+
+
+def parse_counters(text):
+    """llama-server's /metrics -> {name: value} for COUNTERS, or None when they aren't all there."""
+    vals = {}
+    for line in (text or "").splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[0] in COUNTERS:
+            try:
+                vals[parts[0]] = float(parts[1])
+            except ValueError:
+                pass
+    return vals if len(vals) == len(COUNTERS) else None
+
+
+def _same(a, b):
+    return json.dumps(a or {}, sort_keys=True) == json.dumps(b or {}, sort_keys=True)
+
+
+def _candidates(m, ctx, mode, hw, base):
+    """Placements to learn, on top of the base batch. Batch sizes come after, on the winning placement."""
+    return [dict(t, **({"ub": base["ub"]} if "ub" in base else {})) for t in placements(m, ctx, hw)]
+
+
+def _batches_for(m, ctx, mode, hw, best, base):
+    if "ub" in base:   # the default batch didn't fit: bigger ones can't, smaller ones were the fallback
+        return []
+    cmd = models.command(m, ctx, mode)
+    ub_now = int(cmd[cmd.index("-ub") + 1]) if "-ub" in cmd else 2048
+    return [dict(best, **u) for u in batches(hw, ub_now)]
+
+
+def launch_tune(m, ctx, mode, base=None, settle=False, hw=None):
+    """The settings to start this model with now, and whether they are being learned (-> (tune, learning)).
+    `base` is what the model starts with before anything is known ({} or a fallback batch). `settle` starts the
+    best known settings without trying anything new (after a candidate failed to load)."""
+    hw = hw or models.hardware()
+    base = dict(base or {})
+    k = key(m, ctx, mode, hw)
+    with _lock:
+        d = _all()
+        p = d.get(k)
+        if not isinstance(p, dict) or not isinstance(p.get("best"), dict):
+            p = {"best": base, "when": int(time.time()), "gpu": hw.get("gpu"),
+                 "learn": {"base": base, "trying": base, "queue": _candidates(m, ctx, mode, hw, base),
+                           "batches": False, "done": []}}
+            d[k] = p
+            fsutil.write_json(PROFILES, d, indent=1)
+            return base, True
+        L = p.get("learn")
+        if not isinstance(L, dict) or settle:
+            return p["best"], False
+        if L.get("trying") is None:
+            if not L["queue"] and not L["batches"]:
+                L["batches"] = True
+                L["queue"] = _batches_for(m, ctx, mode, hw, p["best"], L["base"])
+            if not L["queue"]:
+                p.pop("learn")   # everything judged: keep the winner, try nothing more
+                fsutil.write_json(PROFILES, d, indent=1)
+                return p["best"], False
+            L["trying"] = L["queue"].pop(0)
+            fsutil.write_json(PROFILES, d, indent=1)
+        return L["trying"], True
+
+
+def _rec(tune, ok, tg=0.0, pp=0.0, vram=None, why="", n_out=0, n_in=0):
+    return {"tune": tune, "ok": ok, "tg": round(tg, 1), "pp": round(pp, 1), "vram_gb": vram, "why": why,
+            "n_out": int(n_out), "n_in": int(n_in)}
+
+
+def _judge(p, hw):
+    """Re-pick the best from everything judged so far (the base is always judged first)."""
+    L = p["learn"]
+    done = [r for r in L["done"] if r.get("ok")]
+    base = next((r for r in done if _same(r["tune"], L["base"])), None)
+    if not base:
+        return
+    winner = choose(base, [r for r in L["done"] if not _same(r["tune"], L["base"])], hw)
+    p.update(best=winner["tune"], result={k: winner[k] for k in ("tg", "pp", "vram_gb")},
+             base={k: base[k] for k in ("tg", "pp", "vram_gb")}, when=int(time.time()))
+
+
+def observe(m, ctx, mode, tune, sums, hw=None):
+    """Real use of `tune` so far this load: sums = {"n_out", "s_out", "n_in", "s_in", "vram"}. Judges the setting
+    once it has done enough work and returns True then (stop observing this load)."""
+    if sums["s_out"] <= 0 or sums["n_out"] < LEARN_EARLY:
+        return False
+    enough = sums["n_out"] >= LEARN_OUT and (sums["n_in"] >= LEARN_IN or sums["n_out"] >= 3 * LEARN_OUT)
+    hw = hw or models.hardware()
+    with _lock:
+        d = _all()
+        p = d.get(key(m, ctx, mode, hw))
+        L = isinstance(p, dict) and p.get("learn")
+        if not L or not _same(L.get("trying"), tune):
+            return True
+        # a candidate already clearly slower than the best known one is judged early, so it isn't tried again
+        best_tg = (p.get("result") or {}).get("tg") or 0
+        if not enough and not (best_tg and sums["n_out"] / sums["s_out"] < best_tg * LEARN_SLOW):
+            return False
+        pp = sums["n_in"] / sums["s_in"] if sums["s_in"] > 0 else 0.0
+        L["done"].append(_rec(tune, True, sums["n_out"] / sums["s_out"], pp, sums.get("vram"),
+                              n_out=sums["n_out"], n_in=sums["n_in"]))
+        L["trying"] = None
+        _judge(p, hw)
+        fsutil.write_json(PROFILES, d, indent=1)
+    return True
+
+
+def failed(m, ctx, mode, tune, why, hw=None):
+    """A candidate being learned didn't load: never try it again. True if it was a candidate (not the base)."""
+    hw = hw or models.hardware()
+    with _lock:
+        d = _all()
+        p = d.get(key(m, ctx, mode, hw))
+        L = isinstance(p, dict) and p.get("learn")
+        if not L or not _same(L.get("trying"), tune) or _same(tune, L["base"]):
+            return False
+        L["done"].append(_rec(tune, False, why=why))
+        L["trying"] = None
+        fsutil.write_json(PROFILES, d, indent=1)
+    return True
+
+
+def learning(m, ctx, mode, hw=None):
+    """Progress for the model list: (judged, total) while learning, else None."""
+    p = _all().get(key(m, ctx, mode, hw or models.hardware()))
+    L = isinstance(p, dict) and p.get("learn")
+    if not L:
+        return None
+    n = len(L["done"])
+    return n, n + len(L["queue"]) + (1 if L.get("trying") is not None else 0) + (0 if L["batches"] else 2)
+
+
 # ------------------------------------------------------------------ the search
 def _safe(r, hw):
     return r["ok"] and (not hw.get("vram_gb") or r["vram_gb"] is None or r["vram_gb"] <= hw["vram_gb"] - HEADROOM_GB)
@@ -291,7 +474,8 @@ def choose(base, trials, hw):
     # placement: the fastest writer and, among those within 3% of it, the one that uses the least VRAM (room to
     # spare matters more than a difference that small: a model that touches the VRAM limit slows to a crawl)
     best = base
-    cands = [r for r in trials if "ub" not in r["tune"] and _safe(r, hw)]
+    bub = base["tune"].get("ub")
+    cands = [r for r in trials if r["tune"].get("ub") == bub and _safe(r, hw)]
     if cands:
         top = max(r["tg"] for r in cands)
         if top > base["tg"] * WORTH:
@@ -300,7 +484,7 @@ def choose(base, trials, hw):
             best = min(near, key=lambda r: (r["vram_gb"] if r["vram_gb"] is not None else 99.0, -r["tg"]))
     place = best
     for r in trials:   # batch size, measured on top of the chosen placement
-        if "ub" not in r["tune"] or not _safe(r, hw):
+        if r["tune"].get("ub") == bub or not _safe(r, hw):
             continue
         if r["tg"] < place["tg"] * 0.97:
             continue
@@ -335,12 +519,25 @@ def optimise(m, ctx, mode, quick=False):
             S["msg"] = "optimising %s: test %d of %d (%s)" % (m["name"], S["step"], S["of"], describe(tune))
             return trial(m, ctx, mode, tune, quick)
 
-        base = run(None)
+        base, floor = run(None), {}
         if S["cancel"]:
             return None
+        # The default batch doesn't fit at all (compute buffer out of memory): jump to the batch the reported size
+        # says fits (usually one retry), and measure everything else on top of it. Bigger batches can't fit then.
+        u = base.get("fit_ub")
+        while u and not base["ok"]:
+            S["of"] += 1
+            floor = {"ub": u}
+            base = run(floor)
+            if S["cancel"]:
+                return None
+            u = base.get("fit_ub")
         if not base["ok"]:
             S["msg"] = "couldn't optimise %s: %s" % (m["name"], base["why"])
             return None
+        if floor:
+            place, ubs = [dict(t, **floor) for t in place], []
+            S["of"] -= len(batches(hw, ub_now))
         trials, too_low = [], None
         for t in place:
             if S["cancel"]:
@@ -363,7 +560,7 @@ def optimise(m, ctx, mode, quick=False):
         # The default ran first, possibly with the model file not yet in Windows' file cache or the GPU still
         # settling, so it is measured once more now and the better run counts. Without this, a slow first run
         # would make every other setting look like a huge gain.
-        again = run(None)
+        again = run(floor or None)
         if S["cancel"]:
             return None
         if again["ok"] and again["tg"] > base["tg"]:

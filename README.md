@@ -141,23 +141,29 @@ the desktop):
 
 ### Optimise any model automatically
 
-In the model list, **optimise each model for this PC the first time it loads** is on by default. The first time you
-turn a model on, the command center starts a few trial copies of it one after another on a spare port, each with
-different settings, has each one read a long prompt and write a short text, and keeps the fastest settings that
-leave VRAM to spare. That takes a few minutes, once; every later load uses the saved result straight away. It works
-for any GGUF, not only the built-in models.
+In the model list, **learn the fastest settings for each model while you use it** is on by default. A model always
+loads straight away: no trial runs before you can use it, so load time is just what this PC needs to load it. While
+you use it, the command center reads llama-server's own counters (tokens and seconds spent reading and writing) and
+the GPU's peak VRAM every few seconds; nothing extra is sent to the model. Once a setting has done enough real work
+(about 1,500 tokens written) it is judged, and the next time the model loads it tries one other setting. When every
+candidate has been judged the fastest is kept and nothing more is tried. It works for any GGUF on any NVIDIA GPU.
 
 - **What is tried:** how much of the model sits on the GPU (llama.cpp's own fit with different VRAM reserves, and
-  for mixture-of-experts models the number of expert layers kept in RAM) and the prompt batch size.
+  for mixture-of-experts models the number of expert layers kept in RAM), then the prompt batch size on the winner.
 - **How it decides:** writing speed first. A change has to be at least 3% faster to replace the default, a setting
-  that leaves less than 0.6 GB of VRAM free is never chosen, and of
-  two near-equal settings the one using less VRAM wins, because a model that touches the VRAM limit slows to a crawl.
-  The default is measured twice (first and last), so a slow first load can't make everything else look better.
-- **When it runs again:** a result belongs to one model file, context size, mode (fast text / images) and GPU.
-  Change one and that combination is measured the next time it loads. **optimise again** on a model's card repeats
-  it on request, for example after closing other apps that use the GPU or after a big llama.cpp update.
-- Turning the model off cancels a running optimisation. Results are in `command-center\tuning.json`, the trial
-  servers' output in `command-center\tune.log`.
+  that leaves less than 0.6 GB of VRAM free is never chosen, and of two near-equal settings the one using less VRAM
+  wins, because a model that touches the VRAM limit slows to a crawl. A setting that is clearly slower (below 80% of
+  the best so far) is judged after a few hundred tokens, so a bad one is dropped quickly.
+- **When a load fails:** if the default prompt batch doesn't fit (some architectures, such as Inkling-2-Mini, need
+  memory that grows with context x batch), the size llama-server reports sets the batch that fits and it loads again
+  at once; that batch is remembered for the model. A setting being tried that doesn't load is never tried again and
+  the best known one starts at once. Saved settings that stop fitting (a driver or engine update, less free VRAM)
+  fall back to the defaults instead of failing.
+- **When it learns again:** a result belongs to one model file, context size, mode (fast text / images) and GPU.
+  Change one and that combination is learned from scratch.
+- **optimise / optimise again** on a model's card measures everything at once instead: a few trial copies on a spare
+  port, a few minutes, only when you ask. Turning the model off cancels it. Results are in
+  `command-center\tuning.json`, the trial servers' output in `command-center\tune.log`.
 
 Measure with the programs you normally keep open: what else is using VRAM at that moment decides what fits.
 
@@ -414,7 +420,7 @@ command-center\
   team.py        agent team: agent registry, task board, planner prompt, briefs, Claude Code runner, review/merge
   conductor.py   Claude (your Claude Code login) planning the team, checking each part and sending it back
   tokens.py      tokens-used meter
-  tuner.py       measures the fastest settings for each model on this PC (auto-optimise)
+  tuner.py       learns the fastest settings for each model while in use; "optimise" measures them on request
   fsutil.py      atomic file writes shared by the modules above
   index.html     the whole UI (no build step, works offline)
   fonts\         Inter and IBM Plex Mono (SIL Open Font License)

@@ -255,6 +255,24 @@ def t_tuner():
     check("tuner: a batch size that reads faster wins", tuner.choose(base, [r({"ub": 4096}, 80, 2600, 15.3)], hw)["tune"] == {"ub": 4096})
     check("tuner: a batch size that slows writing loses", tuner.choose(base, [r({"ub": 4096}, 43, 2600, 15.2)], hw)["tune"] == {})
     check("tuner: same speed with 0.7 GB less VRAM wins", tuner.choose(base, [r({"ub": 1024}, 81, 2010, 14.2)], hw)["tune"] == {"ub": 1024})
+    # a model whose compute buffers only fit with a smaller batch: placements are measured on top of that batch
+    small = r({"ub": 256}, 60, 900, 13.6)
+    check("tuner: with a smaller batch as the base, a faster placement on it wins",
+          tuner.choose(small, [r({"fit_target": 1024, "ub": 256}, 70, 900, 13.9)], hw)["tune"] == {"fit_target": 1024, "ub": 256})
+    check("tuner: with a smaller batch as the base, nothing better keeps that batch", tuner.choose(small, [r({"fit_target": 512, "ub": 256}, 60, 900, 14.0)], hw)["tune"] == {"ub": 256})
+    oom = "E ggml_gallocr_reserve_n_impl: failed to allocate CUDA0 buffer\nE llama_init_from_model: failed to initialize the context: failed to allocate compute pp buffers"
+    check("models: a compute-buffer out-of-memory is recognised", server.models.compute_oom(oom) and not server.models.compute_oom("E unknown model architecture"))
+    check("models: the batch steps down 2048 -> 1024 -> ... -> 128, then stops",
+          [server.models.smaller_ub(u) for u in (2048, 1024, 512, 256, 128)] == [1024, 512, 256, 128, None])
+    # one retry, not one per halving: Inkling-2-Mini at 128K asked for 57 GB at batch 2048 on a 16 GB card, 256 fits
+    fake = {"_meta": {"x.attention.head_count": 24, "x.attention.head_count_kv": 8, "x.attention.key_length": 128,
+                      "x.attention.value_length": 128}, "arch": "x", "layers": 24}
+    big = "E ggml_backend_cuda_buffer_type_alloc_buffer: allocating 57257.49 MiB on device 0: cudaMalloc failed: out of memory"
+    check("models: the batch that fits is found from the logged size in one step",
+          server.models.fit_ub(big, 2048, fake, 131072, {"vram_gb": 15.9}) == 256, server.models.fit_ub(big, 2048, fake, 131072, {"vram_gb": 15.9}))
+    check("models: without a logged size it halves", server.models.fit_ub("failed to allocate compute pp buffers", 2048, fake, 131072, {"vram_gb": 15.9}) == 1024)
+    check("models: any out-of-memory is recognised, a missing architecture is not",
+          server.models.load_oom(big) and not server.models.load_oom("unknown model architecture: 'x'"))
     lib = server.models.scan()
     if not lib or not server.models.hardware()["vram_gb"]:
         return print("skip tuner: command line (needs a model in the models folder and an NVIDIA GPU)")
@@ -262,6 +280,58 @@ def t_tuner():
     cmd = server.models.command(m, 16384, None, {"moe": 21, "ub": 4096})
     check("tuner: measured settings reach the command line", "--n-cpu-moe" in cmd and cmd[cmd.index("--n-cpu-moe") + 1] == "21"
           and cmd[cmd.index("-ub") + 1] == "4096" and cmd[cmd.index("-b") + 1] == "4096", cmd)
+
+
+def t_learn():
+    """Learning while in use: loads never wait, one new setting per load, the winner is kept (no model loaded)."""
+    import tuner
+    tmp = tempfile.mkdtemp()
+    old = (tuner.PROFILES, tuner.placements, tuner._batches_for)
+    tuner.PROFILES = os.path.join(tmp, "tuning.json")
+    f = os.path.join(tmp, "x.gguf")
+    with open(f, "w") as fh:
+        fh.write("x")
+    m, hw, C = {"id": "x.gguf", "_path": f, "name": "x", "mtp": False, "mmproj": None}, {"gpu": "test", "vram_gb": 16.0}, 32768
+    tuner.placements = lambda m, ctx, hw: [{"fit_target": 1024}, {"moe": 20}]
+    tuner._batches_for = lambda m, ctx, mode, hw, best, base: [dict(best, ub=4096)]
+    use = lambda tg, pp, v=14.0: {"n_out": 2000, "s_out": 2000 / tg, "n_in": 3000, "s_in": 3000 / pp, "vram": v}
+    lt = lambda **kw: tuner.launch_tune(m, C, None, {}, hw=hw, **kw)
+    try:
+        t, on = lt()
+        check("learn: the first load starts at once with the defaults", t == {} and on, (t, on))
+        check("learn: not judged before enough real use", not tuner.observe(m, C, None, t, dict(use(80, 2000), n_out=100), hw))
+        check("learn: judged after enough real use", tuner.observe(m, C, None, t, use(80, 2000), hw))
+        t, on = lt()
+        check("learn: the next load tries one candidate", t == {"fit_target": 1024} and on, t)
+        check("learn: a setting not judged yet is tried again on the next load", lt()[0] == {"fit_target": 1024})
+        tuner.observe(m, C, None, t, use(81, 2000), hw)   # not clearly faster: the default stays
+        t, _ = lt()
+        check("learn: a clearly slower candidate is judged early (after a few hundred tokens)",
+              t == {"moe": 20} and tuner.observe(m, C, None, t, dict(use(12, 2000), n_out=250, s_out=250 / 12), hw), t)
+        tuner.forget(m, C, None, hw); t, _ = lt(); tuner.observe(m, C, None, t, use(80, 2000), hw); t, _ = lt()
+        tuner.observe(m, C, None, t, use(81, 2000), hw)
+        t, _ = lt()
+        check("learn: then the next candidate", t == {"moe": 20}, t)
+        check("learn: a candidate that didn't load is recorded", tuner.failed(m, C, None, t, "out of memory", hw))
+        check("learn: after a failed candidate the best known starts, nothing new", lt(settle=True) == ({}, False))
+        check("learn: the base itself is never marked failed", not tuner.failed(m, C, None, {}, "x", hw))
+        t, _ = lt()
+        check("learn: batch sizes come last, on the winning placement", t == {"ub": 4096}, t)
+        tuner.observe(m, C, None, t, use(80, 2600, 14.3), hw)
+        t, on = lt()
+        check("learn: when everything is judged the winner is kept and nothing more is tried", t == {"ub": 4096} and not on, (t, on))
+        check("learn: the model list shows the result", "optimised for this PC" in (tuner.summary(m, C, None, hw) or ""), tuner.summary(m, C, None, hw))
+        tuner.forget(m, C, None, hw)
+        t, on = tuner.launch_tune(m, C, None, {"ub": 256}, hw=hw)
+        check("learn: a fallback batch is the base, and placements are tried on top of it",
+              t == {"ub": 256} and on and lt()[0] == {"ub": 256} and tuner.observe(m, C, None, t, use(60, 900), hw) and lt()[0] == {"fit_target": 1024, "ub": 256})
+        met = "\n".join(["# HELP x", "llamacpp:prompt_tokens_total 3000", "llamacpp:prompt_seconds_total 1.5",
+                         "llamacpp:tokens_predicted_total 200", "llamacpp:tokens_predicted_seconds_total 2.5", ""])
+        check("learn: llama-server's counters are read", tuner.parse_counters(met) == {"llamacpp:prompt_tokens_total": 3000.0,
+              "llamacpp:prompt_seconds_total": 1.5, "llamacpp:tokens_predicted_total": 200.0, "llamacpp:tokens_predicted_seconds_total": 2.5})
+        check("learn: missing counters are ignored", tuner.parse_counters("llamacpp:prompt_tokens_total 1") is None)
+    finally:
+        tuner.PROFILES, tuner.placements, tuner._batches_for = old
 
 
 def t_web():
@@ -1112,7 +1182,7 @@ def urllib_quote(s):
     return urllib.parse.quote(s, safe="")
 
 
-GROUPS = {"web": t_web, "modules": t_modules, "smuggle": t_smuggle, "key": t_key, "guard": t_guard, "phone": t_phone, "tools": t_tools, "tuner": t_tuner, "laptop": t_laptop,
+GROUPS = {"web": t_web, "modules": t_modules, "smuggle": t_smuggle, "key": t_key, "guard": t_guard, "phone": t_phone, "tools": t_tools, "tuner": t_tuner, "learn": t_learn, "laptop": t_laptop,
           "worktree": t_worktree, "team": t_team, "board": t_board, "teamrun": t_teamrun, "review": t_review, "slots": t_slots, "claude": t_claude,
           "conductor": t_conductor}
 
