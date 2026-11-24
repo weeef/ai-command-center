@@ -199,6 +199,29 @@ per reply.
 
 ---
 
+## Skills from GitHub (optional)
+
+Skills are instruction packs: a folder with a `SKILL.md` (YAML front matter with `name` and `description`, then the
+instructions), plus any reference files it points to. This is the same format Claude uses, so repos like
+[anthropics/skills](https://github.com/anthropics/skills), Claude Code plugin marketplaces, or any repo with SKILL.md
+files work with your local models.
+
+In **Settings → skills**, paste a GitHub link (`owner/repo`, the repo URL, a folder `…/tree/main/skills/pdf`, or one
+`…/blob/…/SKILL.md`) and press **look inside**. The repo is downloaded once as a zip (no GitHub API, so no token or
+rate limit), every SKILL.md in it is listed, and you tick which ones to install. Each skill can be turned on/off,
+updated from its repo (↻) or removed.
+
+- **Chat:** the model sees a one-line list of the skills that are on. When a request fits one, it calls the
+  `use_skill` tool, gets the full instructions (and can then load a file the skill points to), and you see
+  `🧩 used skill …` in the chat. Only the skills it uses cost context.
+- **Cline:** the same list goes into the task message, with each SKILL.md's path, and Cline reads the files itself
+  (toggle in the pane).
+- Nothing in a skill is ever run by the command center. Scripts a skill ships are shown to the model as text only.
+  Skills are instructions from whoever wrote them, so install ones you'd trust a coworker to hand you.
+- Files live in `skills\<name>\` (with a `skill.json` recording the repo, branch and folder). Not in the repo.
+
+---
+
 ## Web search and a stronger cloud model (optional)
 
 Give your local model two tools it can use when it decides they help:
@@ -413,6 +436,7 @@ command-center\
   importers.py   ChatGPT / Claude export readers
   cloud.py       optional web search / stronger-model tools (Claude, ChatGPT, Gemini)
   webtool.py     the web connector: free web search and page reading as tools for the local model
+  skills.py      skills imported from GitHub (SKILL.md packs) and the use_skill tool
   updater.py     update check and install (from this GitHub repo)
   llamaup.py     llama.cpp engine updates (official builds, checksum-verified, roll back)
   chats.py       saved chats
@@ -433,7 +457,7 @@ docs\team-demo.md          a script for recording two agents building one featur
 ```
 
 **Not in the repo** (created on your PC): `api-key.txt`, `command-center\secrets.json` (cloud keys), `llm-config.bat`, `llama.cpp\`, `models\`, `memory\`,
-`command-center\settings.json`, token logs, browser/VS Code profiles.
+`command-center\settings.json`, `skills\`, token logs, browser/VS Code profiles.
 
 ## Privacy and security
 

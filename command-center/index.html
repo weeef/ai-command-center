@@ -768,7 +768,7 @@ body.remote .tags>span[data-ws="2"]{display:none}
   <div class="sep">│</div>
   <div id="clock">--:--:--</div>
   <div id="tagsSet" class="tags" role="tablist">
-    <span data-ws="6" role="tab" tabindex="0" title="settings: memory, location, import, web search, updates, appearance (Alt+7)">⚙<b class="tw">&nbsp;Settings</b></span>
+    <span data-ws="6" role="tab" tabindex="0" title="settings: memory, location, import, skills, web search, updates, appearance (Alt+7)">⚙<b class="tw">&nbsp;Settings</b></span>
   </div>
 </div>
 <main id="ws1">
@@ -928,6 +928,7 @@ body.remote .tags>span[data-ws="2"]{display:none}
       <div class="memloc"><textarea id="impPaste" rows="3" maxlength="200000" placeholder="paste memories here, one per line" style="flex:1;min-width:0;background:var(--bg2);color:var(--fg);border:1px solid var(--border);font:inherit;padding:5px 8px;resize:vertical"></textarea></div>
       <div class="memloc"><button id="impPasteBtn">add these memories</button></div>
     </section>
+    <section class="pane"><div class="title">skills <i>· from github, for every model</i></div><div id="skBox">loading…</div></section>
   </div>
   <div class="col">
     <section class="pane"><div class="title">appearance</div><div id="themePick" class="memloc" style="margin-top:0"></div></section>
@@ -2251,6 +2252,12 @@ function toolEvent(msg, t){
   let row = box.querySelector(`[data-tid="${CSS.escape(t.id)}"]`);
   if (!row) { row = el("div", "tool"); row.dataset.tid = t.id; box.appendChild(row); }
   const a = t.args || {}, link = String(a.url || "").slice(0, 160);
+  if (t.name === "use_skill") {
+    const what = "skill " + (a.name || "") + (a.file ? " · " + a.file : "");
+    row.className = "tool" + (t.status === "running" ? " run" : t.status === "error" ? " err" : "");
+    row.textContent = t.status === "running" ? "🧩 loading " + what + " …" : t.status === "error" ? "✗ " + what + " · " + (t.error || "failed") : "🧩 used " + what;
+    return;
+  }
   const what = t.name === "web_search" ? `searching the web: “${a.query || ""}”` : t.name === "web_fetch" ? `reading ${link}` : `asking ${t.provider || "the cloud model"}: “${(a.question || "").slice(0, 140)}”`;
   const icon = t.name === "web_search" ? "🔎 " : t.name === "web_fetch" ? "📄 " : "☁ ";
   row.className = "tool" + (t.status === "running" ? " run" : t.status === "error" ? " err" : "");
@@ -2263,6 +2270,86 @@ function toolEvent(msg, t){
   if (!src.length) { row.textContent = head; return; }
   row.innerHTML = `<details><summary>${esc(head)}</summary><ol>${src.map(s => `<li><a href="${esc(/^https?:\/\//.test(s.url) ? s.url : "#")}" target="_blank" rel="noopener noreferrer">${esc(s.title || s.url)}</a></li>`).join("")}</ol></details>`;
 }
+
+/* ---------------- Settings → skills (SKILL.md packs from GitHub, offered to every model) ---------------- */
+let skSt = null, skScan = null;
+async function refreshSkills(){
+  try { skSt = await (await fetch("/api/skills", {cache:"no-store"})).json(); } catch(e) { return; }
+  renderSkills();
+}
+function skSize(n){ return n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB"; }
+function renderSkills(){
+  const w = skSt, box = $("skBox"); if (!box || !w) return;
+  const url = $("skUrl") ? $("skUrl").value : "", msg = $("skMsg") ? $("skMsg").innerHTML : "";
+  const on = w.skills.filter(s => s.enabled !== false).length;
+  const lib = w.skills.length ? `<div class="kvt" style="margin-top:8px">${w.skills.map(s => `
+      <span class="k" title="${esc(s.id)}">${esc(s.name)}</span>
+      <span class="v" title="${esc((s.description || "") + (s.source ? "\n\nfrom " + s.source.repo + (s.source.path ? "/" + s.source.path : "") : ""))}">${esc(s.description || "")}</span>
+      <span style="display:flex;gap:4px"><button class="tog ${s.enabled !== false ? "on" : ""}" data-sk="toggle" data-id="${esc(s.id)}">${s.enabled !== false ? "on" : "off"}</button><button data-sk="update" data-id="${esc(s.id)}" title="download it again from ${esc(s.source ? s.source.repo : "")}">↻</button><button data-sk="remove" data-id="${esc(s.id)}" title="remove (click twice)">✕</button></span>`).join("")}</div>`
+    : `<div class="hint">No skills yet. Try <a href="#" data-sk="ex" data-u="https://github.com/anthropics/skills">anthropics/skills</a>.</div>`;
+  let found = "";
+  if (skScan) {
+    found = `<div class="hint" style="margin-top:10px"><b>${esc(skScan.repo)}</b>${skScan.sub ? " / " + esc(skScan.sub) : ""} · ${skScan.skills.length} skill${skScan.skills.length === 1 ? "" : "s"} found. Tick what to install:</div>
+      <div class="skfound" style="max-height:260px;overflow:auto;border:1px solid var(--border);padding:4px 8px">${skScan.skills.map((k, i) => `
+        <label class="hint" style="display:flex;gap:6px;align-items:flex-start;margin:4px 0" title="${esc(k.path || "(repo root)")}">
+          <input type="checkbox" data-skp="${i}" ${k.too_big ? "disabled" : k.installed ? "" : "checked"}>
+          <span><b>${esc(k.name)}</b>${k.installed ? " <i>· installed (re-install updates it)</i>" : ""}${k.too_big ? " <i style='color:var(--crit)'>· too big</i>" : ""}<br>${esc(k.description)} <i>· ${k.files} file${k.files === 1 ? "" : "s"}, ${skSize(k.size)}</i></span></label>`).join("")}</div>
+      <div class="ckey"><button data-sk="all">all</button><button data-sk="none">none</button><span style="flex:1"></span><button data-sk="cancel">cancel</button><button class="btn-main go" data-sk="install">install ticked</button></div>`;
+  }
+  box.innerHTML = `
+    <div class="shead"><span class="dot ${w.enabled && on ? "on" : ""}"></span>
+      <span class="big">${w.enabled ? on + " on" : "off"}</span><span class="sub">${w.skills.length} installed</span><span class="grow"></span>
+      <button class="btn-main ${w.enabled ? "stop" : "go"}" data-sk="master">${w.enabled ? "turn off" : "turn on"}</button></div>
+    <div class="hint" style="margin-top:0">Skills are instruction packs (a folder with a <code>SKILL.md</code>, the format Claude uses). Paste a GitHub link: a repo, a folder in it, or one SKILL.md. Your model sees a one-line list of the skills that are on, loads a skill's full instructions only when a task fits it, and you see that in the chat. Nothing in a skill is run here: scripts are only shown to the model as text.</div>
+    <div class="ckey"><input id="skUrl" placeholder="github.com/owner/repo  or  …/tree/main/skills/pdf" value="${esc(url)}"><button data-sk="scan">look inside</button></div>
+    <div id="skMsg" class="hint">${msg}</div>
+    ${found}
+    ${lib}
+    <div class="kvt" style="margin-top:10px">
+      <span class="k">cline</span><span class="v">give Cline the list too (it reads a skill's files itself)</span><button class="tog ${w.cline ? "on" : ""}" data-sk="cline">${w.cline ? "on" : "off"}</button>
+      <span class="k">folder</span><span class="v" title="${esc(w.folder)}">${esc(w.folder)}</span><span></span>
+    </div>`;
+}
+function skSay(text, bad){ const x = $("skMsg"); if (x) { x.textContent = text; x.style.color = bad ? "var(--crit)" : "var(--ok)"; } }
+async function skPost(op, obj){
+  try { return await (await fetch("/api/skills/" + op, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(obj || {})})).json(); }
+  catch(e) { return {ok: false, msg: "the command center didn't answer"}; }
+}
+$("skBox").addEventListener("keydown", e => { if (e.target.id === "skUrl" && e.key === "Enter") { e.preventDefault(); $("skBox").querySelector('[data-sk="scan"]').click(); } });
+$("skBox").addEventListener("click", async e => {
+  const t = e.target.closest("[data-sk]"); if (!t || !skSt) return;
+  const op = t.dataset.sk, id = t.dataset.id;
+  if (op === "ex") { e.preventDefault(); $("skUrl").value = t.dataset.u; return $("skBox").querySelector('[data-sk="scan"]').click(); }
+  if (op === "master") { await skPost("settings", {enabled: !skSt.enabled}); return refreshSkills(); }
+  if (op === "cline") { await skPost("settings", {cline: !skSt.cline}); return refreshSkills(); }
+  if (op === "all" || op === "none") { $("skBox").querySelectorAll("[data-skp]").forEach(c => { if (!c.disabled) c.checked = op === "all"; }); return; }
+  if (op === "cancel") { skScan = null; return renderSkills(); }
+  if (op === "scan") {
+    const u = $("skUrl").value.trim(); if (!u) return skSay("paste a GitHub link first", true);
+    t.disabled = true; t.textContent = "downloading…"; skSay("");
+    const j = await skPost("scan", {url: u});
+    t.disabled = false; t.textContent = "look inside";
+    if (!j.ok) { skScan = null; renderSkills(); return skSay(j.msg || "couldn't read that link", true); }
+    skScan = Object.assign(j, {url: u}); return renderSkills();
+  }
+  if (op === "install") {
+    const paths = [...$("skBox").querySelectorAll("[data-skp]")].filter(c => c.checked).map(c => skScan.skills[+c.dataset.skp].path);
+    if (!paths.length) return skSay("tick at least one skill", true);
+    t.disabled = true; t.textContent = "installing…";
+    const j = await skPost("install", {url: skScan.url, paths});
+    if (j.ok) skScan = null;
+    await refreshSkills(); return skSay(j.msg || (j.ok ? "installed" : "install failed"), !j.ok || (j.errors && j.errors.length));
+  }
+  if (op === "toggle") { const s = skSt.skills.find(x => x.id === id); await skPost("toggle", {id, on: !(s && s.enabled !== false)}); return refreshSkills(); }
+  if (op === "remove") {
+    if (t.dataset.armed !== "1") { t.dataset.armed = "1"; t.textContent = "sure?"; setTimeout(() => { if (t.isConnected) { t.dataset.armed = ""; t.textContent = "✕"; } }, 3000); return; }
+    const j = await skPost("remove", {id}); await refreshSkills(); return skSay(j.ok ? "removed" : "couldn't remove it", !j.ok);
+  }
+  if (op === "update") {
+    t.disabled = true; t.textContent = "…";
+    const j = await skPost("update", {id}); await refreshSkills(); return skSay(j.msg || (j.ok ? "updated" : "update failed"), !j.ok);
+  }
+});
 
 /* ---------------- Settings → web access (the free connector: search + read pages, no key) ---------------- */
 let webSt = null;
@@ -3565,7 +3652,7 @@ async function refreshWs(){
   try {
     if (ws === "2") renderCode(await (await fetch("/api/code", {cache:"no-store"})).json());
     if (ws === "3") renderWeb(await (await fetch("/api/web", {cache:"no-store"})).json());
-    if (ws === "6") { await refreshMem(); if (!cloudSt) refreshCloud(); if (!webSt) refreshWeb(); refreshUpd(); refreshLlu(); if (!uninSt) refreshUnin(); }
+    if (ws === "6") { await refreshMem(); if (!cloudSt) refreshCloud(); if (!webSt) refreshWeb(); if (!skSt) refreshSkills(); refreshUpd(); refreshLlu(); if (!uninSt) refreshUnin(); }
     if (ws === "4") await refreshTree();
     if (ws === "5") renderCline(await (await fetch("/api/clinecc", {cache:"no-store"})).json());
     if (ws === "7") await refreshTeam();

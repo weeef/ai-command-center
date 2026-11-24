@@ -35,6 +35,7 @@ command-center/*
 !command-center/tuner.py
 !command-center/team.py
 !command-center/conductor.py
+!command-center/skills.py
 !command-center/updater.py
 !command-center/llamaup.py
 !command-center/taskbar.py

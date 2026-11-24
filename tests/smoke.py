@@ -1327,6 +1327,133 @@ def t_conductor():
             server.settings["conductor"] = cnd
 
 
+def t_skills():
+    """Skills from a GitHub-style zip (no network): scan, install, the use_skill tool in chat, Cline, the API."""
+    import skills
+    real_root, real_archive = skills.ROOT, skills._archive
+    skills.ROOT = os.path.join(TMP, "skills")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("repo-main/README.md", "x")
+        z.writestr("repo-main/skills/haiku/SKILL.md", "---\nname: haiku-writer\ndescription: >\n  Write haiku when\n  asked for a poem.\n---\n# Haiku\nAlways 5-7-5. See ref/rules.md.\n")
+        z.writestr("repo-main/skills/haiku/ref/rules.md", "no rhymes")
+        z.writestr("repo-main/skills/haiku/bin.dat", b"\x00\x01\x02")
+        z.writestr("repo-main/skills/haiku/../../evil.txt", "escape")
+        z.writestr("repo-main/plugins/p/skills/quoted/SKILL.md", '---\nname: "quoted one"\ndescription: \'it\'\'s fine\'\n---\nbody')
+    data = buf.getvalue()
+    asked = []
+
+    def fake_archive(owner, repo, ref):
+        asked.append(ref)
+        if ref != "main":
+            import urllib.error
+            raise urllib.error.HTTPError("u", 404, "nf", {}, None)
+        return data
+    skills._archive = fake_archive
+    sett_was = server.settings.get("skills")
+    try:
+        check("owner/repo and tree links parse", skills.parse_source("a/b")[:3] == ("a", "b", []) and
+              skills.parse_source("https://github.com/a/b/tree/main/skills/x")[2] == ["main", "skills", "x"])
+        try:
+            skills.parse_source("https://gitlab.com/a/b")
+            check("non-GitHub links are refused", False)
+        except ValueError:
+            check("non-GitHub links are refused", True)
+        r = skills.scan("https://github.com/o/repo/tree/main")
+        names = sorted(k["name"] for k in r["skills"])
+        check("every SKILL.md is found, folded and quoted YAML read", names == ["haiku-writer", "quoted one"], names)
+        check("folded description", next(k for k in r["skills"] if k["name"] == "haiku-writer")["description"] == "Write haiku when asked for a poem.")
+        check("quoted description", next(k for k in r["skills"] if k["name"] == "quoted one")["description"] == "it's fine")
+        r2 = skills.scan("https://github.com/o/repo/tree/main/skills/haiku")
+        check("a folder link scans only that folder", [k["path"] for k in r2["skills"]] == ["skills/haiku"], r2)
+        done, err = skills.install("https://github.com/o/repo/tree/main", ["skills/haiku"])
+        check("install", done == ["haiku-writer"] and not err, (done, err))
+        check("files outside the archive's folder are never written", not os.path.exists(os.path.join(TMP, "evil.txt"))
+              and not any("evil" in f for f in skills.files_of("haiku-writer")), skills.files_of("haiku-writer"))
+        done2, _ = skills.install("https://github.com/o/repo/tree/main", ["skills/haiku"])
+        check("re-install replaces, same id", done2 == ["haiku-writer"] and len(skills.library()) == 1)
+        server.settings["skills"] = {"enabled": True, "cline": True}
+        check("catalog line", skills.catalog(server.settings) == "- haiku-writer: Write haiku when asked for a poem.")
+        o = skills.run({"name": "haiku-writer"})
+        check("use_skill returns the body without front matter, plus the file list",
+              o["ok"] and "5-7-5" in o["text"] and "description:" not in o["text"] and "ref/rules.md" in o["text"], o)
+        check("use_skill reads a listed file", skills.run({"name": "Haiku Writer", "file": "ref/rules.md"}).get("text") == "no rhymes")
+        check("use_skill refuses ../ and skill.json and binaries",
+              not skills.run({"name": "haiku-writer", "file": "../../x"})["ok"] and not skills.run({"name": "haiku-writer", "file": "skill.json"})["ok"]
+              and not skills.run({"name": "haiku-writer", "file": "bin.dat"})["ok"])
+
+        # chat: the model calls use_skill, gets the text, answers
+        seen = []
+
+        class Fake(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                seen.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.end_headers()
+                if len(seen) == 1:
+                    ev = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "s0", "function": {"name": "use_skill", "arguments": '{"name": "haiku-writer"}'}}]}}]}
+                else:
+                    ev = {"choices": [{"delta": {"content": "an old pond"}}]}
+                self.wfile.write(b"data: " + json.dumps(ev).encode() + b"\n\ndata: [DONE]\n\n")
+
+        fake = http.server.ThreadingHTTPServer(("127.0.0.1", PORT - 2), Fake)
+        threading.Thread(target=fake.serve_forever, daemon=True).start()
+
+        class H(server.Handler):
+            def __init__(self):
+                self.wfile, self.close_connection, self.remote, self.headers = io.BytesIO(), False, False, {}
+                self.requestline, self.request_version, self.command = "POST /v1/chat/completions HTTP/1.1", "HTTP/1.1", "POST"
+                self.client_address, self.path = ("127.0.0.1", 1), "/v1/chat/completions"
+        web_was, server.settings["web"] = server.settings.get("web"), {"enabled": False}
+        cloud_was, server.settings["cloud"] = server.settings.get("cloud"), {}
+        tools = server.chat_tools()
+        check("chat offers use_skill", [t["function"]["name"] for t in tools or []] == ["use_skill"], tools)
+        h = H()
+        try:
+            h.tool_chat({"messages": [{"role": "user", "content": "write a poem"}], "stream": True}, ("127.0.0.1", PORT - 2), {}, None, tools)
+        finally:
+            fake.shutdown()
+            server.settings["web"], server.settings["cloud"] = web_was, cloud_was
+        out = h.wfile.getvalue().decode("utf-8", "replace")
+        check("the system note lists the skill", "haiku-writer: Write haiku" in seen[0]["messages"][0]["content"], seen[0]["messages"][0])
+        check("no web wording without web tools", "web" not in seen[0]["messages"][0]["content"].split("Your skills")[0])
+        check("the skill text went back to the model", len(seen) == 2 and "5-7-5" in seen[1]["messages"][-1]["content"], seen[-1]["messages"][-1:])
+        check("the browser sees the skill being used and the answer", '"use_skill"' in out and "an old pond" in out)
+
+        # Cline: catalog with the SKILL.md path in the task message
+        msgs = skills.inject_cline([{"role": "system", "content": "s"}, {"role": "user", "content": [{"type": "text", "text": "task"}]}],
+                                   skills.catalog(server.settings, paths=True))
+        check("cline gets the list with paths in the first user message",
+              msgs[0]["content"] == "s" and "<skills>" in msgs[1]["content"][0]["text"] and "SKILL.md" in msgs[1]["content"][0]["text"])
+
+        # HTTP routes; the phone can't use them
+        st, d = req("GET", "/api/skills")
+        check("GET /api/skills", st == 200 and [x["id"] for x in d["skills"]] == ["haiku-writer"], d)
+        st, d = req("POST", "/api/skills/toggle", json.dumps({"id": "haiku-writer", "on": False}), Origin="http://127.0.0.1:%d" % PORT)
+        check("toggle off hides it from models", st == 200 and skills.catalog(server.settings) == "" and "use_skill" not in [t["function"]["name"] for t in server.chat_tools() or []], (st, d))
+        st, d = req("POST", "/api/skills/scan", json.dumps({"url": "https://example.com/x"}), Origin="http://127.0.0.1:%d" % PORT)
+        check("a bad link is a message, not a crash", st == 200 and d.get("ok") is False and "GitHub" in d.get("msg", ""), d)
+        as_phone(True)
+        try:
+            st, _ = req("GET", "/api/skills", **PHONE)
+            st2, _ = req("POST", "/api/skills/remove", json.dumps({"id": "haiku-writer"}), **PHONE)
+        finally:
+            as_phone(False)
+        check("the phone can't see or change skills", st == 403 and st2 == 403, (st, st2))
+        st, d = req("POST", "/api/skills/remove", json.dumps({"id": "haiku-writer"}), Origin="http://127.0.0.1:%d" % PORT)
+        check("remove", st == 200 and skills.library() == [], d)
+    finally:
+        skills.ROOT, skills._archive = real_root, real_archive
+        if sett_was is None:
+            server.settings.pop("skills", None)
+        else:
+            server.settings["skills"] = sett_was
+
+
 def urllib_quote(s):
     import urllib.parse
     return urllib.parse.quote(s, safe="")
@@ -1334,7 +1461,7 @@ def urllib_quote(s):
 
 GROUPS = {"web": t_web, "modules": t_modules, "smuggle": t_smuggle, "key": t_key, "guard": t_guard, "phone": t_phone, "tools": t_tools, "tuner": t_tuner, "learn": t_learn, "loop": t_loop, "laptop": t_laptop,
           "worktree": t_worktree, "team": t_team, "board": t_board, "teamrun": t_teamrun, "review": t_review, "slots": t_slots, "claude": t_claude,
-          "conductor": t_conductor}
+          "conductor": t_conductor, "skills": t_skills}
 
 if __name__ == "__main__":
     want = sys.argv[1:] or list(GROUPS)
